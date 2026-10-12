@@ -361,8 +361,9 @@ components:
           type: integer
           format: int32
           description: "Account type: `1` ASSET, `2` LIABILITY, `3` EQUITY, `4` INCOME,\
-            \ `5` EXPENSE. The Integration Service maps the ERP's type names to these\
-            \ values."
+            \ `5` EXPENSE. Checked by this module before Fineract processes the request,\
+            \ because `acc_gl_account` has no range constraint on it. The Integration\
+            \ Service maps the ERP's type names to these values."
           enum:
           - 1
           - 2
