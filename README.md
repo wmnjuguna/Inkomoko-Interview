@@ -36,8 +36,7 @@ git -C fineract-customization/fineract describe --tags   # → 1.15.0
 ## Running *(planned)*
 
 ```bash
-cp .env.example .env
-docker compose up --build        # Postgres, customised Fineract, Mock ERP, Integration Service, bootstrap
+make build && make up            # or: cp .env.example .env && docker compose up --build
 ```
 
 The bootstrap step (office, currency, GL sync, loan product, API user) runs as a one-shot service and is safe to re-run.
@@ -46,15 +45,10 @@ The bootstrap step (office, currency, GL sync, loan product, API user) runs as a
 
 | Language | Command | Covers |
 |---|---|---|
-| Java | Unit: run by every Fineract image build (see below). Integration: `docker run --rm --network inkomoko-fineract_default -e FINERACT_URL=http://fineract:8080 fineract-inkomoko-it:1.15.0` | 43 unit tests and 8 integration tests for the GL sync module. Details and build commands: [fineract-customization/BUILD.md](fineract-customization/BUILD.md) |
-| Python | *(planned)* | ruff, mypy, pytest: unit, integration, failure, concurrency |
+| Java | `make test-java` | Builds Fineract from source (43 unit tests run inside the build), starts the stack, runs 8 integration tests against it. Underlying commands: [fineract-customization/BUILD.md](fineract-customization/BUILD.md) |
+| Python | *(planned)* `make test-python` | ruff, mypy, pytest: unit, integration, failure, concurrency |
 
-```bash
-docker buildx build --load -t fineract-inkomoko:1.15.0 fineract-customization                      # build + unit tests
-docker buildx build --load --target integration-test -t fineract-inkomoko-it:1.15.0 fineract-customization
-docker compose up -d --no-build --wait
-docker run --rm --network inkomoko-fineract_default -e FINERACT_URL=http://fineract:8080 fineract-inkomoko-it:1.15.0
-```
+Other targets: `make build`, `make up`, `make down`, `make reset` (deletes all data). `make help` lists them.
 
 ## Simulations *(planned)*
 
