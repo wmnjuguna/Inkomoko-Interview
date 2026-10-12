@@ -1,0 +1,73 @@
+name: inkomoko-fineract
+
+services:
+  db:
+    image: postgres:18.3-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      FINERACT_DB_USER: ${FINERACT_DB_USER}
+      FINERACT_DB_PASSWORD: ${FINERACT_DB_PASSWORD}
+      INTEGRATION_DB_USER: ${INTEGRATION_DB_USER}
+      INTEGRATION_DB_PASSWORD: ${INTEGRATION_DB_PASSWORD}
+      ERP_DB_USER: ${ERP_DB_USER}
+      ERP_DB_PASSWORD: ${ERP_DB_PASSWORD}
+    volumes:
+      - ./infra/postgres/01-init.sh:/docker-entrypoint-initdb.d/01-init.sh:ro
+      - pgdata:/var/lib/postgresql
+    ports:
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -q -U $${POSTGRES_USER} -d postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  fineract:
+    build:
+      context: ./fineract-customization
+    image: fineract-inkomoko:1.15.0
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      # Tenant registry database
+      FINERACT_HIKARI_DRIVER_SOURCE_CLASS_NAME: org.postgresql.Driver
+      FINERACT_HIKARI_JDBC_URL: jdbc:postgresql://db:5432/fineract_tenants
+      FINERACT_HIKARI_USERNAME: ${FINERACT_DB_USER}
+      FINERACT_HIKARI_PASSWORD: ${FINERACT_DB_PASSWORD}
+      # Default tenant: written into fineract_tenants on first boot, then used to migrate fineract_default
+      FINERACT_DEFAULT_TENANTDB_HOSTNAME: db
+      FINERACT_DEFAULT_TENANTDB_PORT: "5432"
+      FINERACT_DEFAULT_TENANTDB_UID: ${FINERACT_DB_USER}
+      FINERACT_DEFAULT_TENANTDB_PWD: ${FINERACT_DB_PASSWORD}
+      FINERACT_DEFAULT_TENANTDB_NAME: fineract_default
+      FINERACT_DEFAULT_TENANTDB_IDENTIFIER: default
+      FINERACT_DEFAULT_TENANTDB_DESCRIPTION: Inkomoko assessment tenant
+      FINERACT_DEFAULT_TENANTDB_TIMEZONE: Africa/Kigali
+      FINERACT_DEFAULT_TENANTDB_MASTER_PASSWORD: ${FINERACT_MASTER_PASSWORD}
+      # Plain HTTP inside the compose network only; the port is bound to localhost
+      FINERACT_SERVER_PORT: "8080"
+      FINERACT_SERVER_SSL_ENABLED: "false"
+      FINERACT_NODE_ID: "1"
+      FINERACT_CONTENT_FILESYSTEM_ROOT_FOLDER: /tmp
+      JAVA_TOOL_OPTIONS: >-
+        -Xmx2g -XX:+UseContainerSupport
+        --add-exports=java.naming/com.sun.jndi.ldap=ALL-UNNAMED
+        --add-opens=java.base/java.lang=ALL-UNNAMED --add-opens=java.base/java.lang.invoke=ALL-UNNAMED
+        --add-opens=java.base/java.io=ALL-UNNAMED --add-opens=java.base/java.security=ALL-UNNAMED
+        --add-opens=java.base/java.util=ALL-UNNAMED --add-opens=java.management/javax.management=ALL-UNNAMED
+        --add-opens=java.naming/javax.naming=ALL-UNNAMED
+    tmpfs:
+      - /tmp:rw,nosuid,size=256m
+    ports:
+      - "127.0.0.1:8080:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/fineract-provider/actuator/health | grep -q '\"UP\"'"]
+      interval: 10s
+      timeout: 5s
+      retries: 60
+      start_period: 120s
+
+volumes:
+  pgdata:
