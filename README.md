@@ -49,6 +49,19 @@ make up       # starts Postgres and Fineract
 
 *(planned)* A setup step will create the office, the currency, the loan product and the API user. It will be safe to run more than once.
 
+## Try the APIs in the browser
+
+1. Open http://localhost:8080/fineract-provider/swagger-ui/index.html
+2. Pick a spec in the **Select a definition** list at the top right:
+   - **Fineract 1.15.0**: all of Fineract's own APIs
+   - **ERP accounts (glsync plugin)**: my plugin's `/v1/erp-accounts` endpoints
+3. Click **Authorize**. Fill in both:
+   - `basicAuth`: user `mifos`, password `password`
+   - `tenantid`: `default`
+4. Open an endpoint, click **Try it out**, then **Execute**.
+
+Without step 3, every call gets `401`.
+
 ## Tests
 
 | Language | Command | What it runs |
