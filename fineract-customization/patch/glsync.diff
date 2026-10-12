@@ -175,17 +175,21 @@ index 0000000..b000b16
 +}
 diff --git a/custom/inkomoko/glsync/service/src/main/java/com/inkomoko/fineract/glsync/api/ErpAccountCommands.java b/custom/inkomoko/glsync/service/src/main/java/com/inkomoko/fineract/glsync/api/ErpAccountCommands.java
 new file mode 100644
-index 0000000..e6e4796
+index 0000000..616ccf3
 --- /dev/null
 +++ b/custom/inkomoko/glsync/service/src/main/java/com/inkomoko/fineract/glsync/api/ErpAccountCommands.java
-@@ -0,0 +1,62 @@
+@@ -0,0 +1,98 @@
 +package com.inkomoko.fineract.glsync.api;
 +
 +import com.google.gson.JsonElement;
 +import com.google.gson.JsonParseException;
++import com.google.gson.JsonObject;
 +import com.google.gson.JsonParser;
++import java.util.ArrayList;
 +import java.util.List;
 +import java.util.regex.Pattern;
++import org.apache.fineract.accounting.glaccount.domain.GLAccountType;
++import org.apache.fineract.accounting.glaccount.domain.GLAccountUsage;
 +import org.apache.fineract.commands.domain.CommandWrapper;
 +import org.apache.fineract.infrastructure.core.data.ApiParameterError;
 +import org.apache.fineract.infrastructure.core.exception.PlatformApiDataValidationException;
@@ -203,7 +207,7 @@ index 0000000..e6e4796
 +
 +    public static CommandWrapper syncCommand(String erpReference, String json) {
 +        validate(erpReference);
-+        requireUsage(json);
++        validateClassification(json);
 +        return new CommandWrapper(null, null, null, null, null, ACTION, ENTITY, null, null, HREF_PREFIX + erpReference, json, null, null,
 +                null, null, null, null, null, null, null);
 +    }
@@ -216,20 +220,52 @@ index 0000000..e6e4796
 +    }
 +
 +    /**
-+     * Core's validator treats usage as optional, but acc_gl_account.account_usage is NOT NULL, so a missing value would
-+     * fail at insert time. Reject it up front with the same error shape core uses.
++     * Account type and usage decide where a GL account sits in the chart of accounts and which loan product roles it can
++     * fill. The acc_gl_account table only has NOT NULL on those columns, no range check, so the allowed values are
++     * enforced here, before Fineract processes anything. The ranges come from core's own enums and the error codes are
++     * core's, so the contract matches core POST /glaccounts. Usage is required here even though core's validator treats it
++     * as optional, because the column is NOT NULL.
 +     */
-+    static void requireUsage(String json) {
++    static void validateClassification(String json) {
 +        JsonElement body;
 +        try {
 +            body = JsonParser.parseString(json == null ? "" : json);
 +        } catch (JsonParseException e) {
 +            return; // malformed JSON is reported by core's own parser
 +        }
-+        if (body.isJsonObject() && (!body.getAsJsonObject().has("usage") || body.getAsJsonObject().get("usage").isJsonNull())) {
-+            throw new PlatformApiDataValidationException("validation.msg.validation.errors.exist", "Validation errors exist.",
-+                    List.of(ApiParameterError.parameterError("validation.msg.GLAccount.usage.cannot.be.blank", "The parameter `usage` is mandatory.",
-+                            "usage")));
++        if (!body.isJsonObject()) {
++            return;
++        }
++        List<ApiParameterError> errors = new ArrayList<>();
++        checkInRange(body.getAsJsonObject(), "type", GLAccountType.getMinValue(), GLAccountType.getMaxValue(), errors);
++        checkInRange(body.getAsJsonObject(), "usage", GLAccountUsage.getMinValue(), GLAccountUsage.getMaxValue(), errors);
++        if (!errors.isEmpty()) {
++            throw new PlatformApiDataValidationException("validation.msg.validation.errors.exist", "Validation errors exist.", errors);
++        }
++    }
++
++    private static void checkInRange(JsonObject body, String field, int min, int max, List<ApiParameterError> errors) {
++        JsonElement value = body.get(field);
++        if (value == null || value.isJsonNull() || (value.isJsonPrimitive() && value.getAsString().isBlank())) {
++            errors.add(ApiParameterError.parameterError("validation.msg.GLAccount." + field + ".cannot.be.blank",
++                    "The parameter `" + field + "` is mandatory.", field));
++            return;
++        }
++        Integer number = value.isJsonPrimitive() ? parseInteger(value.getAsString().trim()) : null;
++        if (number == null) {
++            errors.add(ApiParameterError.parameterError("validation.msg.invalid.integer",
++                    "The parameter `" + field + "` must be a whole number.", field, (Object) value.toString()));
++        } else if (number < min || number > max) {
++            errors.add(ApiParameterError.parameterError("validation.msg.GLAccount." + field + ".is.not.within.expected.range",
++                    "The parameter `" + field + "` must be between " + min + " and " + max + ".", field, number, min, max));
++        }
++    }
++
++    private static Integer parseInteger(String text) {
++        try {
++            return Integer.valueOf(text);
++        } catch (NumberFormatException e) {
++            return null;
 +        }
 +    }
 +
@@ -237,7 +273,7 @@ index 0000000..e6e4796
 +        if (erpReference == null || !ERP_REFERENCE.matcher(erpReference).matches()) {
 +            throw new PlatformApiDataValidationException(List.of(ApiParameterError.parameterError(
 +                    "validation.msg.erpaccount.erpReference.invalid",
-+                    "erpReference must be 1-100 characters of letters, digits, '.', '_', ':' or '-'", "erpReference", erpReference)));
++                    "erpReference must be 1-100 characters of letters, digits, '.', '_', ':' or '-'", "erpReference", (Object) erpReference)));
 +        }
 +    }
 +}
@@ -401,7 +437,7 @@ index 0000000..83465d8
 +}
 diff --git a/custom/inkomoko/glsync/service/src/main/java/com/inkomoko/fineract/glsync/api/ErpAccountsApiResourceSwagger.java b/custom/inkomoko/glsync/service/src/main/java/com/inkomoko/fineract/glsync/api/ErpAccountsApiResourceSwagger.java
 new file mode 100644
-index 0000000..6943907
+index 0000000..8fe1626
 --- /dev/null
 +++ b/custom/inkomoko/glsync/service/src/main/java/com/inkomoko/fineract/glsync/api/ErpAccountsApiResourceSwagger.java
 @@ -0,0 +1,69 @@
@@ -434,7 +470,7 @@ index 0000000..6943907
 +            @Schema(requiredMode = RequiredMode.REQUIRED, minLength = 1, maxLength = 45, example = "1200", description = "GL code, unique across all GL accounts in the tenant. A code already used by another account returns 409. Stored in `acc_gl_account.gl_code`.") String glCode,
 +
 +            @Schema(requiredMode = RequiredMode.REQUIRED, allowableValues = { "1", "2", "3", "4",
-+                    "5" }, example = "1", description = "Account type: `1` ASSET, `2` LIABILITY, `3` EQUITY, `4` INCOME, `5` EXPENSE. The Integration Service maps the ERP's type names to these values.") Integer type,
++                    "5" }, example = "1", description = "Account type: `1` ASSET, `2` LIABILITY, `3` EQUITY, `4` INCOME, `5` EXPENSE. Checked by this module before Fineract processes the request, because `acc_gl_account` has no range constraint on it. The Integration Service maps the ERP's type names to these values.") Integer type,
 +
 +            @Schema(requiredMode = RequiredMode.REQUIRED, allowableValues = { "1",
 +                    "2" }, example = "1", description = "`1` DETAIL (transactions post to it), `2` HEADER (groups other accounts). Core's validator treats it as optional, but the column is NOT NULL, so this API requires it.") Integer usage,
@@ -890,10 +926,10 @@ index 0000000..2db4094
 +}
 diff --git a/custom/inkomoko/glsync/service/src/test/java/com/inkomoko/fineract/glsync/api/ErpAccountCommandsTest.java b/custom/inkomoko/glsync/service/src/test/java/com/inkomoko/fineract/glsync/api/ErpAccountCommandsTest.java
 new file mode 100644
-index 0000000..6936872
+index 0000000..92a7699
 --- /dev/null
 +++ b/custom/inkomoko/glsync/service/src/test/java/com/inkomoko/fineract/glsync/api/ErpAccountCommandsTest.java
-@@ -0,0 +1,75 @@
+@@ -0,0 +1,108 @@
 +package com.inkomoko.fineract.glsync.api;
 +
 +import static org.assertj.core.api.Assertions.assertThat;
@@ -936,7 +972,9 @@ index 0000000..6936872
 +    @ValueSource(strings = { "", "GL 1200", "GL/1200", "GL-1200?x=1" })
 +    @DisplayName("rejects references with other characters")
 +    void rejectsInvalidReferences(String reference) {
-+        assertThatThrownBy(() -> ErpAccountCommands.syncCommand(reference, BODY)).isInstanceOf(PlatformApiDataValidationException.class);
++        assertThatThrownBy(() -> ErpAccountCommands.syncCommand(reference, BODY)).isInstanceOf(PlatformApiDataValidationException.class)
++                .satisfies(e -> assertThat(((PlatformApiDataValidationException) e).getErrors().get(0).getParameterName())
++                        .isEqualTo("erpReference"));
 +    }
 +
 +    @Test
@@ -955,6 +993,37 @@ index 0000000..6936872
 +    void requiresUsage(String body) {
 +        assertThatThrownBy(() -> ErpAccountCommands.syncCommand("GL-1100", body)).isInstanceOf(PlatformApiDataValidationException.class)
 +                .satisfies(e -> assertThat(((PlatformApiDataValidationException) e).getErrors().get(0).getParameterName()).isEqualTo("usage"));
++    }
++
++    @ParameterizedTest(name = "{0} -> {1}")
++    @org.junit.jupiter.params.provider.CsvSource(delimiter = '|', value = { //
++            "\"type\":0,\"usage\":1        | type  | validation.msg.GLAccount.type.is.not.within.expected.range", //
++            "\"type\":6,\"usage\":1        | type  | validation.msg.GLAccount.type.is.not.within.expected.range", //
++            "\"type\":\"ASSET\",\"usage\":1  | type  | validation.msg.invalid.integer", //
++            "\"type\":1.5,\"usage\":1      | type  | validation.msg.invalid.integer", //
++            "\"type\":null,\"usage\":1     | type  | validation.msg.GLAccount.type.cannot.be.blank", //
++            "\"usage\":1                   | type  | validation.msg.GLAccount.type.cannot.be.blank", //
++            "\"type\":1,\"usage\":0        | usage | validation.msg.GLAccount.usage.is.not.within.expected.range", //
++            "\"type\":1,\"usage\":3        | usage | validation.msg.GLAccount.usage.is.not.within.expected.range", //
++            "\"type\":1,\"usage\":\"DETAIL\" | usage | validation.msg.invalid.integer" })
++    @DisplayName("rejects account types outside 1-5 and usages outside 1-2, with core's error codes")
++    void rejectsUnsupportedClassification(String fields, String parameter, String code) {
++        String body = "{\"name\":\"Bank\",\"glCode\":\"1100\"," + fields.trim() + ",\"manualEntriesAllowed\":false}";
++
++        assertThatThrownBy(() -> ErpAccountCommands.syncCommand("GL-1100", body)).isInstanceOf(PlatformApiDataValidationException.class)
++                .satisfies(e -> {
++                    var error = ((PlatformApiDataValidationException) e).getErrors().get(0);
++                    assertThat(error.getParameterName()).isEqualTo(parameter);
++                    assertThat(error.getUserMessageGlobalisationCode()).isEqualTo(code);
++                });
++    }
++
++    @ParameterizedTest
++    @ValueSource(strings = { "1", "2", "3", "4", "5", "\"3\"" })
++    @DisplayName("accepts every Fineract account type, as a number or a numeric string")
++    void acceptsEveryAccountType(String type) {
++        String body = "{\"name\":\"X\",\"glCode\":\"9\",\"type\":" + type + ",\"usage\":2,\"manualEntriesAllowed\":false}";
++        assertThatCode(() -> ErpAccountCommands.syncCommand("GL-9", body)).doesNotThrowAnyException();
 +    }
 +
 +    @Test
@@ -1034,10 +1103,10 @@ index 0000000..70062cb
 +}
 diff --git a/custom/inkomoko/glsync/service/src/test/java/com/inkomoko/fineract/glsync/integration/ErpAccountsApiIntegrationTest.java b/custom/inkomoko/glsync/service/src/test/java/com/inkomoko/fineract/glsync/integration/ErpAccountsApiIntegrationTest.java
 new file mode 100644
-index 0000000..2cc250f
+index 0000000..99b8414
 --- /dev/null
 +++ b/custom/inkomoko/glsync/service/src/test/java/com/inkomoko/fineract/glsync/integration/ErpAccountsApiIntegrationTest.java
-@@ -0,0 +1,211 @@
+@@ -0,0 +1,235 @@
 +package com.inkomoko.fineract.glsync.integration;
 +
 +import static org.assertj.core.api.Assertions.assertThat;
@@ -1191,6 +1260,30 @@ index 0000000..2cc250f
 +        Reply noUsage = put(ADMIN, uniqueRef(), "{\"name\":\"Bank\",\"glCode\":\"" + uniqueCode() + "\",\"type\":1,\"manualEntriesAllowed\":false}");
 +        assertThat(noUsage.status()).isEqualTo(400);
 +        assertThat(noUsage.body().getAsJsonArray("errors").get(0).getAsJsonObject().get("parameterName").getAsString()).isEqualTo("usage");
++    }
++
++    @Test
++    @DisplayName("only Fineract's account types (1-5) and usages (1-2) are accepted; nothing is written otherwise")
++    void rejectsUnsupportedTypesAndUsages() throws Exception {
++        Map<String, String> invalid = Map.of( //
++                "\"type\":0,\"usage\":1", "validation.msg.GLAccount.type.is.not.within.expected.range", //
++                "\"type\":6,\"usage\":1", "validation.msg.GLAccount.type.is.not.within.expected.range", //
++                "\"type\":\"ASSET\",\"usage\":1", "validation.msg.invalid.integer", //
++                "\"type\":null,\"usage\":1", "validation.msg.GLAccount.type.cannot.be.blank", //
++                "\"type\":1,\"usage\":0", "validation.msg.GLAccount.usage.is.not.within.expected.range", //
++                "\"type\":1,\"usage\":3", "validation.msg.GLAccount.usage.is.not.within.expected.range");
++
++        for (Map.Entry<String, String> attempt : invalid.entrySet()) {
++            String ref = uniqueRef();
++            String code = uniqueCode();
++            Reply reply = put(ADMIN, ref, "{\"name\":\"Type check\",\"glCode\":\"" + code + "\"," + attempt.getKey() + ",\"manualEntriesAllowed\":false}");
++
++            assertThat(reply.status()).as(attempt.getKey()).isEqualTo(400);
++            assertThat(reply.body().getAsJsonArray("errors").get(0).getAsJsonObject().get("userMessageGlobalisationCode").getAsString())
++                    .as(attempt.getKey()).isEqualTo(attempt.getValue());
++            assertThat(get(ADMIN, "/erp-accounts/" + ref).status()).as(attempt.getKey()).isEqualTo(404);
++            assertThat(glAccountsWithCode(code)).as(attempt.getKey()).isZero();
++        }
 +    }
 +
 +    // --- helpers
