@@ -1,0 +1,1579 @@
+diff --git a/custom/inkomoko/glsync/service/build.gradle b/custom/inkomoko/glsync/service/build.gradle
+new file mode 100644
+index 0000000..cba21ea
+--- /dev/null
++++ b/custom/inkomoko/glsync/service/build.gradle
+@@ -0,0 +1,84 @@
++description = 'Inkomoko Fineract GL Sync Service'
++group = 'com.inkomoko.fineract'
++
++base {
++    archivesName = 'inkomoko-fineract-glsync-service'
++}
++
++apply from: 'dependencies.gradle'
++apply plugin: 'io.swagger.core.v3.swagger-gradle-plugin'
++
++// Fineract's own fineract.json only scans fineract-provider, so this module generates and ships its own spec.
++// It is packaged as static/glsync.json and served by Fineract at /fineract-provider/glsync.json.
++resolve {
++    outputFileName = 'glsync'
++    outputFormat = 'JSONANDYAML'
++    prettyPrint = true
++    sortOutput = true
++    classpath = sourceSets.main.runtimeClasspath
++    buildClasspath = classpath
++    resourcePackages = ['com.inkomoko.fineract.glsync.api']
++    openApiFile = file('config/swagger/glsync-input.yaml')
++    outputDir = file("${buildDir}/generated/openapi/static")
++}
++
++// The spec lives in its own folder and only the jar packages it (as static/glsync.*), so it stays out of
++// the main and test class outputs.
++tasks.named('jar') {
++    dependsOn(resolve)
++    from(file("${buildDir}/generated/openapi"))
++}
++
++// Unit tests run in every image build; integration tests need a running Fineract and run separately.
++test {
++    useJUnitPlatform {
++        excludeTags 'integration'
++    }
++    // Always run, never restore from cache: the build log must show the tests executing.
++    outputs.cacheIf { false }
++    outputs.upToDateWhen { false }
++}
++
++// Integration tests talk to Fineract over HTTP only, so they need just JUnit, AssertJ and Gson at runtime.
++// integrationTestBundle packages them with those libraries so they run as a plain container, without Gradle.
++configurations {
++    integrationTestRunner
++}
++
++dependencies {
++    integrationTestRunner 'org.junit.platform:junit-platform-console-standalone:1.14.4' // Platform release matching Fineract's junit-bom 5.14.4
++    integrationTestRunner 'org.assertj:assertj-core'
++    integrationTestRunner 'com.google.code.gson:gson'
++}
++
++tasks.register('integrationTestBundle', Sync) {
++    description = 'Packages the integration tests and their runtime libraries into build/integration-test-bundle.'
++    group = 'verification'
++    dependsOn(testClasses)
++    into("${buildDir}/integration-test-bundle")
++    from(sourceSets.test.output.classesDirs) {
++        include 'com/inkomoko/fineract/glsync/integration/**'
++        into 'classes'
++    }
++    from(configurations.integrationTestRunner) {
++        into 'lib'
++    }
++}
++
++tasks.register('integrationTest', Test) {
++    description = 'Runs the ERP accounts API tests from an IDE or Gradle against a running Fineract (FINERACT_URL).'
++    group = 'verification'
++    testClassesDirs = sourceSets.test.output.classesDirs
++    classpath = sourceSets.test.runtimeClasspath
++    useJUnitPlatform {
++        includeTags 'integration'
++    }
++    outputs.upToDateWhen { false }
++}
++
++// Fineract sets the test logger to quiet; print every test so the build log is evidence on its own.
++testlogger {
++    theme 'plain'
++    logLevel 'lifecycle'
++    showPassed true
++}
+diff --git a/custom/inkomoko/glsync/service/config/swagger/glsync-input.yaml b/custom/inkomoko/glsync/service/config/swagger/glsync-input.yaml
+new file mode 100644
+index 0000000..f5a5c4c
+--- /dev/null
++++ b/custom/inkomoko/glsync/service/config/swagger/glsync-input.yaml
+@@ -0,0 +1,22 @@
++openapi: 3.0.3
++info:
++  title: Fineract ERP Accounts API (Inkomoko GL sync module)
++  version: 1.15.0
++  description: |-
++    Custom module for Apache Fineract 1.15.0. Mirrors the ERP chart of accounts into Fineract GL accounts,
++    one GL account per ERP reference. GL account fields and their validation are Fineract core's own
++    (the same rules as POST /glaccounts); this API adds the ERP reference, idempotent replay and 409 conflicts.
++servers:
++  - url: /fineract-provider/api
++components:
++  securitySchemes:
++    basicAuth:
++      type: http
++      scheme: basic
++    tenantid:
++      type: apiKey
++      in: header
++      name: fineract-platform-tenantid
++security:
++  - basicAuth: []
++    tenantid: []
+diff --git a/custom/inkomoko/glsync/service/dependencies.gradle b/custom/inkomoko/glsync/service/dependencies.gradle
+new file mode 100644
+index 0000000..1e0ddde
+--- /dev/null
++++ b/custom/inkomoko/glsync/service/dependencies.gradle
+@@ -0,0 +1,19 @@
++dependencies {
++    implementation(project(':fineract-core'))
++    implementation(project(':fineract-accounting'))
++    implementation(project(':fineract-provider'))
++    implementation(
++            'org.springframework.boot:spring-boot-starter-web',
++            'org.springframework.boot:spring-boot-starter-security',
++            'jakarta.ws.rs:jakarta.ws.rs-api',
++            'io.swagger.core.v3:swagger-annotations-jakarta',
++            'com.google.code.gson:gson',
++            'org.apache.commons:commons-lang3',
++            )
++    implementation('org.springframework.boot:spring-boot-starter-data-jpa') {
++        exclude group: 'org.hibernate'
++    }
++    implementation('org.eclipse.persistence:org.eclipse.persistence.jpa') {
++        exclude group: 'org.eclipse.persistence', module: 'jakarta.persistence'
++    }
++}
+diff --git a/custom/inkomoko/glsync/service/src/main/java/com/inkomoko/fineract/glsync/api/ErpAccount.java b/custom/inkomoko/glsync/service/src/main/java/com/inkomoko/fineract/glsync/api/ErpAccount.java
+new file mode 100644
+index 0000000..b000b16
+--- /dev/null
++++ b/custom/inkomoko/glsync/service/src/main/java/com/inkomoko/fineract/glsync/api/ErpAccount.java
+@@ -0,0 +1,26 @@
++package com.inkomoko.fineract.glsync.api;
++
++import com.google.gson.Gson;
++import io.swagger.v3.oas.annotations.media.Schema;
++import io.swagger.v3.oas.annotations.media.Schema.RequiredMode;
++
++/** Response of GET /v1/erp-accounts/{erpReference}: the GL account an ERP account is mapped to. */
++@Schema(name = "ErpAccount", description = "An ERP account as mirrored in Fineract. A 200 here proves an earlier sync succeeded.")
++public record ErpAccount(
++
++        @Schema(requiredMode = RequiredMode.REQUIRED, example = "GL-1200") String erpReference,
++
++        @Schema(requiredMode = RequiredMode.REQUIRED, example = "42", description = "Fineract's GL account id.") Long glAccountId,
++
++        @Schema(requiredMode = RequiredMode.REQUIRED, example = "1200") String glCode,
++
++        @Schema(requiredMode = RequiredMode.REQUIRED, example = "Loan Receivable", description = "The name as currently stored in Fineract.") String name,
++
++        @Schema(requiredMode = RequiredMode.REQUIRED, example = "2026-10-12T14:30:00Z", description = "When the mapping was created, UTC, ISO-8601.") String syncedAt) {
++
++    private static final Gson GSON = new Gson();
++
++    String toJson() {
++        return GSON.toJson(this);
++    }
++}
+diff --git a/custom/inkomoko/glsync/service/src/main/java/com/inkomoko/fineract/glsync/api/ErpAccountCommands.java b/custom/inkomoko/glsync/service/src/main/java/com/inkomoko/fineract/glsync/api/ErpAccountCommands.java
+new file mode 100644
+index 0000000..e6e4796
+--- /dev/null
++++ b/custom/inkomoko/glsync/service/src/main/java/com/inkomoko/fineract/glsync/api/ErpAccountCommands.java
+@@ -0,0 +1,62 @@
++package com.inkomoko.fineract.glsync.api;
++
++import com.google.gson.JsonElement;
++import com.google.gson.JsonParseException;
++import com.google.gson.JsonParser;
++import java.util.List;
++import java.util.regex.Pattern;
++import org.apache.fineract.commands.domain.CommandWrapper;
++import org.apache.fineract.infrastructure.core.data.ApiParameterError;
++import org.apache.fineract.infrastructure.core.exception.PlatformApiDataValidationException;
++
++/** Builds the GLACCOUNT/SYNC command. The ERP reference travels in the command's resource URL; the body stays core's GL body. */
++public final class ErpAccountCommands {
++
++    public static final String ENTITY = "GLACCOUNT";
++    public static final String ACTION = "SYNC";
++    static final String HREF_PREFIX = "/erp-accounts/";
++    public static final String ERP_REFERENCE_PATTERN = "^[A-Za-z0-9._:-]{1,100}$";
++    private static final Pattern ERP_REFERENCE = Pattern.compile(ERP_REFERENCE_PATTERN);
++
++    private ErpAccountCommands() {}
++
++    public static CommandWrapper syncCommand(String erpReference, String json) {
++        validate(erpReference);
++        requireUsage(json);
++        return new CommandWrapper(null, null, null, null, null, ACTION, ENTITY, null, null, HREF_PREFIX + erpReference, json, null, null,
++                null, null, null, null, null, null, null);
++    }
++
++    public static String erpReferenceFrom(String href) {
++        if (href == null || !href.startsWith(HREF_PREFIX)) {
++            throw new IllegalStateException("Not an ERP account command URL: " + href);
++        }
++        return href.substring(HREF_PREFIX.length());
++    }
++
++    /**
++     * Core's validator treats usage as optional, but acc_gl_account.account_usage is NOT NULL, so a missing value would
++     * fail at insert time. Reject it up front with the same error shape core uses.
++     */
++    static void requireUsage(String json) {
++        JsonElement body;
++        try {
++            body = JsonParser.parseString(json == null ? "" : json);
++        } catch (JsonParseException e) {
++            return; // malformed JSON is reported by core's own parser
++        }
++        if (body.isJsonObject() && (!body.getAsJsonObject().has("usage") || body.getAsJsonObject().get("usage").isJsonNull())) {
++            throw new PlatformApiDataValidationException("validation.msg.validation.errors.exist", "Validation errors exist.",
++                    List.of(ApiParameterError.parameterError("validation.msg.GLAccount.usage.cannot.be.blank", "The parameter `usage` is mandatory.",
++                            "usage")));
++        }
++    }
++
++    static void validate(String erpReference) {
++        if (erpReference == null || !ERP_REFERENCE.matcher(erpReference).matches()) {
++            throw new PlatformApiDataValidationException(List.of(ApiParameterError.parameterError(
++                    "validation.msg.erpaccount.erpReference.invalid",
++                    "erpReference must be 1-100 characters of letters, digits, '.', '_', ':' or '-'", "erpReference", erpReference)));
++        }
++    }
++}
+diff --git a/custom/inkomoko/glsync/service/src/main/java/com/inkomoko/fineract/glsync/api/ErpAccountSyncResult.java b/custom/inkomoko/glsync/service/src/main/java/com/inkomoko/fineract/glsync/api/ErpAccountSyncResult.java
+new file mode 100644
+index 0000000..ae556cf
+--- /dev/null
++++ b/custom/inkomoko/glsync/service/src/main/java/com/inkomoko/fineract/glsync/api/ErpAccountSyncResult.java
+@@ -0,0 +1,36 @@
++package com.inkomoko.fineract.glsync.api;
++
++import com.google.gson.Gson;
++import io.swagger.v3.oas.annotations.media.Schema;
++import io.swagger.v3.oas.annotations.media.Schema.RequiredMode;
++import java.util.Map;
++import org.apache.fineract.infrastructure.core.data.CommandProcessingResult;
++
++/**
++ * Response of PUT /v1/erp-accounts/{erpReference}, built from Fineract's command result. For a repeated Idempotency-Key,
++ * Fineract replays this exact body as it stored it.
++ */
++@Schema(name = "ErpAccountSyncResult", description = "Which GL account the ERP account maps to, and whether this call created it.")
++public record ErpAccountSyncResult(
++
++        @Schema(requiredMode = RequiredMode.REQUIRED, example = "GL-1200", description = "The ERP reference from the path.") String erpReference,
++
++        @Schema(requiredMode = RequiredMode.REQUIRED, example = "42", description = "Fineract's GL account id. Use it in loan product accounting mappings.") Long glAccountId,
++
++        @Schema(requiredMode = RequiredMode.REQUIRED, example = "1200") String glCode,
++
++        @Schema(requiredMode = RequiredMode.REQUIRED, allowableValues = { "CREATED",
++                "UNCHANGED" }, example = "CREATED", description = "`CREATED`: this call created the GL account. `UNCHANGED`: the same payload was already synced, so nothing was written.") String outcome) {
++
++    private static final Gson GSON = new Gson();
++
++    static ErpAccountSyncResult from(CommandProcessingResult result) {
++        Map<String, Object> changes = result.getChanges();
++        return new ErpAccountSyncResult((String) changes.get("erpReference"), result.getResourceId(), (String) changes.get("glCode"),
++                (String) changes.get("outcome"));
++    }
++
++    String toJson() {
++        return GSON.toJson(this);
++    }
++}
+diff --git a/custom/inkomoko/glsync/service/src/main/java/com/inkomoko/fineract/glsync/api/ErpAccountsApiResource.java b/custom/inkomoko/glsync/service/src/main/java/com/inkomoko/fineract/glsync/api/ErpAccountsApiResource.java
+new file mode 100644
+index 0000000..83465d8
+--- /dev/null
++++ b/custom/inkomoko/glsync/service/src/main/java/com/inkomoko/fineract/glsync/api/ErpAccountsApiResource.java
+@@ -0,0 +1,110 @@
++package com.inkomoko.fineract.glsync.api;
++
++import com.inkomoko.fineract.glsync.service.ErpAccountReadService;
++import com.inkomoko.fineract.glsync.service.ErpAccountReadService.ErpAccountView;
++import io.swagger.v3.oas.annotations.Operation;
++import io.swagger.v3.oas.annotations.Parameter;
++import io.swagger.v3.oas.annotations.headers.Header;
++import io.swagger.v3.oas.annotations.media.Content;
++import io.swagger.v3.oas.annotations.media.ExampleObject;
++import io.swagger.v3.oas.annotations.media.Schema;
++import io.swagger.v3.oas.annotations.parameters.RequestBody;
++import io.swagger.v3.oas.annotations.responses.ApiResponse;
++import io.swagger.v3.oas.annotations.tags.Tag;
++import jakarta.ws.rs.Consumes;
++import jakarta.ws.rs.GET;
++import jakarta.ws.rs.PUT;
++import jakarta.ws.rs.Path;
++import jakarta.ws.rs.PathParam;
++import jakarta.ws.rs.Produces;
++import jakarta.ws.rs.core.MediaType;
++import jakarta.ws.rs.core.Response;
++import lombok.RequiredArgsConstructor;
++import org.apache.fineract.commands.service.PortfolioCommandSourceWritePlatformService;
++import org.apache.fineract.infrastructure.core.data.CommandProcessingResult;
++import org.apache.fineract.infrastructure.core.exception.AbstractIdempotentCommandException;
++import org.apache.fineract.infrastructure.core.exception.IdempotentCommandProcessSucceedException;
++import org.apache.fineract.infrastructure.security.service.PlatformSecurityContext;
++import org.springframework.stereotype.Component;
++
++@Path("/v1/erp-accounts")
++@Component
++@Tag(name = "ERP Accounts", description = """
++        GL accounts mirrored from the ERP chart of accounts, keyed by the ERP reference. \
++        The ERP owns the chart of accounts; Fineract holds a matching GL account for each ERP account.""")
++@RequiredArgsConstructor
++public class ErpAccountsApiResource {
++
++    private static final String READ_PERMISSION_RESOURCE = "GLACCOUNT";
++
++    private final PlatformSecurityContext context;
++    private final PortfolioCommandSourceWritePlatformService commandsSourceWritePlatformService;
++    private final ErpAccountReadService readService;
++
++    @PUT
++    @Path("{erpReference}")
++    @Consumes({ MediaType.APPLICATION_JSON })
++    @Produces({ MediaType.APPLICATION_JSON })
++    @Operation(operationId = "syncErpAccount", summary = "Create the GL account for an ERP account, or return the one already created", description = """
++            The body uses the same fields and validation as core POST /glaccounts.
++            - New ERP reference, GL code free: creates the GL account. 200, outcome CREATED.
++            - Same ERP reference, same payload (key order, whitespace and null fields ignored): 200, outcome UNCHANGED, nothing written.
++            - Same ERP reference, different payload: 409, nothing written.
++            - New ERP reference, GL code already used by another account: 409, nothing written.
++            Requires permission SYNC_GLACCOUNT. Send an Idempotency-Key header to have a retry return the original response \
++            (with header x-served-from-cache: true); a retry while the first call is still running returns 425.""")
++    @RequestBody(required = true, content = @Content(schema = @Schema(implementation = ErpAccountsApiResourceSwagger.SyncErpAccountRequest.class), examples = @ExampleObject(name = "Loan Receivable", value = """
++            {"name": "Loan Receivable", "glCode": "1200", "type": 1, "usage": 1, "manualEntriesAllowed": false}""")))
++    @ApiResponse(responseCode = "200", description = "Created, or already synced with the same payload", headers = @Header(name = "x-served-from-cache", description = "true when the body is a replay for a repeated Idempotency-Key", schema = @Schema(type = "string")), content = @Content(schema = @Schema(implementation = ErpAccountSyncResult.class), examples = {
++            @ExampleObject(name = "created", value = """
++                    {"erpReference": "GL-1200", "glAccountId": 42, "glCode": "1200", "outcome": "CREATED"}"""),
++            @ExampleObject(name = "unchanged", value = """
++                    {"erpReference": "GL-1200", "glAccountId": 42, "glCode": "1200", "outcome": "UNCHANGED"}""") }))
++    @ApiResponse(responseCode = "400", description = "Invalid ERP reference, missing or invalid field, or a field core doesn't support", content = @Content(schema = @Schema(implementation = ErpAccountsApiResourceSwagger.FineractError.class), examples = {
++            @ExampleObject(name = "missing glCode", value = """
++                    {"httpStatusCode": "400", "userMessageGlobalisationCode": "validation.msg.validation.errors.exist", "errors": [{"userMessageGlobalisationCode": "validation.msg.GLAccount.glCode.cannot.be.blank", "parameterName": "glCode"}]}"""),
++            @ExampleObject(name = "unsupported field", value = """
++                    {"httpStatusCode": "400", "userMessageGlobalisationCode": "validation.msg.validation.errors.exist", "errors": [{"userMessageGlobalisationCode": "error.msg.parameter.unsupported", "parameterName": "currency"}]}"""),
++            @ExampleObject(name = "invalid ERP reference", value = """
++                    {"httpStatusCode": "400", "errors": [{"userMessageGlobalisationCode": "validation.msg.erpaccount.erpReference.invalid", "parameterName": "erpReference"}]}""") }))
++    @ApiResponse(responseCode = "401", description = "Missing or invalid credentials or tenant")
++    @ApiResponse(responseCode = "403", description = "User lacks permission SYNC_GLACCOUNT, or parentId is not a HEADER account", content = @Content(schema = @Schema(implementation = ErpAccountsApiResourceSwagger.FineractError.class)))
++    @ApiResponse(responseCode = "404", description = "parentId or tagId does not exist", content = @Content(schema = @Schema(implementation = ErpAccountsApiResourceSwagger.FineractError.class)))
++    @ApiResponse(responseCode = "409", description = "ERP reference already synced with a different payload, or GL code already in use", content = @Content(schema = @Schema(implementation = ErpAccountsApiResourceSwagger.FineractError.class), examples = {
++            @ExampleObject(name = "payload conflict", value = """
++                    {"httpStatusCode": "409", "userMessageGlobalisationCode": "error.msg.glaccount.sync.payload.conflict", "defaultUserMessage": "External reference GL-1200 is already synced with a different payload"}"""),
++            @ExampleObject(name = "GL code taken", value = """
++                    {"httpStatusCode": "409", "userMessageGlobalisationCode": "error.msg.glaccount.sync.code.conflict", "defaultUserMessage": "GL code 1200 already belongs to another GL account"}""") }))
++    @ApiResponse(responseCode = "425", description = "A request with the same Idempotency-Key is still being processed; retry later")
++    public Response sync(@PathParam("erpReference") @Parameter(description = "The ERP's reference for the account", example = "GL-1200", schema = @Schema(type = "string", pattern = ErpAccountCommands.ERP_REFERENCE_PATTERN, minLength = 1, maxLength = 100)) String erpReference,
++            @Parameter(hidden = true) String apiRequestBodyAsJson) {
++        try {
++            CommandProcessingResult result = commandsSourceWritePlatformService
++                    .logCommandSource(ErpAccountCommands.syncCommand(erpReference, apiRequestBodyAsJson));
++            return Response.ok(ErpAccountSyncResult.from(result).toJson(), MediaType.APPLICATION_JSON).build();
++        } catch (IdempotentCommandProcessSucceedException replay) {
++            // Fineract stored this endpoint's own response body for the key; return it unchanged.
++            int status = replay.getStatusCode() == null ? 200 : replay.getStatusCode();
++            return Response.status(status).type(MediaType.APPLICATION_JSON)
++                    .entity(replay.getResponse())
++                    .header(AbstractIdempotentCommandException.IDEMPOTENT_CACHE_HEADER, "true").build();
++        }
++    }
++
++    @GET
++    @Path("{erpReference}")
++    @Produces({ MediaType.APPLICATION_JSON })
++    @Operation(operationId = "retrieveErpAccount", summary = "Show which GL account an ERP account is mapped to", description = """
++            Use this to resolve a sync whose response was lost (e.g. a timeout): if it returns 200, the sync happened. \
++            Requires permission READ_GLACCOUNT.""")
++    @ApiResponse(responseCode = "200", description = "Mapped", content = @Content(schema = @Schema(implementation = ErpAccount.class)))
++    @ApiResponse(responseCode = "401", description = "Missing or invalid credentials or tenant")
++    @ApiResponse(responseCode = "403", description = "User lacks permission READ_GLACCOUNT", content = @Content(schema = @Schema(implementation = ErpAccountsApiResourceSwagger.FineractError.class)))
++    @ApiResponse(responseCode = "404", description = "No GL account is synced for this ERP reference yet", content = @Content(schema = @Schema(implementation = ErpAccountsApiResourceSwagger.FineractError.class), examples = @ExampleObject(name = "not synced", value = """
++            {"httpStatusCode": "404", "userMessageGlobalisationCode": "error.msg.resource.not.found", "defaultUserMessage": "The requested resource is not available.", "errors": [{"userMessageGlobalisationCode": "error.msg.erpaccount.not.found", "defaultUserMessage": "No GL account is synced for ERP reference GL-9999"}]}""")))
++    public String retrieve(@PathParam("erpReference") @Parameter(description = "The ERP's reference for the account", example = "GL-1200", schema = @Schema(type = "string", pattern = ErpAccountCommands.ERP_REFERENCE_PATTERN, minLength = 1, maxLength = 100)) String erpReference) {
++        context.authenticatedUser().validateHasReadPermission(READ_PERMISSION_RESOURCE);
++        ErpAccountView view = readService.retrieve(erpReference);
++        return new ErpAccount(view.erpReference(), view.glAccountId(), view.glCode(), view.name(), view.syncedAt()).toJson();
++    }
++}
+diff --git a/custom/inkomoko/glsync/service/src/main/java/com/inkomoko/fineract/glsync/api/ErpAccountsApiResourceSwagger.java b/custom/inkomoko/glsync/service/src/main/java/com/inkomoko/fineract/glsync/api/ErpAccountsApiResourceSwagger.java
+new file mode 100644
+index 0000000..6943907
+--- /dev/null
++++ b/custom/inkomoko/glsync/service/src/main/java/com/inkomoko/fineract/glsync/api/ErpAccountsApiResourceSwagger.java
+@@ -0,0 +1,69 @@
++package com.inkomoko.fineract.glsync.api;
++
++import io.swagger.v3.oas.annotations.media.ArraySchema;
++import io.swagger.v3.oas.annotations.media.Schema;
++import io.swagger.v3.oas.annotations.media.Schema.AdditionalPropertiesValue;
++import io.swagger.v3.oas.annotations.media.Schema.RequiredMode;
++
++/**
++ * OpenAPI-only schemas for {@link ErpAccountsApiResource}, following Fineract's {@code *ApiResourceSwagger} convention.
++ *
++ * <p>Field constraints are what Fineract 1.15.0 actually enforces: core's {@code GLAccountCommand.validateForCreate}, plus
++ * the {@code acc_gl_account} column definitions where the database is stricter than the validator. The response types
++ * are not here: {@link ErpAccountSyncResult} and {@link ErpAccount} are the records the endpoint really returns.
++ */
++final class ErpAccountsApiResourceSwagger {
++
++    private ErpAccountsApiResourceSwagger() {}
++
++    @Schema(name = "SyncErpAccountRequest", additionalProperties = AdditionalPropertiesValue.FALSE, description = """
++            One account from the ERP chart of accounts, in Fineract's GL account shape. These are exactly the fields of core \
++            POST /glaccounts and are validated by core; anything else (for example the ERP's `currency`) is rejected with 400. \
++            The ERP reference is not in the body: it is the `{erpReference}` path segment.""")
++    record SyncErpAccountRequest(
++
++            @Schema(requiredMode = RequiredMode.REQUIRED, minLength = 1, maxLength = 200, example = "Loan Receivable", description = "Account name, shown in Fineract's chart of accounts. Stored in `acc_gl_account.name`.") String name,
++
++            @Schema(requiredMode = RequiredMode.REQUIRED, minLength = 1, maxLength = 45, example = "1200", description = "GL code, unique across all GL accounts in the tenant. A code already used by another account returns 409. Stored in `acc_gl_account.gl_code`.") String glCode,
++
++            @Schema(requiredMode = RequiredMode.REQUIRED, allowableValues = { "1", "2", "3", "4",
++                    "5" }, example = "1", description = "Account type: `1` ASSET, `2` LIABILITY, `3` EQUITY, `4` INCOME, `5` EXPENSE. The Integration Service maps the ERP's type names to these values.") Integer type,
++
++            @Schema(requiredMode = RequiredMode.REQUIRED, allowableValues = { "1",
++                    "2" }, example = "1", description = "`1` DETAIL (transactions post to it), `2` HEADER (groups other accounts). Core's validator treats it as optional, but the column is NOT NULL, so this API requires it.") Integer usage,
++
++            @Schema(requiredMode = RequiredMode.REQUIRED, example = "false", description = "Whether manual journal entries may post to this account. ERP-owned accounts normally use `false`.") Boolean manualEntriesAllowed,
++
++            @Schema(maxLength = 500, example = "Mirrored from ERP account GL-1200", description = "Optional free text.") String description,
++
++            @Schema(minimum = "1", example = "10", description = "Optional Fineract id of the parent account. It must exist (404) and be a HEADER account (403).") Long parentId,
++
++            @Schema(minimum = "1", example = "3", description = "Optional tag: a code value from the tag code list for this account type (404 if unknown).") Long tagId) {
++    }
++
++    @Schema(name = "FineractError", description = "Fineract's standard error envelope, used for every 4xx response.")
++    record FineractError(
++
++            @Schema(example = "409", description = "The HTTP status, repeated as a string.") String httpStatusCode,
++
++            @Schema(example = "error.msg.glaccount.sync.payload.conflict", description = "Stable machine-readable code. Clients should branch on this, not on the message.") String userMessageGlobalisationCode,
++
++            @Schema(example = "External reference GL-1200 is already synced with a different payload") String defaultUserMessage,
++
++            @Schema(example = "The request conflicts with an existing GL account.") String developerMessage,
++
++            @ArraySchema(schema = @Schema(implementation = FineractErrorDetail.class), arraySchema = @Schema(description = "One entry per failed rule.")) FineractErrorDetail[] errors) {
++    }
++
++    @Schema(name = "FineractErrorDetail", description = "One failed rule.")
++    record FineractErrorDetail(
++
++            @Schema(example = "validation.msg.GLAccount.glCode.cannot.be.blank") String userMessageGlobalisationCode,
++
++            @Schema(example = "glCode", description = "The request field the rule applies to, when there is one.") String parameterName,
++
++            @Schema(example = "The parameter `glCode` is mandatory.") String defaultUserMessage,
++
++            @Schema(example = "The parameter `glCode` is mandatory.") String developerMessage) {
++    }
++}
+diff --git a/custom/inkomoko/glsync/service/src/main/java/com/inkomoko/fineract/glsync/domain/GlAccountExternalRef.java b/custom/inkomoko/glsync/service/src/main/java/com/inkomoko/fineract/glsync/domain/GlAccountExternalRef.java
+new file mode 100644
+index 0000000..9a1a293
+--- /dev/null
++++ b/custom/inkomoko/glsync/service/src/main/java/com/inkomoko/fineract/glsync/domain/GlAccountExternalRef.java
+@@ -0,0 +1,47 @@
++package com.inkomoko.fineract.glsync.domain;
++
++import jakarta.persistence.Column;
++import jakarta.persistence.Entity;
++import jakarta.persistence.GeneratedValue;
++import jakarta.persistence.GenerationType;
++import jakarta.persistence.Id;
++import jakarta.persistence.Table;
++import java.time.OffsetDateTime;
++import java.time.ZoneOffset;
++import lombok.AccessLevel;
++import lombok.Getter;
++import lombok.NoArgsConstructor;
++
++/**
++ * Links an ERP {@code external_reference} to exactly one Fineract GL account, together with the hash of the payload
++ * that created it. Plain columns only (no JPA relationships), so the entity needs none of Fineract's static weaving.
++ */
++@Entity
++@Table(name = "glsync_external_ref")
++@Getter
++@NoArgsConstructor(access = AccessLevel.PROTECTED)
++public class GlAccountExternalRef {
++
++    @Id
++    @GeneratedValue(strategy = GenerationType.IDENTITY)
++    private Long id;
++
++    @Column(name = "gl_account_id", nullable = false, unique = true)
++    private Long glAccountId;
++
++    @Column(name = "external_reference", nullable = false, unique = true, length = 100)
++    private String externalReference;
++
++    @Column(name = "payload_hash", nullable = false, length = 64)
++    private String payloadHash;
++
++    @Column(name = "created_at", nullable = false)
++    private OffsetDateTime createdAt;
++
++    public GlAccountExternalRef(Long glAccountId, String externalReference, String payloadHash) {
++        this.glAccountId = glAccountId;
++        this.externalReference = externalReference;
++        this.payloadHash = payloadHash;
++        this.createdAt = OffsetDateTime.now(ZoneOffset.UTC);
++    }
++}
+diff --git a/custom/inkomoko/glsync/service/src/main/java/com/inkomoko/fineract/glsync/domain/GlAccountExternalRefRepository.java b/custom/inkomoko/glsync/service/src/main/java/com/inkomoko/fineract/glsync/domain/GlAccountExternalRefRepository.java
+new file mode 100644
+index 0000000..59beee2
+--- /dev/null
++++ b/custom/inkomoko/glsync/service/src/main/java/com/inkomoko/fineract/glsync/domain/GlAccountExternalRefRepository.java
+@@ -0,0 +1,9 @@
++package com.inkomoko.fineract.glsync.domain;
++
++import java.util.Optional;
++import org.springframework.data.jpa.repository.JpaRepository;
++
++public interface GlAccountExternalRefRepository extends JpaRepository<GlAccountExternalRef, Long> {
++
++    Optional<GlAccountExternalRef> findByExternalReference(String externalReference);
++}
+diff --git a/custom/inkomoko/glsync/service/src/main/java/com/inkomoko/fineract/glsync/domain/PayloadHasher.java b/custom/inkomoko/glsync/service/src/main/java/com/inkomoko/fineract/glsync/domain/PayloadHasher.java
+new file mode 100644
+index 0000000..93e7330
+--- /dev/null
++++ b/custom/inkomoko/glsync/service/src/main/java/com/inkomoko/fineract/glsync/domain/PayloadHasher.java
+@@ -0,0 +1,60 @@
++package com.inkomoko.fineract.glsync.domain;
++
++import com.google.gson.JsonArray;
++import com.google.gson.JsonElement;
++import com.google.gson.JsonObject;
++import com.google.gson.JsonParser;
++import com.google.gson.JsonPrimitive;
++import java.nio.charset.StandardCharsets;
++import java.security.MessageDigest;
++import java.security.NoSuchAlgorithmException;
++import java.util.HexFormat;
++import java.util.Map;
++import java.util.TreeMap;
++
++/**
++ * Hashes a GL account payload so that "the same payload" means the same business content: key order, whitespace around
++ * values, null fields and number-vs-string spellings ({@code 1} and {@code "1"}) don't change the hash.
++ */
++public final class PayloadHasher {
++
++    private PayloadHasher() {}
++
++    public static String sha256(String json) {
++        String canonical = canonicalJson(JsonParser.parseString(json));
++        try {
++            byte[] digest = MessageDigest.getInstance("SHA-256").digest(canonical.getBytes(StandardCharsets.UTF_8));
++            return HexFormat.of().formatHex(digest);
++        } catch (NoSuchAlgorithmException e) {
++            throw new IllegalStateException("SHA-256 is not available", e);
++        }
++    }
++
++    static String canonicalJson(JsonElement element) {
++        return canonicalize(element).toString();
++    }
++
++    private static JsonElement canonicalize(JsonElement element) {
++        if (element == null || element.isJsonNull()) {
++            return null;
++        }
++        if (element.isJsonObject()) {
++            Map<String, JsonElement> sorted = new TreeMap<>();
++            for (Map.Entry<String, JsonElement> entry : element.getAsJsonObject().entrySet()) {
++                JsonElement value = canonicalize(entry.getValue());
++                if (value != null) {
++                    sorted.put(entry.getKey(), value);
++                }
++            }
++            JsonObject result = new JsonObject();
++            sorted.forEach(result::add);
++            return result;
++        }
++        if (element.isJsonArray()) {
++            JsonArray result = new JsonArray();
++            element.getAsJsonArray().forEach(item -> result.add(canonicalize(item)));
++            return result;
++        }
++        return new JsonPrimitive(element.getAsJsonPrimitive().getAsString().trim());
++    }
++}
+diff --git a/custom/inkomoko/glsync/service/src/main/java/com/inkomoko/fineract/glsync/exception/ErpAccountNotFoundException.java b/custom/inkomoko/glsync/service/src/main/java/com/inkomoko/fineract/glsync/exception/ErpAccountNotFoundException.java
+new file mode 100644
+index 0000000..e700124
+--- /dev/null
++++ b/custom/inkomoko/glsync/service/src/main/java/com/inkomoko/fineract/glsync/exception/ErpAccountNotFoundException.java
+@@ -0,0 +1,11 @@
++package com.inkomoko.fineract.glsync.exception;
++
++import org.apache.fineract.infrastructure.core.exception.AbstractPlatformResourceNotFoundException;
++
++/** No GL account has been synced for this ERP reference yet. Core maps this type to 404. */
++public class ErpAccountNotFoundException extends AbstractPlatformResourceNotFoundException {
++
++    public ErpAccountNotFoundException(String erpReference) {
++        super("error.msg.erpaccount.not.found", "No GL account is synced for ERP reference " + erpReference, erpReference);
++    }
++}
+diff --git a/custom/inkomoko/glsync/service/src/main/java/com/inkomoko/fineract/glsync/exception/GlAccountSyncConflictException.java b/custom/inkomoko/glsync/service/src/main/java/com/inkomoko/fineract/glsync/exception/GlAccountSyncConflictException.java
+new file mode 100644
+index 0000000..c0e1a65
+--- /dev/null
++++ b/custom/inkomoko/glsync/service/src/main/java/com/inkomoko/fineract/glsync/exception/GlAccountSyncConflictException.java
+@@ -0,0 +1,24 @@
++package com.inkomoko.fineract.glsync.exception;
++
++import org.apache.fineract.infrastructure.core.exception.AbstractPlatformDomainRuleException;
++
++/**
++ * The request can't be applied because it contradicts an existing GL account. Mapped to HTTP 409 by
++ * {@link GlAccountSyncConflictExceptionMapper}; core would map the parent type to 403.
++ */
++public class GlAccountSyncConflictException extends AbstractPlatformDomainRuleException {
++
++    private GlAccountSyncConflictException(String code, String message, Object... args) {
++        super(code, message, args);
++    }
++
++    public static GlAccountSyncConflictException payloadMismatch(String externalReference) {
++        return new GlAccountSyncConflictException("error.msg.glaccount.sync.payload.conflict",
++                "External reference " + externalReference + " is already synced with a different payload", externalReference);
++    }
++
++    public static GlAccountSyncConflictException codeTaken(String glCode) {
++        return new GlAccountSyncConflictException("error.msg.glaccount.sync.code.conflict",
++                "GL code " + glCode + " already belongs to another GL account", glCode);
++    }
++}
+diff --git a/custom/inkomoko/glsync/service/src/main/java/com/inkomoko/fineract/glsync/exception/GlAccountSyncConflictExceptionMapper.java b/custom/inkomoko/glsync/service/src/main/java/com/inkomoko/fineract/glsync/exception/GlAccountSyncConflictExceptionMapper.java
+new file mode 100644
+index 0000000..1b59564
+--- /dev/null
++++ b/custom/inkomoko/glsync/service/src/main/java/com/inkomoko/fineract/glsync/exception/GlAccountSyncConflictExceptionMapper.java
+@@ -0,0 +1,41 @@
++package com.inkomoko.fineract.glsync.exception;
++
++import jakarta.ws.rs.core.MediaType;
++import jakarta.ws.rs.core.Response;
++import jakarta.ws.rs.ext.ExceptionMapper;
++import jakarta.ws.rs.ext.Provider;
++import java.util.List;
++import lombok.extern.slf4j.Slf4j;
++import org.apache.fineract.infrastructure.core.data.ApiGlobalErrorResponse;
++import org.apache.fineract.infrastructure.core.data.ApiParameterError;
++import org.apache.fineract.infrastructure.core.exceptionmapper.FineractExceptionMapper;
++import org.springframework.context.annotation.Scope;
++import org.springframework.stereotype.Component;
++
++/**
++ * Returns 409 with Fineract's standard error envelope. Being typed to the concrete exception, it is preferred by Jersey
++ * over core's 403 domain-rule mapper, and Fineract's ErrorHandler uses it to store the same status on the audit row.
++ */
++@Provider
++@Component
++@Scope("singleton")
++@Slf4j
++public class GlAccountSyncConflictExceptionMapper implements FineractExceptionMapper, ExceptionMapper<GlAccountSyncConflictException> {
++
++    private static final int CONFLICT = 409;
++
++    @Override
++    public Response toResponse(GlAccountSyncConflictException exception) {
++        log.warn("GL sync conflict: {}", exception.getDefaultUserMessage());
++        ApiGlobalErrorResponse body = ApiGlobalErrorResponse.create(CONFLICT, exception.getGlobalisationMessageCode(),
++                "The request conflicts with an existing GL account.", exception.getDefaultUserMessage(),
++                List.of(ApiParameterError.generalError(exception.getGlobalisationMessageCode(), exception.getDefaultUserMessage(),
++                        exception.getDefaultUserMessageArgs())));
++        return Response.status(CONFLICT).entity(body).type(MediaType.APPLICATION_JSON).build();
++    }
++
++    @Override
++    public int errorCode() {
++        return 4091;
++    }
++}
+diff --git a/custom/inkomoko/glsync/service/src/main/java/com/inkomoko/fineract/glsync/handler/SyncGlAccountCommandHandler.java b/custom/inkomoko/glsync/service/src/main/java/com/inkomoko/fineract/glsync/handler/SyncGlAccountCommandHandler.java
+new file mode 100644
+index 0000000..5057026
+--- /dev/null
++++ b/custom/inkomoko/glsync/service/src/main/java/com/inkomoko/fineract/glsync/handler/SyncGlAccountCommandHandler.java
+@@ -0,0 +1,26 @@
++package com.inkomoko.fineract.glsync.handler;
++
++import com.inkomoko.fineract.glsync.api.ErpAccountCommands;
++import com.inkomoko.fineract.glsync.service.GlAccountSyncService;
++import lombok.RequiredArgsConstructor;
++import org.apache.fineract.commands.annotation.CommandType;
++import org.apache.fineract.commands.handler.NewCommandSourceHandler;
++import org.apache.fineract.infrastructure.core.api.JsonCommand;
++import org.apache.fineract.infrastructure.core.data.CommandProcessingResult;
++import org.springframework.stereotype.Service;
++import org.springframework.transaction.annotation.Transactional;
++
++/** Registered with Fineract's CommandHandlerProvider under {@code GLACCOUNT|SYNC}; permission {@code SYNC_GLACCOUNT}. */
++@Service
++@CommandType(entity = ErpAccountCommands.ENTITY, action = ErpAccountCommands.ACTION)
++@RequiredArgsConstructor
++public class SyncGlAccountCommandHandler implements NewCommandSourceHandler {
++
++    private final GlAccountSyncService syncService;
++
++    @Transactional
++    @Override
++    public CommandProcessingResult processCommand(JsonCommand command) {
++        return syncService.sync(ErpAccountCommands.erpReferenceFrom(command.getUrl()), command);
++    }
++}
+diff --git a/custom/inkomoko/glsync/service/src/main/java/com/inkomoko/fineract/glsync/package-info.java b/custom/inkomoko/glsync/service/src/main/java/com/inkomoko/fineract/glsync/package-info.java
+new file mode 100644
+index 0000000..f496ea6
+--- /dev/null
++++ b/custom/inkomoko/glsync/service/src/main/java/com/inkomoko/fineract/glsync/package-info.java
+@@ -0,0 +1,8 @@
++/**
++ * GL account synchronisation from the ERP into Fineract.
++ *
++ * <p>Enforces, inside Fineract, that an ERP {@code external_reference} maps to exactly one GL account: an identical
++ * payload returns the existing account, a different payload is rejected with 409, and the endpoint is guarded by the
++ * {@code SYNC_GLACCOUNT} permission.
++ */
++package com.inkomoko.fineract.glsync;
+diff --git a/custom/inkomoko/glsync/service/src/main/java/com/inkomoko/fineract/glsync/service/AdvisoryLocks.java b/custom/inkomoko/glsync/service/src/main/java/com/inkomoko/fineract/glsync/service/AdvisoryLocks.java
+new file mode 100644
+index 0000000..dfa71ee
+--- /dev/null
++++ b/custom/inkomoko/glsync/service/src/main/java/com/inkomoko/fineract/glsync/service/AdvisoryLocks.java
+@@ -0,0 +1,30 @@
++package com.inkomoko.fineract.glsync.service;
++
++import java.util.Arrays;
++import lombok.RequiredArgsConstructor;
++import org.springframework.jdbc.core.JdbcTemplate;
++import org.springframework.stereotype.Component;
++import org.springframework.transaction.annotation.Propagation;
++import org.springframework.transaction.annotation.Transactional;
++
++/**
++ * Postgres transaction-scoped advisory locks. They serialise requests that touch the same key and are released
++ * automatically at commit or rollback.
++ *
++ * <p>Uses Fineract's JdbcTemplate on purpose: inside a JPA transaction it resolves to the transaction's own connection
++ * (Fineract's EclipseLink dialect hands out {@code em.unwrap(Connection.class)}), so the lock lives exactly as long as
++ * the command transaction.
++ */
++@Component
++@RequiredArgsConstructor
++public class AdvisoryLocks {
++
++    private final JdbcTemplate jdbcTemplate;
++
++    /** Locks every key, always in sorted order, so two requests can never wait on each other in a cycle. */
++    @Transactional(propagation = Propagation.MANDATORY)
++    public void lockInOrder(String... keys) {
++        Arrays.stream(keys).sorted().distinct()
++                .forEach(key -> jdbcTemplate.queryForList("SELECT pg_advisory_xact_lock(hashtext(?))", key));
++    }
++}
+diff --git a/custom/inkomoko/glsync/service/src/main/java/com/inkomoko/fineract/glsync/service/ErpAccountReadService.java b/custom/inkomoko/glsync/service/src/main/java/com/inkomoko/fineract/glsync/service/ErpAccountReadService.java
+new file mode 100644
+index 0000000..7820403
+--- /dev/null
++++ b/custom/inkomoko/glsync/service/src/main/java/com/inkomoko/fineract/glsync/service/ErpAccountReadService.java
+@@ -0,0 +1,28 @@
++package com.inkomoko.fineract.glsync.service;
++
++import com.inkomoko.fineract.glsync.domain.GlAccountExternalRef;
++import com.inkomoko.fineract.glsync.domain.GlAccountExternalRefRepository;
++import com.inkomoko.fineract.glsync.exception.ErpAccountNotFoundException;
++import lombok.RequiredArgsConstructor;
++import org.apache.fineract.accounting.glaccount.domain.GLAccount;
++import org.apache.fineract.accounting.glaccount.domain.GLAccountRepository;
++import org.springframework.stereotype.Service;
++import org.springframework.transaction.annotation.Transactional;
++
++/** Looks up what an ERP reference is mapped to, so a caller can resolve a timed-out sync instead of retrying blindly. */
++@Service
++@RequiredArgsConstructor
++public class ErpAccountReadService {
++
++    private final GlAccountExternalRefRepository refs;
++    private final GLAccountRepository glAccounts;
++
++    public record ErpAccountView(String erpReference, Long glAccountId, String glCode, String name, String syncedAt) {}
++
++    @Transactional(readOnly = true)
++    public ErpAccountView retrieve(String erpReference) {
++        GlAccountExternalRef ref = refs.findByExternalReference(erpReference).orElseThrow(() -> new ErpAccountNotFoundException(erpReference));
++        GLAccount glAccount = glAccounts.findById(ref.getGlAccountId()).orElseThrow(() -> new ErpAccountNotFoundException(erpReference));
++        return new ErpAccountView(erpReference, glAccount.getId(), glAccount.getGlCode(), glAccount.getName(), ref.getCreatedAt().toString());
++    }
++}
+diff --git a/custom/inkomoko/glsync/service/src/main/java/com/inkomoko/fineract/glsync/service/GlAccountSyncService.java b/custom/inkomoko/glsync/service/src/main/java/com/inkomoko/fineract/glsync/service/GlAccountSyncService.java
+new file mode 100644
+index 0000000..2db4094
+--- /dev/null
++++ b/custom/inkomoko/glsync/service/src/main/java/com/inkomoko/fineract/glsync/service/GlAccountSyncService.java
+@@ -0,0 +1,64 @@
++package com.inkomoko.fineract.glsync.service;
++
++import com.inkomoko.fineract.glsync.domain.GlAccountExternalRef;
++import com.inkomoko.fineract.glsync.domain.GlAccountExternalRefRepository;
++import com.inkomoko.fineract.glsync.domain.PayloadHasher;
++import com.inkomoko.fineract.glsync.exception.GlAccountSyncConflictException;
++import java.util.Map;
++import java.util.Optional;
++import lombok.RequiredArgsConstructor;
++import org.apache.commons.lang3.StringUtils;
++import lombok.extern.slf4j.Slf4j;
++import org.apache.fineract.accounting.glaccount.domain.GLAccountRepository;
++import org.apache.fineract.accounting.glaccount.service.GLAccountWritePlatformService;
++import org.apache.fineract.infrastructure.core.api.JsonCommand;
++import org.apache.fineract.infrastructure.core.data.CommandProcessingResult;
++import org.apache.fineract.infrastructure.core.data.CommandProcessingResultBuilder;
++import org.springframework.stereotype.Service;
++import org.springframework.transaction.annotation.Transactional;
++
++/**
++ * The GL sync rules. Runs inside the command transaction Fineract opens in
++ * {@code CommandSourceService.processCommandAndSaveResult}, so the GL account, the reference row and Fineract's audit
++ * result commit together or not at all.
++ */
++@Slf4j
++@Service
++@RequiredArgsConstructor
++public class GlAccountSyncService {
++
++    private final AdvisoryLocks locks;
++    private final GlAccountExternalRefRepository refs;
++    private final GLAccountRepository glAccounts;
++    private final GLAccountWritePlatformService coreGlAccountService;
++
++    @Transactional
++    public CommandProcessingResult sync(String erpReference, JsonCommand command) {
++        String glCode = StringUtils.trimToNull(command.stringValueOfParameterNamed("glCode")); // core stores it trimmed
++        String payloadHash = PayloadHasher.sha256(command.json());
++        locks.lockInOrder("glsync:ref:" + erpReference, "glsync:code:" + glCode);
++
++        Optional<GlAccountExternalRef> existing = refs.findByExternalReference(erpReference);
++        if (existing.isPresent()) {
++            if (!existing.get().getPayloadHash().equals(payloadHash)) {
++                throw GlAccountSyncConflictException.payloadMismatch(erpReference);
++            }
++            log.info("GL sync replay: {} already maps to GL account {}", erpReference, existing.get().getGlAccountId());
++            return resultFor(command, erpReference, glCode, existing.get().getGlAccountId(), "UNCHANGED");
++        }
++        if (glCode != null && glAccounts.findOneByGlCode(glCode).isPresent()) {
++            throw GlAccountSyncConflictException.codeTaken(glCode);
++        }
++
++        CommandProcessingResult created = coreGlAccountService.createGLAccount(command);
++        refs.saveAndFlush(new GlAccountExternalRef(created.getResourceId(), erpReference, payloadHash));
++        log.info("GL sync created: {} -> GL account {}", erpReference, created.getResourceId());
++        return resultFor(command, erpReference, glCode, created.getResourceId(), "CREATED");
++    }
++
++    private static CommandProcessingResult resultFor(JsonCommand command, String erpReference, String glCode, Long glAccountId,
++            String outcome) {
++        return new CommandProcessingResultBuilder().withCommandId(command.commandId()).withEntityId(glAccountId)
++                .with(Map.of("erpReference", erpReference, "glCode", glCode, "outcome", outcome)).build();
++    }
++}
+diff --git a/custom/inkomoko/glsync/service/src/test/java/com/inkomoko/fineract/glsync/api/ErpAccountCommandsTest.java b/custom/inkomoko/glsync/service/src/test/java/com/inkomoko/fineract/glsync/api/ErpAccountCommandsTest.java
+new file mode 100644
+index 0000000..6936872
+--- /dev/null
++++ b/custom/inkomoko/glsync/service/src/test/java/com/inkomoko/fineract/glsync/api/ErpAccountCommandsTest.java
+@@ -0,0 +1,75 @@
++package com.inkomoko.fineract.glsync.api;
++
++import static org.assertj.core.api.Assertions.assertThat;
++import static org.assertj.core.api.Assertions.assertThatCode;
++import static org.assertj.core.api.Assertions.assertThatThrownBy;
++
++import org.apache.fineract.commands.domain.CommandWrapper;
++import org.apache.fineract.infrastructure.core.exception.PlatformApiDataValidationException;
++import org.junit.jupiter.api.DisplayName;
++import org.junit.jupiter.api.Test;
++import org.junit.jupiter.params.ParameterizedTest;
++import org.junit.jupiter.params.provider.ValueSource;
++
++class ErpAccountCommandsTest {
++
++    private static final String BODY = """
++            {"name":"Loan Receivable","glCode":"1200","type":1,"usage":1,"manualEntriesAllowed":false}""";
++
++    @Test
++    @DisplayName("builds a GLACCOUNT/SYNC command guarded by SYNC_GLACCOUNT, carrying the reference in its URL")
++    void buildsSyncCommand() {
++        CommandWrapper command = ErpAccountCommands.syncCommand("GL-1200", BODY);
++
++        assertThat(command.getEntityName()).isEqualTo("GLACCOUNT");
++        assertThat(command.getActionName()).isEqualTo("SYNC");
++        assertThat(command.getTaskPermissionName()).isEqualTo("SYNC_GLACCOUNT");
++        assertThat(command.getHref()).isEqualTo("/erp-accounts/GL-1200");
++        assertThat(command.getJson()).isEqualTo(BODY);
++        assertThat(ErpAccountCommands.erpReferenceFrom(command.getHref())).isEqualTo("GL-1200");
++    }
++
++    @ParameterizedTest
++    @ValueSource(strings = { "GL-1200", "1100", "acct.4000_v2", "ERP:GL:1200" })
++    @DisplayName("accepts references made of letters, digits and . _ : -")
++    void acceptsValidReferences(String reference) {
++        assertThatCode(() -> ErpAccountCommands.syncCommand(reference, BODY)).doesNotThrowAnyException();
++    }
++
++    @ParameterizedTest
++    @ValueSource(strings = { "", "GL 1200", "GL/1200", "GL-1200?x=1" })
++    @DisplayName("rejects references with other characters")
++    void rejectsInvalidReferences(String reference) {
++        assertThatThrownBy(() -> ErpAccountCommands.syncCommand(reference, BODY)).isInstanceOf(PlatformApiDataValidationException.class);
++    }
++
++    @Test
++    @DisplayName("rejects references longer than 100 characters (the column size)")
++    void rejectsTooLongReference() {
++        assertThatThrownBy(() -> ErpAccountCommands.syncCommand("G".repeat(101), BODY))
++                .isInstanceOf(PlatformApiDataValidationException.class);
++        assertThatCode(() -> ErpAccountCommands.syncCommand("G".repeat(100), BODY)).doesNotThrowAnyException();
++    }
++
++    @ParameterizedTest
++    @ValueSource(strings = { """
++            {"name":"Bank","glCode":"1100","type":1,"manualEntriesAllowed":false}""", """
++            {"name":"Bank","glCode":"1100","type":1,"usage":null,"manualEntriesAllowed":false}""" })
++    @DisplayName("requires usage, because acc_gl_account.account_usage is NOT NULL")
++    void requiresUsage(String body) {
++        assertThatThrownBy(() -> ErpAccountCommands.syncCommand("GL-1100", body)).isInstanceOf(PlatformApiDataValidationException.class)
++                .satisfies(e -> assertThat(((PlatformApiDataValidationException) e).getErrors().get(0).getParameterName()).isEqualTo("usage"));
++    }
++
++    @Test
++    @DisplayName("leaves malformed JSON to core's own parser")
++    void malformedJsonLeftToCore() {
++        assertThatCode(() -> ErpAccountCommands.syncCommand("GL-1100", "{not json")).doesNotThrowAnyException();
++    }
++
++    @Test
++    @DisplayName("refuses to read a reference from a URL that isn't an ERP account command")
++    void rejectsForeignUrl() {
++        assertThatThrownBy(() -> ErpAccountCommands.erpReferenceFrom("/glaccounts/42")).isInstanceOf(IllegalStateException.class);
++    }
++}
+diff --git a/custom/inkomoko/glsync/service/src/test/java/com/inkomoko/fineract/glsync/domain/PayloadHasherTest.java b/custom/inkomoko/glsync/service/src/test/java/com/inkomoko/fineract/glsync/domain/PayloadHasherTest.java
+new file mode 100644
+index 0000000..70062cb
+--- /dev/null
++++ b/custom/inkomoko/glsync/service/src/test/java/com/inkomoko/fineract/glsync/domain/PayloadHasherTest.java
+@@ -0,0 +1,57 @@
++package com.inkomoko.fineract.glsync.domain;
++
++import static org.assertj.core.api.Assertions.assertThat;
++
++import org.junit.jupiter.api.DisplayName;
++import org.junit.jupiter.api.Test;
++
++class PayloadHasherTest {
++
++    private static final String LOAN_RECEIVABLE = """
++            {"name":"Loan Receivable","glCode":"1200","type":1,"usage":1,"manualEntriesAllowed":false}""";
++
++    @Test
++    @DisplayName("key order does not change the hash")
++    void keyOrderIgnored() {
++        String reordered = """
++                {"manualEntriesAllowed":false,"usage":1,"type":1,"glCode":"1200","name":"Loan Receivable"}""";
++        assertThat(PayloadHasher.sha256(reordered)).isEqualTo(PayloadHasher.sha256(LOAN_RECEIVABLE));
++    }
++
++    @Test
++    @DisplayName("whitespace around values does not change the hash")
++    void surroundingWhitespaceIgnored() {
++        String padded = """
++                { "name": "  Loan Receivable ", "glCode": " 1200", "type": 1, "usage": 1, "manualEntriesAllowed": false }""";
++        assertThat(PayloadHasher.sha256(padded)).isEqualTo(PayloadHasher.sha256(LOAN_RECEIVABLE));
++    }
++
++    @Test
++    @DisplayName("a null field is the same as an absent one")
++    void nullEqualsAbsent() {
++        String withNull = """
++                {"name":"Loan Receivable","glCode":"1200","type":1,"usage":1,"manualEntriesAllowed":false,"description":null}""";
++        assertThat(PayloadHasher.sha256(withNull)).isEqualTo(PayloadHasher.sha256(LOAN_RECEIVABLE));
++    }
++
++    @Test
++    @DisplayName("1 and \"1\" hash the same, as core accepts both")
++    void numberAndNumericStringEqual() {
++        String quoted = """
++                {"name":"Loan Receivable","glCode":"1200","type":"1","usage":"1","manualEntriesAllowed":"false"}""";
++        assertThat(PayloadHasher.sha256(quoted)).isEqualTo(PayloadHasher.sha256(LOAN_RECEIVABLE));
++    }
++
++    @Test
++    @DisplayName("a changed value changes the hash")
++    void changedValueChangesHash() {
++        String renamed = LOAN_RECEIVABLE.replace("Loan Receivable", "Loans Receivable");
++        assertThat(PayloadHasher.sha256(renamed)).isNotEqualTo(PayloadHasher.sha256(LOAN_RECEIVABLE));
++    }
++
++    @Test
++    @DisplayName("the hash is 64 lowercase hex characters (fits CHAR(64))")
++    void hashShape() {
++        assertThat(PayloadHasher.sha256(LOAN_RECEIVABLE)).matches("[0-9a-f]{64}");
++    }
++}
+diff --git a/custom/inkomoko/glsync/service/src/test/java/com/inkomoko/fineract/glsync/integration/ErpAccountsApiIntegrationTest.java b/custom/inkomoko/glsync/service/src/test/java/com/inkomoko/fineract/glsync/integration/ErpAccountsApiIntegrationTest.java
+new file mode 100644
+index 0000000..2cc250f
+--- /dev/null
++++ b/custom/inkomoko/glsync/service/src/test/java/com/inkomoko/fineract/glsync/integration/ErpAccountsApiIntegrationTest.java
+@@ -0,0 +1,211 @@
++package com.inkomoko.fineract.glsync.integration;
++
++import static org.assertj.core.api.Assertions.assertThat;
++
++import com.google.gson.JsonArray;
++import com.google.gson.JsonElement;
++import com.google.gson.JsonObject;
++import com.google.gson.JsonParser;
++import java.net.URI;
++import java.net.http.HttpClient;
++import java.net.http.HttpRequest;
++import java.net.http.HttpResponse;
++import java.nio.charset.StandardCharsets;
++import java.util.ArrayList;
++import java.util.Base64;
++import java.util.List;
++import java.util.Map;
++import java.util.concurrent.Callable;
++import java.util.concurrent.ExecutorService;
++import java.util.concurrent.Executors;
++import java.util.concurrent.Future;
++import java.util.concurrent.ThreadLocalRandom;
++import java.util.function.Function;
++import java.util.stream.Collectors;
++import org.junit.jupiter.api.DisplayName;
++import org.junit.jupiter.api.Tag;
++import org.junit.jupiter.api.Test;
++
++/**
++ * Runs against a live customised Fineract and its Postgres database (FINERACT_URL, default http://localhost:8080). Every
++ * test uses fresh references and GL codes, so the suite can run repeatedly against the same database.
++ */
++@Tag("integration")
++class ErpAccountsApiIntegrationTest {
++
++    private static final String BASE = System.getenv().getOrDefault("FINERACT_URL", "http://localhost:8080") + "/fineract-provider/api/v1";
++    private static final String ADMIN = System.getenv().getOrDefault("FINERACT_ADMIN", "mifos:password");
++    private static final HttpClient HTTP = HttpClient.newHttpClient();
++
++    private record Reply(int status, JsonObject body, HttpResponse<String> raw) {}
++
++    @Test
++    @DisplayName("behaviours 1 and 2: first sync creates the GL account, an identical repeat returns it")
++    void createsThenReturnsExisting() throws Exception {
++        String ref = uniqueRef();
++        String code = uniqueCode();
++
++        Reply first = put(ADMIN, ref, account(code, "Loan Receivable"));
++        Reply repeat = put(ADMIN, ref, account(code, "Loan Receivable"));
++
++        assertThat(first.status()).isEqualTo(200);
++        assertThat(first.body().get("outcome").getAsString()).isEqualTo("CREATED");
++        assertThat(repeat.status()).isEqualTo(200);
++        assertThat(repeat.body().get("outcome").getAsString()).isEqualTo("UNCHANGED");
++        assertThat(repeat.body().get("glAccountId").getAsLong()).isEqualTo(first.body().get("glAccountId").getAsLong());
++        assertThat(glAccountsWithCode(code)).isEqualTo(1);
++
++        Reply lookup = get(ADMIN, "/erp-accounts/" + ref);
++        assertThat(lookup.status()).isEqualTo(200);
++        assertThat(lookup.body().get("glAccountId").getAsLong()).isEqualTo(first.body().get("glAccountId").getAsLong());
++        assertThat(lookup.body().get("name").getAsString()).isEqualTo("Loan Receivable");
++    }
++
++    @Test
++    @DisplayName("behaviour 3: same reference with a different payload is rejected with 409 and changes nothing")
++    void rejectsDifferentPayload() throws Exception {
++        String ref = uniqueRef();
++        String code = uniqueCode();
++        put(ADMIN, ref, account(code, "Loan Receivable"));
++
++        Reply conflict = put(ADMIN, ref, account(code, "Loans Receivable"));
++
++        assertThat(conflict.status()).isEqualTo(409);
++        assertThat(conflict.body().get("userMessageGlobalisationCode").getAsString()).isEqualTo("error.msg.glaccount.sync.payload.conflict");
++        assertThat(get(ADMIN, "/erp-accounts/" + ref).body().get("name").getAsString()).isEqualTo("Loan Receivable");
++    }
++
++    @Test
++    @DisplayName("GL code uniqueness: a new reference cannot reuse an existing code")
++    void rejectsTakenCode() throws Exception {
++        String code = uniqueCode();
++        put(ADMIN, uniqueRef(), account(code, "Bank"));
++
++        String secondRef = uniqueRef();
++        Reply conflict = put(ADMIN, secondRef, account(code, "Bank"));
++
++        assertThat(conflict.status()).isEqualTo(409);
++        assertThat(conflict.body().get("userMessageGlobalisationCode").getAsString()).isEqualTo("error.msg.glaccount.sync.code.conflict");
++        assertThat(get(ADMIN, "/erp-accounts/" + secondRef).status()).isEqualTo(404);
++        assertThat(glAccountsWithCode(code)).isEqualTo(1);
++    }
++
++    @Test
++    @DisplayName("behaviour 4: a user without SYNC_GLACCOUNT gets 403 from Fineract's permission model")
++    void enforcesPermission() throws Exception {
++        String reader = createUserWithPermissions("READ_GLACCOUNT");
++
++        Reply denied = put(reader, uniqueRef(), account(uniqueCode(), "Interest Income"));
++
++        assertThat(denied.status()).isEqualTo(403);
++        assertThat(denied.body().get("userMessageGlobalisationCode").getAsString()).isEqualTo("error.msg.not.authorized");
++    }
++
++    @Test
++    @DisplayName("10 parallel identical syncs create exactly one GL account")
++    void parallelSyncsCreateOneAccount() throws Exception {
++        String ref = uniqueRef();
++        String code = uniqueCode();
++        String body = account(code, "Fee Income");
++
++        ExecutorService pool = Executors.newFixedThreadPool(10);
++        List<Callable<Reply>> calls = new ArrayList<>();
++        for (int i = 0; i < 10; i++) {
++            calls.add(() -> put(ADMIN, ref, body));
++        }
++        List<Reply> replies = new ArrayList<>();
++        for (Future<Reply> future : pool.invokeAll(calls)) {
++            replies.add(future.get());
++        }
++        pool.shutdown();
++
++        assertThat(replies).allSatisfy(reply -> assertThat(reply.status()).isEqualTo(200));
++        Map<String, Long> outcomes = replies.stream()
++                .collect(Collectors.groupingBy(reply -> reply.body().get("outcome").getAsString(), Collectors.counting()));
++        assertThat(outcomes).containsEntry("CREATED", 1L).containsEntry("UNCHANGED", 9L);
++        assertThat(replies.stream().map(reply -> reply.body().get("glAccountId").getAsLong()).distinct()).hasSize(1);
++        assertThat(glAccountsWithCode(code)).isEqualTo(1);
++    }
++
++    @Test
++    @DisplayName("a repeated Idempotency-Key replays the original response from Fineract's command store")
++    void replaysIdempotencyKey() throws Exception {
++        String ref = uniqueRef();
++        String body = account(uniqueCode(), "Bank");
++        String key = "SYNC:" + ref + ":1";
++
++        Reply first = send("PUT", ADMIN, "/erp-accounts/" + ref, body, Map.of("Idempotency-Key", key));
++        Reply replay = send("PUT", ADMIN, "/erp-accounts/" + ref, body, Map.of("Idempotency-Key", key));
++
++        assertThat(replay.status()).isEqualTo(200);
++        assertThat(replay.raw().headers().firstValue("x-served-from-cache")).contains("true");
++        assertThat(replay.body()).isEqualTo(first.body());
++    }
++
++    @Test
++    @DisplayName("unknown reference: 404; invalid reference or missing usage: 400")
++    void rejectsUnknownAndInvalid() throws Exception {
++        assertThat(get(ADMIN, "/erp-accounts/" + uniqueRef()).status()).isEqualTo(404);
++        assertThat(put(ADMIN, "bad%20ref", account(uniqueCode(), "Bank")).status()).isEqualTo(400);
++
++        Reply noUsage = put(ADMIN, uniqueRef(), "{\"name\":\"Bank\",\"glCode\":\"" + uniqueCode() + "\",\"type\":1,\"manualEntriesAllowed\":false}");
++        assertThat(noUsage.status()).isEqualTo(400);
++        assertThat(noUsage.body().getAsJsonArray("errors").get(0).getAsJsonObject().get("parameterName").getAsString()).isEqualTo("usage");
++    }
++
++    // --- helpers
++
++    private static String account(String code, String name) {
++        return "{\"name\":\"" + name + "\",\"glCode\":\"" + code + "\",\"type\":1,\"usage\":1,\"manualEntriesAllowed\":false}";
++    }
++
++    private static Reply put(String user, String ref, String body) throws Exception {
++        return send("PUT", user, "/erp-accounts/" + ref, body, Map.of());
++    }
++
++    private static Reply get(String user, String path) throws Exception {
++        return send("GET", user, path, null, Map.of());
++    }
++
++    private static Reply send(String method, String user, String path, String body, Map<String, String> headers) throws Exception {
++        HttpRequest.Builder request = HttpRequest.newBuilder(URI.create(BASE + path))
++                .header("Authorization", "Basic " + Base64.getEncoder().encodeToString(user.getBytes(StandardCharsets.UTF_8)))
++                .header("Fineract-Platform-TenantId", "default").header("Content-Type", "application/json")
++                .method(method, body == null ? HttpRequest.BodyPublishers.noBody() : HttpRequest.BodyPublishers.ofString(body));
++        headers.forEach(request::header);
++        HttpResponse<String> response = HTTP.send(request.build(), HttpResponse.BodyHandlers.ofString());
++        JsonElement parsed = response.body().isBlank() ? new JsonObject() : JsonParser.parseString(response.body());
++        return new Reply(response.statusCode(), parsed.isJsonObject() ? parsed.getAsJsonObject() : new JsonObject(), response);
++    }
++
++    private static long glAccountsWithCode(String code) throws Exception {
++        HttpResponse<String> response = HTTP.send(HttpRequest.newBuilder(URI.create(BASE + "/glaccounts"))
++                .header("Authorization", "Basic " + Base64.getEncoder().encodeToString(ADMIN.getBytes(StandardCharsets.UTF_8)))
++                .header("Fineract-Platform-TenantId", "default").GET().build(), HttpResponse.BodyHandlers.ofString());
++        JsonArray accounts = JsonParser.parseString(response.body()).getAsJsonArray();
++        Function<JsonElement, String> glCode = account -> account.getAsJsonObject().get("glCode").getAsString();
++        return accounts.asList().stream().map(glCode).filter(code::equals).count();
++    }
++
++    /** Creates a throwaway role and user (test values for this local Fineract only) and returns its basic-auth credentials. */
++    private static String createUserWithPermissions(String... permissions) throws Exception {
++        String suffix = Long.toString(ThreadLocalRandom.current().nextLong(1_000_000_000L), 36);
++        Reply role = send("POST", ADMIN, "/roles", "{\"name\":\"it-" + suffix + "\",\"description\":\"integration test\"}", Map.of());
++        long roleId = role.body().get("resourceId").getAsLong();
++        String grants = java.util.Arrays.stream(permissions).map(p -> "\"" + p + "\":true").collect(Collectors.joining(","));
++        send("PUT", ADMIN, "/roles/" + roleId + "/permissions", "{\"permissions\":{" + grants + "}}", Map.of());
++        String password = "It!Gl5ync#Test2026q"; // satisfies Fineract's policy: no consecutive repeated characters
++        send("POST", ADMIN, "/users", "{\"username\":\"it" + suffix + "\",\"firstname\":\"Integration\",\"lastname\":\"Test\","
++                + "\"email\":\"it" + suffix + "@example.test\",\"officeId\":1,\"roles\":[" + roleId + "],\"sendPasswordToEmail\":false,"
++                + "\"password\":\"" + password + "\",\"repeatPassword\":\"" + password + "\",\"passwordNeverExpires\":true}", Map.of());
++        return "it" + suffix + ":" + password;
++    }
++
++    private static String uniqueRef() {
++        return "IT-" + Long.toString(ThreadLocalRandom.current().nextLong(Long.MAX_VALUE), 36);
++    }
++
++    private static String uniqueCode() {
++        return "9" + (100_000_000L + ThreadLocalRandom.current().nextLong(899_999_999L));
++    }
++}
+diff --git a/custom/inkomoko/glsync/service/src/test/java/com/inkomoko/fineract/glsync/service/AdvisoryLocksTest.java b/custom/inkomoko/glsync/service/src/test/java/com/inkomoko/fineract/glsync/service/AdvisoryLocksTest.java
+new file mode 100644
+index 0000000..69e922c
+--- /dev/null
++++ b/custom/inkomoko/glsync/service/src/test/java/com/inkomoko/fineract/glsync/service/AdvisoryLocksTest.java
+@@ -0,0 +1,40 @@
++package com.inkomoko.fineract.glsync.service;
++
++import static org.mockito.ArgumentMatchers.anyString;
++import static org.mockito.ArgumentMatchers.eq;
++import static org.mockito.Mockito.inOrder;
++import static org.mockito.Mockito.mock;
++import static org.mockito.Mockito.times;
++import static org.mockito.Mockito.verify;
++
++import org.junit.jupiter.api.DisplayName;
++import org.junit.jupiter.api.Test;
++import org.mockito.InOrder;
++import org.springframework.jdbc.core.JdbcTemplate;
++
++class AdvisoryLocksTest {
++
++    private static final String SQL = "SELECT pg_advisory_xact_lock(hashtext(?))";
++
++    @Test
++    @DisplayName("locks keys in sorted order whatever order they are passed in, so two requests can't deadlock")
++    void locksInSortedOrder() {
++        JdbcTemplate jdbc = mock(JdbcTemplate.class);
++
++        new AdvisoryLocks(jdbc).lockInOrder("glsync:ref:GL-1200", "glsync:code:1200");
++
++        InOrder order = inOrder(jdbc);
++        order.verify(jdbc).queryForList(SQL, "glsync:code:1200");
++        order.verify(jdbc).queryForList(SQL, "glsync:ref:GL-1200");
++    }
++
++    @Test
++    @DisplayName("locks a repeated key once")
++    void locksDuplicateKeyOnce() {
++        JdbcTemplate jdbc = mock(JdbcTemplate.class);
++
++        new AdvisoryLocks(jdbc).lockInOrder("glsync:ref:A", "glsync:ref:A");
++
++        verify(jdbc, times(1)).queryForList(eq(SQL), anyString());
++    }
++}
+diff --git a/custom/inkomoko/glsync/service/src/test/java/com/inkomoko/fineract/glsync/service/GlAccountSyncServiceTest.java b/custom/inkomoko/glsync/service/src/test/java/com/inkomoko/fineract/glsync/service/GlAccountSyncServiceTest.java
+new file mode 100644
+index 0000000..b9979b9
+--- /dev/null
++++ b/custom/inkomoko/glsync/service/src/test/java/com/inkomoko/fineract/glsync/service/GlAccountSyncServiceTest.java
+@@ -0,0 +1,142 @@
++package com.inkomoko.fineract.glsync.service;
++
++import static org.assertj.core.api.Assertions.assertThat;
++import static org.assertj.core.api.Assertions.assertThatThrownBy;
++import static org.mockito.ArgumentMatchers.any;
++import static org.mockito.Mockito.mock;
++import static org.mockito.Mockito.never;
++import static org.mockito.Mockito.verify;
++import static org.mockito.Mockito.when;
++
++import com.google.gson.JsonParser;
++import com.inkomoko.fineract.glsync.domain.GlAccountExternalRef;
++import com.inkomoko.fineract.glsync.domain.GlAccountExternalRefRepository;
++import com.inkomoko.fineract.glsync.domain.PayloadHasher;
++import com.inkomoko.fineract.glsync.exception.GlAccountSyncConflictException;
++import java.util.Optional;
++import org.apache.fineract.accounting.glaccount.domain.GLAccount;
++import org.apache.fineract.accounting.glaccount.domain.GLAccountRepository;
++import org.apache.fineract.accounting.glaccount.service.GLAccountWritePlatformService;
++import org.apache.fineract.infrastructure.core.api.JsonCommand;
++import org.apache.fineract.infrastructure.core.data.CommandProcessingResult;
++import org.apache.fineract.infrastructure.core.data.CommandProcessingResultBuilder;
++import org.apache.fineract.infrastructure.core.serialization.FromJsonHelper;
++import org.junit.jupiter.api.BeforeEach;
++import org.junit.jupiter.api.DisplayName;
++import org.junit.jupiter.api.Test;
++import org.junit.jupiter.api.extension.ExtendWith;
++import org.mockito.ArgumentCaptor;
++import org.mockito.Mock;
++import org.mockito.junit.jupiter.MockitoExtension;
++
++@ExtendWith(MockitoExtension.class)
++class GlAccountSyncServiceTest {
++
++    private static final String BODY = """
++            {"name":"Loan Receivable","glCode":"1200","type":1,"usage":1,"manualEntriesAllowed":false}""";
++
++    @Mock
++    private AdvisoryLocks locks;
++    @Mock
++    private GlAccountExternalRefRepository refs;
++    @Mock
++    private GLAccountRepository glAccounts;
++    @Mock
++    private GLAccountWritePlatformService coreGlAccountService;
++
++    private GlAccountSyncService service;
++
++    @BeforeEach
++    void setUp() {
++        service = new GlAccountSyncService(locks, refs, glAccounts, coreGlAccountService);
++    }
++
++    @Test
++    @DisplayName("new reference, free code: creates through core, stores the reference with the payload hash")
++    void createsNewAccount() {
++        JsonCommand command = command(BODY);
++        when(refs.findByExternalReference("GL-1200")).thenReturn(Optional.empty());
++        when(glAccounts.findOneByGlCode("1200")).thenReturn(Optional.empty());
++        when(coreGlAccountService.createGLAccount(command)).thenReturn(new CommandProcessingResultBuilder().withEntityId(42L).build());
++
++        CommandProcessingResult result = service.sync("GL-1200", command);
++
++        assertThat(result.getResourceId()).isEqualTo(42L);
++        assertThat(result.getChanges()).containsEntry("outcome", "CREATED").containsEntry("erpReference", "GL-1200").containsEntry("glCode",
++                "1200");
++        ArgumentCaptor<GlAccountExternalRef> saved = ArgumentCaptor.forClass(GlAccountExternalRef.class);
++        verify(refs).saveAndFlush(saved.capture());
++        assertThat(saved.getValue().getGlAccountId()).isEqualTo(42L);
++        assertThat(saved.getValue().getExternalReference()).isEqualTo("GL-1200");
++        assertThat(saved.getValue().getPayloadHash()).isEqualTo(PayloadHasher.sha256(BODY));
++        verify(locks).lockInOrder("glsync:ref:GL-1200", "glsync:code:1200");
++    }
++
++    @Test
++    @DisplayName("same reference, same payload: returns the existing account and writes nothing")
++    void returnsExistingForSamePayload() {
++        when(refs.findByExternalReference("GL-1200")).thenReturn(Optional.of(new GlAccountExternalRef(42L, "GL-1200", PayloadHasher.sha256(BODY))));
++
++        CommandProcessingResult result = service.sync("GL-1200", command(BODY));
++
++        assertThat(result.getResourceId()).isEqualTo(42L);
++        assertThat(result.getChanges()).containsEntry("outcome", "UNCHANGED");
++        verify(coreGlAccountService, never()).createGLAccount(any());
++        verify(refs, never()).saveAndFlush(any());
++    }
++
++    @Test
++    @DisplayName("same reference, different payload: 409 conflict and nothing written")
++    void rejectsDifferentPayload() {
++        when(refs.findByExternalReference("GL-1200")).thenReturn(Optional.of(new GlAccountExternalRef(42L, "GL-1200", PayloadHasher.sha256(BODY))));
++
++        assertThatThrownBy(() -> service.sync("GL-1200", command(BODY.replace("Loan Receivable", "Loans Receivable"))))
++                .isInstanceOf(GlAccountSyncConflictException.class)
++                .hasFieldOrPropertyWithValue("globalisationMessageCode", "error.msg.glaccount.sync.payload.conflict");
++        verify(coreGlAccountService, never()).createGLAccount(any());
++        verify(refs, never()).saveAndFlush(any());
++    }
++
++    @Test
++    @DisplayName("new reference, GL code already used: 409 conflict and nothing written")
++    void rejectsTakenCode() {
++        when(refs.findByExternalReference("GL-1200-B")).thenReturn(Optional.empty());
++        when(glAccounts.findOneByGlCode("1200")).thenReturn(Optional.of(mock(GLAccount.class)));
++
++        assertThatThrownBy(() -> service.sync("GL-1200-B", command(BODY))).isInstanceOf(GlAccountSyncConflictException.class)
++                .hasFieldOrPropertyWithValue("globalisationMessageCode", "error.msg.glaccount.sync.code.conflict");
++        verify(coreGlAccountService, never()).createGLAccount(any());
++        verify(refs, never()).saveAndFlush(any());
++    }
++
++    @Test
++    @DisplayName("locks and looks up the trimmed GL code, as core stores it trimmed")
++    void trimsGlCode() {
++        JsonCommand command = command(BODY.replace("\"1200\"", "\" 1200 \""));
++        when(refs.findByExternalReference("GL-1200")).thenReturn(Optional.empty());
++        when(glAccounts.findOneByGlCode("1200")).thenReturn(Optional.empty());
++        when(coreGlAccountService.createGLAccount(command)).thenReturn(new CommandProcessingResultBuilder().withEntityId(42L).build());
++
++        CommandProcessingResult result = service.sync("GL-1200", command);
++
++        verify(locks).lockInOrder("glsync:ref:GL-1200", "glsync:code:1200");
++        assertThat(result.getChanges()).containsEntry("glCode", "1200");
++    }
++
++    @Test
++    @DisplayName("takes the locks before reading anything")
++    void locksBeforeReading() {
++        when(refs.findByExternalReference("GL-1200")).thenReturn(Optional.of(new GlAccountExternalRef(42L, "GL-1200", PayloadHasher.sha256(BODY))));
++
++        service.sync("GL-1200", command(BODY));
++
++        var order = org.mockito.Mockito.inOrder(locks, refs);
++        order.verify(locks).lockInOrder("glsync:ref:GL-1200", "glsync:code:1200");
++        order.verify(refs).findByExternalReference("GL-1200");
++    }
++
++    private static JsonCommand command(String json) {
++        return JsonCommand.from(json, JsonParser.parseString(json), new FromJsonHelper(), "GLACCOUNT", null, null, null, null, null, null,
++                null, "/erp-accounts/GL-1200", null, null, null, null, null);
++    }
++}
+diff --git a/custom/inkomoko/glsync/starter/build.gradle b/custom/inkomoko/glsync/starter/build.gradle
+new file mode 100644
+index 0000000..0a60845
+--- /dev/null
++++ b/custom/inkomoko/glsync/starter/build.gradle
+@@ -0,0 +1,8 @@
++description = 'Inkomoko Fineract GL Sync Starter'
++group = 'com.inkomoko.fineract'
++
++base {
++    archivesName = 'inkomoko-fineract-glsync-starter'
++}
++
++apply from: 'dependencies.gradle'
+diff --git a/custom/inkomoko/glsync/starter/dependencies.gradle b/custom/inkomoko/glsync/starter/dependencies.gradle
+new file mode 100644
+index 0000000..9f62c25
+--- /dev/null
++++ b/custom/inkomoko/glsync/starter/dependencies.gradle
+@@ -0,0 +1,9 @@
++dependencies {
++    implementation(project(':custom:inkomoko:glsync:service'))
++    implementation(project(':fineract-core'))
++    implementation(project(':fineract-provider'))
++    implementation('org.springframework.boot:spring-boot-starter')
++    implementation('org.springframework.boot:spring-boot-starter-data-jpa') {
++        exclude group: 'org.hibernate'
++    }
++}
+diff --git a/custom/inkomoko/glsync/starter/src/main/java/com/inkomoko/fineract/glsync/starter/GlSyncAutoConfiguration.java b/custom/inkomoko/glsync/starter/src/main/java/com/inkomoko/fineract/glsync/starter/GlSyncAutoConfiguration.java
+new file mode 100644
+index 0000000..06466e9
+--- /dev/null
++++ b/custom/inkomoko/glsync/starter/src/main/java/com/inkomoko/fineract/glsync/starter/GlSyncAutoConfiguration.java
+@@ -0,0 +1,39 @@
++package com.inkomoko.fineract.glsync.starter;
++
++import java.util.Set;
++import lombok.extern.slf4j.Slf4j;
++import org.apache.fineract.infrastructure.core.config.jpa.EntityManagerFactoryCustomizer;
++import org.springframework.boot.autoconfigure.AutoConfiguration;
++import org.springframework.context.annotation.Bean;
++import org.springframework.context.annotation.ComponentScan;
++import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
++
++/**
++ * Wires the GL sync module into Fineract. Fineract's own JPA setup only scans {@code org.apache.fineract}, so the module
++ * registers its entity package through Fineract's {@link EntityManagerFactoryCustomizer} hook and enables its own
++ * repositories.
++ */
++@Slf4j
++@AutoConfiguration
++@ComponentScan(GlSyncAutoConfiguration.BASE_PACKAGE)
++@EnableJpaRepositories(basePackages = GlSyncAutoConfiguration.DOMAIN_PACKAGE)
++public class GlSyncAutoConfiguration {
++
++    static final String BASE_PACKAGE = "com.inkomoko.fineract.glsync";
++    static final String DOMAIN_PACKAGE = BASE_PACKAGE + ".domain";
++
++    public GlSyncAutoConfiguration() {
++        log.info("Inkomoko GL sync module loaded");
++    }
++
++    @Bean
++    EntityManagerFactoryCustomizer glSyncEntityManagerFactoryCustomizer() {
++        return new EntityManagerFactoryCustomizer() {
++
++            @Override
++            public Set<String> additionalPackagesToScan() {
++                return Set.of(DOMAIN_PACKAGE);
++            }
++        };
++    }
++}
+diff --git a/custom/inkomoko/glsync/starter/src/main/resources/META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports b/custom/inkomoko/glsync/starter/src/main/resources/META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports
+new file mode 100644
+index 0000000..886acd1
+--- /dev/null
++++ b/custom/inkomoko/glsync/starter/src/main/resources/META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports
+@@ -0,0 +1 @@
++com.inkomoko.fineract.glsync.starter.GlSyncAutoConfiguration
+diff --git a/custom/inkomoko/glsync/starter/src/main/resources/db/custom-changelog/0001_glsync_external_ref.xml b/custom/inkomoko/glsync/starter/src/main/resources/db/custom-changelog/0001_glsync_external_ref.xml
+new file mode 100644
+index 0000000..c78ac3f
+--- /dev/null
++++ b/custom/inkomoko/glsync/starter/src/main/resources/db/custom-changelog/0001_glsync_external_ref.xml
+@@ -0,0 +1,26 @@
++<?xml version="1.0" encoding="UTF-8"?>
++<databaseChangeLog xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
++                   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
++                   xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.1.xsd">
++    <!-- One row per ERP-synced GL account: the ERP reference, the GL account it created, and the hash of that payload. -->
++    <changeSet author="inkomoko" id="glsync-0001-external-ref">
++        <createTable tableName="glsync_external_ref">
++            <column name="id" type="BIGINT" autoIncrement="true">
++                <constraints nullable="false" primaryKey="true" primaryKeyName="pk_glsync_external_ref"/>
++            </column>
++            <column name="gl_account_id" type="BIGINT">
++                <constraints nullable="false" unique="true" uniqueConstraintName="uq_glsync_external_ref_gl_account"
++                             foreignKeyName="fk_glsync_external_ref_gl_account" references="acc_gl_account(id)"/>
++            </column>
++            <column name="external_reference" type="VARCHAR(100)">
++                <constraints nullable="false" unique="true" uniqueConstraintName="uq_glsync_external_ref_reference"/>
++            </column>
++            <column name="payload_hash" type="CHAR(64)">
++                <constraints nullable="false"/>
++            </column>
++            <column name="created_at" type="TIMESTAMP WITH TIME ZONE">
++                <constraints nullable="false"/>
++            </column>
++        </createTable>
++    </changeSet>
++</databaseChangeLog>
+diff --git a/custom/inkomoko/glsync/starter/src/main/resources/db/custom-changelog/0002_glsync_permission.xml b/custom/inkomoko/glsync/starter/src/main/resources/db/custom-changelog/0002_glsync_permission.xml
+new file mode 100644
+index 0000000..2bfde07
+--- /dev/null
++++ b/custom/inkomoko/glsync/starter/src/main/resources/db/custom-changelog/0002_glsync_permission.xml
+@@ -0,0 +1,15 @@
++<?xml version="1.0" encoding="UTF-8"?>
++<databaseChangeLog xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
++                   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
++                   xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.1.xsd">
++    <!-- Same shape as core's CREATE_GLACCOUNT. Granting it to a role is done by the setup script, not here. -->
++    <changeSet author="inkomoko" id="glsync-0002-permission">
++        <insert tableName="m_permission">
++            <column name="grouping" value="accounting"/>
++            <column name="code" value="SYNC_GLACCOUNT"/>
++            <column name="entity_name" value="GLACCOUNT"/>
++            <column name="action_name" value="SYNC"/>
++            <column name="can_maker_checker" valueBoolean="false"/>
++        </insert>
++    </changeSet>
++</databaseChangeLog>
