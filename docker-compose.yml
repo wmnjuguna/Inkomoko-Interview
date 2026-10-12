@@ -54,7 +54,7 @@ services:
       # Swagger UI: offer Fineract's own spec and the ERP accounts plugin spec in one dropdown
       SPRINGDOC_SWAGGERUI_URLS_0_NAME: Fineract 1.15.0
       SPRINGDOC_SWAGGERUI_URLS_0_URL: /fineract.json
-      SPRINGDOC_SWAGGERUI_URLS_1_NAME: ERP accounts (glsync plugin)
+      SPRINGDOC_SWAGGERUI_URLS_1_NAME: ERP integration (glsync plugin)
       SPRINGDOC_SWAGGERUI_URLS_1_URL: /glsync.json
       SPRINGDOC_SWAGGERUI_URLSPRIMARYNAME: Fineract 1.15.0
       JAVA_TOOL_OPTIONS: >-
