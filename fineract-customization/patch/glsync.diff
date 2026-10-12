@@ -90,13 +90,13 @@ index 0000000..cba21ea
 +}
 diff --git a/custom/inkomoko/glsync/service/config/swagger/glsync-input.yaml b/custom/inkomoko/glsync/service/config/swagger/glsync-input.yaml
 new file mode 100644
-index 0000000..f5a5c4c
+index 0000000..b5d46ac
 --- /dev/null
 +++ b/custom/inkomoko/glsync/service/config/swagger/glsync-input.yaml
 @@ -0,0 +1,22 @@
 +openapi: 3.0.3
 +info:
-+  title: Fineract ERP Accounts API (Inkomoko GL sync module)
++  title: Fineract ERP Integration API (Inkomoko GL sync module)
 +  version: 1.15.0
 +  description: |-
 +    Custom module for Apache Fineract 1.15.0. Mirrors the ERP chart of accounts into Fineract GL accounts,
@@ -143,7 +143,7 @@ index 0000000..1e0ddde
 +}
 diff --git a/custom/inkomoko/glsync/service/src/main/java/com/inkomoko/fineract/glsync/api/ErpAccount.java b/custom/inkomoko/glsync/service/src/main/java/com/inkomoko/fineract/glsync/api/ErpAccount.java
 new file mode 100644
-index 0000000..f662440
+index 0000000..6f37b31
 --- /dev/null
 +++ b/custom/inkomoko/glsync/service/src/main/java/com/inkomoko/fineract/glsync/api/ErpAccount.java
 @@ -0,0 +1,35 @@
@@ -153,7 +153,7 @@ index 0000000..f662440
 +import io.swagger.v3.oas.annotations.media.Schema;
 +import io.swagger.v3.oas.annotations.media.Schema.RequiredMode;
 +
-+/** Response of GET /v1/erp-accounts/{erpReference}: the GL account an ERP account is mapped to. */
++/** Response of GET /v1/erp-integration/accounts/{erpReference}: the GL account an ERP account is mapped to. */
 +@Schema(name = "ErpAccount", description = "An ERP account as mirrored in Fineract. A 200 here proves an earlier sync succeeded.")
 +public record ErpAccount(
 +
@@ -184,7 +184,7 @@ index 0000000..f662440
 +}
 diff --git a/custom/inkomoko/glsync/service/src/main/java/com/inkomoko/fineract/glsync/api/ErpAccountCommands.java b/custom/inkomoko/glsync/service/src/main/java/com/inkomoko/fineract/glsync/api/ErpAccountCommands.java
 new file mode 100644
-index 0000000..38e015c
+index 0000000..1fada50
 --- /dev/null
 +++ b/custom/inkomoko/glsync/service/src/main/java/com/inkomoko/fineract/glsync/api/ErpAccountCommands.java
 @@ -0,0 +1,139 @@
@@ -208,7 +208,7 @@ index 0000000..38e015c
 +
 +    public static final String ENTITY = "GLACCOUNT";
 +    public static final String ACTION = "SYNC";
-+    static final String HREF_PREFIX = "/erp-accounts/";
++    static final String HREF_PREFIX = "/erp-integration/accounts/";
 +    public static final String ERP_REFERENCE_PATTERN = "^[A-Za-z0-9._:-]{1,100}$";
 +    private static final Pattern ERP_REFERENCE = Pattern.compile(ERP_REFERENCE_PATTERN);
 +
@@ -329,7 +329,7 @@ index 0000000..38e015c
 +}
 diff --git a/custom/inkomoko/glsync/service/src/main/java/com/inkomoko/fineract/glsync/api/ErpAccountSyncResult.java b/custom/inkomoko/glsync/service/src/main/java/com/inkomoko/fineract/glsync/api/ErpAccountSyncResult.java
 new file mode 100644
-index 0000000..404ae87
+index 0000000..201b228
 --- /dev/null
 +++ b/custom/inkomoko/glsync/service/src/main/java/com/inkomoko/fineract/glsync/api/ErpAccountSyncResult.java
 @@ -0,0 +1,38 @@
@@ -342,7 +342,7 @@ index 0000000..404ae87
 +import org.apache.fineract.infrastructure.core.data.CommandProcessingResult;
 +
 +/**
-+ * Response of PUT /v1/erp-accounts/{erpReference}, built from Fineract's command result. For a repeated Idempotency-Key,
++ * Response of PUT /v1/erp-integration/accounts/{erpReference}, built from Fineract's command result. For a repeated Idempotency-Key,
 + * Fineract replays this exact body as it stored it.
 + */
 +@Schema(name = "ErpAccountSyncResult", description = "Which GL account the ERP account maps to, and whether this call created it.")
@@ -373,7 +373,7 @@ index 0000000..404ae87
 +}
 diff --git a/custom/inkomoko/glsync/service/src/main/java/com/inkomoko/fineract/glsync/api/ErpAccountsApiResource.java b/custom/inkomoko/glsync/service/src/main/java/com/inkomoko/fineract/glsync/api/ErpAccountsApiResource.java
 new file mode 100644
-index 0000000..869c139
+index 0000000..e78fa51
 --- /dev/null
 +++ b/custom/inkomoko/glsync/service/src/main/java/com/inkomoko/fineract/glsync/api/ErpAccountsApiResource.java
 @@ -0,0 +1,119 @@
@@ -406,9 +406,9 @@ index 0000000..869c139
 +import org.apache.fineract.infrastructure.security.service.PlatformSecurityContext;
 +import org.springframework.stereotype.Component;
 +
-+@Path("/v1/erp-accounts")
++@Path("/v1/erp-integration/accounts")
 +@Component
-+@Tag(name = "ERP Accounts", description = """
++@Tag(name = "ERP Integration", description = """
 +        GL accounts mirrored from the ERP chart of accounts, keyed by the ERP reference. \
 +        The ERP owns the chart of accounts; Fineract holds a matching GL account for each ERP account.""")
 +@RequiredArgsConstructor
@@ -1062,7 +1062,7 @@ index 0000000..6d286d5
 +}
 diff --git a/custom/inkomoko/glsync/service/src/test/java/com/inkomoko/fineract/glsync/api/ErpAccountCommandsTest.java b/custom/inkomoko/glsync/service/src/test/java/com/inkomoko/fineract/glsync/api/ErpAccountCommandsTest.java
 new file mode 100644
-index 0000000..43af81f
+index 0000000..a30d617
 --- /dev/null
 +++ b/custom/inkomoko/glsync/service/src/test/java/com/inkomoko/fineract/glsync/api/ErpAccountCommandsTest.java
 @@ -0,0 +1,132 @@
@@ -1092,7 +1092,7 @@ index 0000000..43af81f
 +        assertThat(command.getEntityName()).isEqualTo("GLACCOUNT");
 +        assertThat(command.getActionName()).isEqualTo("SYNC");
 +        assertThat(command.getTaskPermissionName()).isEqualTo("SYNC_GLACCOUNT");
-+        assertThat(command.getHref()).isEqualTo("/erp-accounts/GL-1200");
++        assertThat(command.getHref()).isEqualTo("/erp-integration/accounts/GL-1200");
 +        assertThat(command.getJson()).isEqualTo(BODY);
 +        assertThat(ErpAccountCommands.erpReferenceFrom(command.getHref())).isEqualTo("GL-1200");
 +    }
@@ -1263,7 +1263,7 @@ index 0000000..70062cb
 +}
 diff --git a/custom/inkomoko/glsync/service/src/test/java/com/inkomoko/fineract/glsync/integration/ErpAccountsApiIntegrationTest.java b/custom/inkomoko/glsync/service/src/test/java/com/inkomoko/fineract/glsync/integration/ErpAccountsApiIntegrationTest.java
 new file mode 100644
-index 0000000..058b3c3
+index 0000000..47260e0
 --- /dev/null
 +++ b/custom/inkomoko/glsync/service/src/test/java/com/inkomoko/fineract/glsync/integration/ErpAccountsApiIntegrationTest.java
 @@ -0,0 +1,296 @@
@@ -1324,7 +1324,7 @@ index 0000000..058b3c3
 +        assertThat(repeat.body().get("glAccountId").getAsLong()).isEqualTo(first.body().get("glAccountId").getAsLong());
 +        assertThat(glAccountsWithCode(code)).isEqualTo(1);
 +
-+        Reply lookup = get(ADMIN, "/erp-accounts/" + ref);
++        Reply lookup = get(ADMIN, "/erp-integration/accounts/" + ref);
 +        assertThat(lookup.status()).isEqualTo(200);
 +        assertThat(lookup.body().get("glAccountId").getAsLong()).isEqualTo(first.body().get("glAccountId").getAsLong());
 +        assertThat(lookup.body().get("name").getAsString()).isEqualTo("Loan Receivable");
@@ -1341,7 +1341,7 @@ index 0000000..058b3c3
 +
 +        assertThat(conflict.status()).isEqualTo(409);
 +        assertThat(conflict.body().get("userMessageGlobalisationCode").getAsString()).isEqualTo("error.msg.glaccount.sync.payload.conflict");
-+        assertThat(get(ADMIN, "/erp-accounts/" + ref).body().get("name").getAsString()).isEqualTo("Loan Receivable");
++        assertThat(get(ADMIN, "/erp-integration/accounts/" + ref).body().get("name").getAsString()).isEqualTo("Loan Receivable");
 +    }
 +
 +    @Test
@@ -1355,7 +1355,7 @@ index 0000000..058b3c3
 +
 +        assertThat(conflict.status()).isEqualTo(409);
 +        assertThat(conflict.body().get("userMessageGlobalisationCode").getAsString()).isEqualTo("error.msg.glaccount.sync.code.conflict");
-+        assertThat(get(ADMIN, "/erp-accounts/" + secondRef).status()).isEqualTo(404);
++        assertThat(get(ADMIN, "/erp-integration/accounts/" + secondRef).status()).isEqualTo(404);
 +        assertThat(glAccountsWithCode(code)).isEqualTo(1);
 +    }
 +
@@ -1403,8 +1403,8 @@ index 0000000..058b3c3
 +        String body = account(uniqueCode(), "Bank");
 +        String key = "SYNC:" + ref + ":1";
 +
-+        Reply first = send("PUT", ADMIN, "/erp-accounts/" + ref, body, Map.of("Idempotency-Key", key));
-+        Reply replay = send("PUT", ADMIN, "/erp-accounts/" + ref, body, Map.of("Idempotency-Key", key));
++        Reply first = send("PUT", ADMIN, "/erp-integration/accounts/" + ref, body, Map.of("Idempotency-Key", key));
++        Reply replay = send("PUT", ADMIN, "/erp-integration/accounts/" + ref, body, Map.of("Idempotency-Key", key));
 +
 +        assertThat(replay.status()).isEqualTo(200);
 +        assertThat(replay.raw().headers().firstValue("x-served-from-cache")).contains("true");
@@ -1414,7 +1414,7 @@ index 0000000..058b3c3
 +    @Test
 +    @DisplayName("unknown reference: 404; invalid reference or missing usage: 400")
 +    void rejectsUnknownAndInvalid() throws Exception {
-+        assertThat(get(ADMIN, "/erp-accounts/" + uniqueRef()).status()).isEqualTo(404);
++        assertThat(get(ADMIN, "/erp-integration/accounts/" + uniqueRef()).status()).isEqualTo(404);
 +        assertThat(put(ADMIN, "bad%20ref", account(uniqueCode(), "Bank")).status()).isEqualTo(400);
 +
 +        Reply noUsage = put(ADMIN, uniqueRef(), "{\"name\":\"Bank\",\"glCode\":\"" + uniqueCode() + "\",\"type\":1,\"manualEntriesAllowed\":false}");
@@ -1441,7 +1441,7 @@ index 0000000..058b3c3
 +            assertThat(reply.status()).as(attempt.getKey()).isEqualTo(400);
 +            assertThat(reply.body().getAsJsonArray("errors").get(0).getAsJsonObject().get("userMessageGlobalisationCode").getAsString())
 +                    .as(attempt.getKey()).isEqualTo(attempt.getValue());
-+            assertThat(get(ADMIN, "/erp-accounts/" + ref).status()).as(attempt.getKey()).isEqualTo(404);
++            assertThat(get(ADMIN, "/erp-integration/accounts/" + ref).status()).as(attempt.getKey()).isEqualTo(404);
 +            assertThat(glAccountsWithCode(code)).as(attempt.getKey()).isZero();
 +        }
 +    }
@@ -1461,11 +1461,11 @@ index 0000000..058b3c3
 +        long parentId = parent.body().get("glAccountId").getAsLong();
 +        long childId = child.body().get("glAccountId").getAsLong();
 +
-+        JsonObject childView = get(ADMIN, "/erp-accounts/" + childRef).body();
++        JsonObject childView = get(ADMIN, "/erp-integration/accounts/" + childRef).body();
 +        assertThat(childView.get("usage").getAsString()).isEqualTo("DETAIL");
 +        assertThat(childView.get("type").getAsString()).isEqualTo("ASSET");
 +        assertThat(childView.get("parentAccount").getAsString()).isEqualTo(parentRef);
-+        JsonObject parentView = get(ADMIN, "/erp-accounts/" + parentRef).body();
++        JsonObject parentView = get(ADMIN, "/erp-integration/accounts/" + parentRef).body();
 +        assertThat(parentView.get("usage").getAsString()).isEqualTo("HEADER");
 +        assertThat(parentView.get("glAccountId").getAsLong()).isEqualTo(parentId);
 +        // Core's rule (GLAccount.generateHierarchy): child path = parent path + child id + "."; a top-level account's path is "."
@@ -1514,7 +1514,7 @@ index 0000000..058b3c3
 +    }
 +
 +    private static Reply put(String user, String ref, String body) throws Exception {
-+        return send("PUT", user, "/erp-accounts/" + ref, body, Map.of());
++        return send("PUT", user, "/erp-integration/accounts/" + ref, body, Map.of());
 +    }
 +
 +    private static Reply get(String user, String path) throws Exception {
@@ -1611,7 +1611,7 @@ index 0000000..69e922c
 +}
 diff --git a/custom/inkomoko/glsync/service/src/test/java/com/inkomoko/fineract/glsync/service/GlAccountSyncServiceTest.java b/custom/inkomoko/glsync/service/src/test/java/com/inkomoko/fineract/glsync/service/GlAccountSyncServiceTest.java
 new file mode 100644
-index 0000000..5e6960a
+index 0000000..100e8ba
 --- /dev/null
 +++ b/custom/inkomoko/glsync/service/src/test/java/com/inkomoko/fineract/glsync/service/GlAccountSyncServiceTest.java
 @@ -0,0 +1,222 @@
@@ -1834,7 +1834,7 @@ index 0000000..5e6960a
 +
 +    private static JsonCommand command(String json) {
 +        return JsonCommand.from(json, JsonParser.parseString(json), new FromJsonHelper(), "GLACCOUNT", null, null, null, null, null, null,
-+                null, "/erp-accounts/GL-1200", null, null, null, null, null);
++                null, "/erp-integration/accounts/GL-1200", null, null, null, null, null);
 +    }
 +}
 diff --git a/custom/inkomoko/glsync/starter/build.gradle b/custom/inkomoko/glsync/starter/build.gradle
