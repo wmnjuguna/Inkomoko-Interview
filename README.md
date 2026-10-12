@@ -42,12 +42,19 @@ docker compose up --build        # Postgres, customised Fineract, Mock ERP, Inte
 
 The bootstrap step (office, currency, GL sync, loan product, API user) runs as a one-shot service and is safe to re-run.
 
-## Tests *(planned)*
+## Tests
 
 | Language | Command | Covers |
 |---|---|---|
-| Java | `make test-java` | JUnit unit + integration tests for the GL sync customisation |
-| Python | `make test-python` | ruff, mypy, pytest: unit, integration, failure, concurrency |
+| Java | Unit: run by every Fineract image build (see below). Integration: `docker run --rm --network inkomoko-fineract_default -e FINERACT_URL=http://fineract:8080 fineract-inkomoko-it:1.15.0` | 28 unit tests and 7 integration tests for the GL sync module. Details and build commands: [fineract-customization/BUILD.md](fineract-customization/BUILD.md) |
+| Python | *(planned)* | ruff, mypy, pytest: unit, integration, failure, concurrency |
+
+```bash
+docker buildx build --load -t fineract-inkomoko:1.15.0 fineract-customization                      # build + unit tests
+docker buildx build --load --target integration-test -t fineract-inkomoko-it:1.15.0 fineract-customization
+docker compose up -d --no-build --wait
+docker run --rm --network inkomoko-fineract_default -e FINERACT_URL=http://fineract:8080 fineract-inkomoko-it:1.15.0
+```
 
 ## Simulations *(planned)*
 
