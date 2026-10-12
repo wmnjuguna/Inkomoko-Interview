@@ -55,7 +55,7 @@ class ErpAccountsApiIntegrationTest {
         assertThat(repeat.body().get("glAccountId").getAsLong()).isEqualTo(first.body().get("glAccountId").getAsLong());
         assertThat(glAccountsWithCode(code)).isEqualTo(1);
 
-        Reply lookup = get(ADMIN, "/erp-accounts/" + ref);
+        Reply lookup = get(ADMIN, "/erp-integration/accounts/" + ref);
         assertThat(lookup.status()).isEqualTo(200);
         assertThat(lookup.body().get("glAccountId").getAsLong()).isEqualTo(first.body().get("glAccountId").getAsLong());
         assertThat(lookup.body().get("name").getAsString()).isEqualTo("Loan Receivable");
@@ -72,7 +72,7 @@ class ErpAccountsApiIntegrationTest {
 
         assertThat(conflict.status()).isEqualTo(409);
         assertThat(conflict.body().get("userMessageGlobalisationCode").getAsString()).isEqualTo("error.msg.glaccount.sync.payload.conflict");
-        assertThat(get(ADMIN, "/erp-accounts/" + ref).body().get("name").getAsString()).isEqualTo("Loan Receivable");
+        assertThat(get(ADMIN, "/erp-integration/accounts/" + ref).body().get("name").getAsString()).isEqualTo("Loan Receivable");
     }
 
     @Test
@@ -86,7 +86,7 @@ class ErpAccountsApiIntegrationTest {
 
         assertThat(conflict.status()).isEqualTo(409);
         assertThat(conflict.body().get("userMessageGlobalisationCode").getAsString()).isEqualTo("error.msg.glaccount.sync.code.conflict");
-        assertThat(get(ADMIN, "/erp-accounts/" + secondRef).status()).isEqualTo(404);
+        assertThat(get(ADMIN, "/erp-integration/accounts/" + secondRef).status()).isEqualTo(404);
         assertThat(glAccountsWithCode(code)).isEqualTo(1);
     }
 
@@ -134,8 +134,8 @@ class ErpAccountsApiIntegrationTest {
         String body = account(uniqueCode(), "Bank");
         String key = "SYNC:" + ref + ":1";
 
-        Reply first = send("PUT", ADMIN, "/erp-accounts/" + ref, body, Map.of("Idempotency-Key", key));
-        Reply replay = send("PUT", ADMIN, "/erp-accounts/" + ref, body, Map.of("Idempotency-Key", key));
+        Reply first = send("PUT", ADMIN, "/erp-integration/accounts/" + ref, body, Map.of("Idempotency-Key", key));
+        Reply replay = send("PUT", ADMIN, "/erp-integration/accounts/" + ref, body, Map.of("Idempotency-Key", key));
 
         assertThat(replay.status()).isEqualTo(200);
         assertThat(replay.raw().headers().firstValue("x-served-from-cache")).contains("true");
@@ -145,7 +145,7 @@ class ErpAccountsApiIntegrationTest {
     @Test
     @DisplayName("unknown reference: 404; invalid reference or missing usage: 400")
     void rejectsUnknownAndInvalid() throws Exception {
-        assertThat(get(ADMIN, "/erp-accounts/" + uniqueRef()).status()).isEqualTo(404);
+        assertThat(get(ADMIN, "/erp-integration/accounts/" + uniqueRef()).status()).isEqualTo(404);
         assertThat(put(ADMIN, "bad%20ref", account(uniqueCode(), "Bank")).status()).isEqualTo(400);
 
         Reply noUsage = put(ADMIN, uniqueRef(), "{\"name\":\"Bank\",\"glCode\":\"" + uniqueCode() + "\",\"type\":1,\"manualEntriesAllowed\":false}");
@@ -172,7 +172,7 @@ class ErpAccountsApiIntegrationTest {
             assertThat(reply.status()).as(attempt.getKey()).isEqualTo(400);
             assertThat(reply.body().getAsJsonArray("errors").get(0).getAsJsonObject().get("userMessageGlobalisationCode").getAsString())
                     .as(attempt.getKey()).isEqualTo(attempt.getValue());
-            assertThat(get(ADMIN, "/erp-accounts/" + ref).status()).as(attempt.getKey()).isEqualTo(404);
+            assertThat(get(ADMIN, "/erp-integration/accounts/" + ref).status()).as(attempt.getKey()).isEqualTo(404);
             assertThat(glAccountsWithCode(code)).as(attempt.getKey()).isZero();
         }
     }
@@ -192,11 +192,11 @@ class ErpAccountsApiIntegrationTest {
         long parentId = parent.body().get("glAccountId").getAsLong();
         long childId = child.body().get("glAccountId").getAsLong();
 
-        JsonObject childView = get(ADMIN, "/erp-accounts/" + childRef).body();
+        JsonObject childView = get(ADMIN, "/erp-integration/accounts/" + childRef).body();
         assertThat(childView.get("usage").getAsString()).isEqualTo("DETAIL");
         assertThat(childView.get("type").getAsString()).isEqualTo("ASSET");
         assertThat(childView.get("parentAccount").getAsString()).isEqualTo(parentRef);
-        JsonObject parentView = get(ADMIN, "/erp-accounts/" + parentRef).body();
+        JsonObject parentView = get(ADMIN, "/erp-integration/accounts/" + parentRef).body();
         assertThat(parentView.get("usage").getAsString()).isEqualTo("HEADER");
         assertThat(parentView.get("glAccountId").getAsLong()).isEqualTo(parentId);
         // Core's rule (GLAccount.generateHierarchy): child path = parent path + child id + "."; a top-level account's path is "."
@@ -245,7 +245,7 @@ class ErpAccountsApiIntegrationTest {
     }
 
     private static Reply put(String user, String ref, String body) throws Exception {
-        return send("PUT", user, "/erp-accounts/" + ref, body, Map.of());
+        return send("PUT", user, "/erp-integration/accounts/" + ref, body, Map.of());
     }
 
     private static Reply get(String user, String path) throws Exception {

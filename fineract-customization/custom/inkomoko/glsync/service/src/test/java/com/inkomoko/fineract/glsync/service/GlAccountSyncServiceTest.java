@@ -217,6 +217,6 @@ class GlAccountSyncServiceTest {
 
     private static JsonCommand command(String json) {
         return JsonCommand.from(json, JsonParser.parseString(json), new FromJsonHelper(), "GLACCOUNT", null, null, null, null, null, null,
-                null, "/erp-accounts/GL-1200", null, null, null, null, null);
+                null, "/erp-integration/accounts/GL-1200", null, null, null, null, null);
     }
 }

@@ -24,7 +24,7 @@ class ErpAccountCommandsTest {
         assertThat(command.getEntityName()).isEqualTo("GLACCOUNT");
         assertThat(command.getActionName()).isEqualTo("SYNC");
         assertThat(command.getTaskPermissionName()).isEqualTo("SYNC_GLACCOUNT");
-        assertThat(command.getHref()).isEqualTo("/erp-accounts/GL-1200");
+        assertThat(command.getHref()).isEqualTo("/erp-integration/accounts/GL-1200");
         assertThat(command.getJson()).isEqualTo(BODY);
         assertThat(ErpAccountCommands.erpReferenceFrom(command.getHref())).isEqualTo("GL-1200");
     }
