@@ -40,7 +40,9 @@ class ErpAccountCommandsTest {
     @ValueSource(strings = { "", "GL 1200", "GL/1200", "GL-1200?x=1" })
     @DisplayName("rejects references with other characters")
     void rejectsInvalidReferences(String reference) {
-        assertThatThrownBy(() -> ErpAccountCommands.syncCommand(reference, BODY)).isInstanceOf(PlatformApiDataValidationException.class);
+        assertThatThrownBy(() -> ErpAccountCommands.syncCommand(reference, BODY)).isInstanceOf(PlatformApiDataValidationException.class)
+                .satisfies(e -> assertThat(((PlatformApiDataValidationException) e).getErrors().get(0).getParameterName())
+                        .isEqualTo("erpReference"));
     }
 
     @Test
@@ -59,6 +61,37 @@ class ErpAccountCommandsTest {
     void requiresUsage(String body) {
         assertThatThrownBy(() -> ErpAccountCommands.syncCommand("GL-1100", body)).isInstanceOf(PlatformApiDataValidationException.class)
                 .satisfies(e -> assertThat(((PlatformApiDataValidationException) e).getErrors().get(0).getParameterName()).isEqualTo("usage"));
+    }
+
+    @ParameterizedTest(name = "{0} -> {1}")
+    @org.junit.jupiter.params.provider.CsvSource(delimiter = '|', value = { //
+            "\"type\":0,\"usage\":1        | type  | validation.msg.GLAccount.type.is.not.within.expected.range", //
+            "\"type\":6,\"usage\":1        | type  | validation.msg.GLAccount.type.is.not.within.expected.range", //
+            "\"type\":\"ASSET\",\"usage\":1  | type  | validation.msg.invalid.integer", //
+            "\"type\":1.5,\"usage\":1      | type  | validation.msg.invalid.integer", //
+            "\"type\":null,\"usage\":1     | type  | validation.msg.GLAccount.type.cannot.be.blank", //
+            "\"usage\":1                   | type  | validation.msg.GLAccount.type.cannot.be.blank", //
+            "\"type\":1,\"usage\":0        | usage | validation.msg.GLAccount.usage.is.not.within.expected.range", //
+            "\"type\":1,\"usage\":3        | usage | validation.msg.GLAccount.usage.is.not.within.expected.range", //
+            "\"type\":1,\"usage\":\"DETAIL\" | usage | validation.msg.invalid.integer" })
+    @DisplayName("rejects account types outside 1-5 and usages outside 1-2, with core's error codes")
+    void rejectsUnsupportedClassification(String fields, String parameter, String code) {
+        String body = "{\"name\":\"Bank\",\"glCode\":\"1100\"," + fields.trim() + ",\"manualEntriesAllowed\":false}";
+
+        assertThatThrownBy(() -> ErpAccountCommands.syncCommand("GL-1100", body)).isInstanceOf(PlatformApiDataValidationException.class)
+                .satisfies(e -> {
+                    var error = ((PlatformApiDataValidationException) e).getErrors().get(0);
+                    assertThat(error.getParameterName()).isEqualTo(parameter);
+                    assertThat(error.getUserMessageGlobalisationCode()).isEqualTo(code);
+                });
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = { "1", "2", "3", "4", "5", "\"3\"" })
+    @DisplayName("accepts every Fineract account type, as a number or a numeric string")
+    void acceptsEveryAccountType(String type) {
+        String body = "{\"name\":\"X\",\"glCode\":\"9\",\"type\":" + type + ",\"usage\":2,\"manualEntriesAllowed\":false}";
+        assertThatCode(() -> ErpAccountCommands.syncCommand("GL-9", body)).doesNotThrowAnyException();
     }
 
     @Test
