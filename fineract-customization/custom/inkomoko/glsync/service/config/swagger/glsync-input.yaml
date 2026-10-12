@@ -1,0 +1,22 @@
+openapi: 3.0.3
+info:
+  title: Fineract ERP Accounts API (Inkomoko GL sync module)
+  version: 1.15.0
+  description: |-
+    Custom module for Apache Fineract 1.15.0. Mirrors the ERP chart of accounts into Fineract GL accounts,
+    one GL account per ERP reference. GL account fields and their validation are Fineract core's own
+    (the same rules as POST /glaccounts); this API adds the ERP reference, idempotent replay and 409 conflicts.
+servers:
+  - url: /fineract-provider/api
+components:
+  securitySchemes:
+    basicAuth:
+      type: http
+      scheme: basic
+    tenantid:
+      type: apiKey
+      in: header
+      name: fineract-platform-tenantid
+security:
+  - basicAuth: []
+    tenantid: []

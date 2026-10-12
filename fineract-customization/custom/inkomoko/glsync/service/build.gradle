@@ -6,3 +6,23 @@ base {
 }
 
 apply from: 'dependencies.gradle'
+apply plugin: 'io.swagger.core.v3.swagger-gradle-plugin'
+
+// Fineract's own fineract.json only scans fineract-provider, so this module generates and ships its own spec.
+// It is packaged as static/glsync.json and served by Fineract at /fineract-provider/glsync.json.
+resolve {
+    outputFileName = 'glsync'
+    outputFormat = 'JSONANDYAML'
+    prettyPrint = true
+    sortOutput = true
+    classpath = sourceSets.main.runtimeClasspath
+    buildClasspath = classpath
+    resourcePackages = ['com.inkomoko.fineract.glsync.api']
+    openApiFile = file('config/swagger/glsync-input.yaml')
+    outputDir = file("${buildDir}/resources/main/static")
+    dependsOn(classes)
+}
+
+tasks.named('jar') {
+    dependsOn(resolve)
+}
