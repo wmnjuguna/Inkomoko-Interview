@@ -19,10 +19,66 @@ resolve {
     buildClasspath = classpath
     resourcePackages = ['com.inkomoko.fineract.glsync.api']
     openApiFile = file('config/swagger/glsync-input.yaml')
-    outputDir = file("${buildDir}/resources/main/static")
-    dependsOn(classes)
+    outputDir = file("${buildDir}/generated/openapi/static")
 }
 
+// The spec lives in its own folder and only the jar packages it (as static/glsync.*), so it stays out of
+// the main and test class outputs.
 tasks.named('jar') {
     dependsOn(resolve)
+    from(file("${buildDir}/generated/openapi"))
+}
+
+// Unit tests run in every image build; integration tests need a running Fineract and run separately.
+test {
+    useJUnitPlatform {
+        excludeTags 'integration'
+    }
+    // Always run, never restore from cache: the build log must show the tests executing.
+    outputs.cacheIf { false }
+    outputs.upToDateWhen { false }
+}
+
+// Integration tests talk to Fineract over HTTP only, so they need just JUnit, AssertJ and Gson at runtime.
+// integrationTestBundle packages them with those libraries so they run as a plain container, without Gradle.
+configurations {
+    integrationTestRunner
+}
+
+dependencies {
+    integrationTestRunner 'org.junit.platform:junit-platform-console-standalone:1.14.4' // Platform release matching Fineract's junit-bom 5.14.4
+    integrationTestRunner 'org.assertj:assertj-core'
+    integrationTestRunner 'com.google.code.gson:gson'
+}
+
+tasks.register('integrationTestBundle', Sync) {
+    description = 'Packages the integration tests and their runtime libraries into build/integration-test-bundle.'
+    group = 'verification'
+    dependsOn(testClasses)
+    into("${buildDir}/integration-test-bundle")
+    from(sourceSets.test.output.classesDirs) {
+        include 'com/inkomoko/fineract/glsync/integration/**'
+        into 'classes'
+    }
+    from(configurations.integrationTestRunner) {
+        into 'lib'
+    }
+}
+
+tasks.register('integrationTest', Test) {
+    description = 'Runs the ERP accounts API tests from an IDE or Gradle against a running Fineract (FINERACT_URL).'
+    group = 'verification'
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath
+    useJUnitPlatform {
+        includeTags 'integration'
+    }
+    outputs.upToDateWhen { false }
+}
+
+// Fineract sets the test logger to quiet; print every test so the build log is evidence on its own.
+testlogger {
+    theme 'plain'
+    logLevel 'lifecycle'
+    showPassed true
 }

@@ -28,13 +28,22 @@ COPY custom/inkomoko /src/custom/inkomoko
 RUN --mount=type=cache,target=/root/.gradle \
     ./gradlew --no-daemon --max-workers=3 \
       "-Dorg.gradle.jvmargs=-Xmx${GRADLE_XMX} ${GRADLE_JVM_ARGS}" \
+      :custom:inkomoko:glsync:service:test :custom:inkomoko:glsync:service:integrationTestBundle \
       :fineract-provider:bootJar \
       :custom:inkomoko:glsync:service:jar :custom:inkomoko:glsync:starter:jar \
-      -x test \
  && mkdir -p /out/libs \
  && cp "$(ls -S fineract-provider/build/libs/fineract-provider-*.jar | grep -v plain | head -1)" /out/fineract-provider.jar \
  && find custom/inkomoko -path '*/build/libs/*.jar' ! -name '*-sources.jar' ! -name '*-javadoc.jar' -exec cp {} /out/libs/ \; \
+ && cp -r custom/inkomoko/glsync/service/build/integration-test-bundle /out/integration-test \
  && ls -l /out/libs
+
+# Integration tests as a small runnable image: compiled tests + JUnit, AssertJ, Gson. No Gradle, no rebuild.
+#   docker buildx build --load --target integration-test -t fineract-inkomoko-it:1.15.0 fineract-customization
+#   docker run --rm --network inkomoko-fineract_default -e FINERACT_URL=http://fineract:8080 fineract-inkomoko-it:1.15.0
+FROM ${JRE_IMAGE} AS integration-test
+COPY --from=build /out/integration-test /it
+ENTRYPOINT ["java", "-cp", "/it/classes:/it/lib/*", "org.junit.platform.console.ConsoleLauncher", "execute", \
+            "--select-package", "com.inkomoko.fineract.glsync.integration", "--details", "tree", "--disable-banner", "--disable-ansi-colors"]
 
 FROM ${JRE_IMAGE}
 ARG FINERACT_TAG=1.15.0
