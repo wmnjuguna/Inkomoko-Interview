@@ -153,6 +153,30 @@ class ErpAccountsApiIntegrationTest {
         assertThat(noUsage.body().getAsJsonArray("errors").get(0).getAsJsonObject().get("parameterName").getAsString()).isEqualTo("usage");
     }
 
+    @Test
+    @DisplayName("only Fineract's account types (1-5) and usages (1-2) are accepted; nothing is written otherwise")
+    void rejectsUnsupportedTypesAndUsages() throws Exception {
+        Map<String, String> invalid = Map.of( //
+                "\"type\":0,\"usage\":1", "validation.msg.GLAccount.type.is.not.within.expected.range", //
+                "\"type\":6,\"usage\":1", "validation.msg.GLAccount.type.is.not.within.expected.range", //
+                "\"type\":\"ASSET\",\"usage\":1", "validation.msg.invalid.integer", //
+                "\"type\":null,\"usage\":1", "validation.msg.GLAccount.type.cannot.be.blank", //
+                "\"type\":1,\"usage\":0", "validation.msg.GLAccount.usage.is.not.within.expected.range", //
+                "\"type\":1,\"usage\":3", "validation.msg.GLAccount.usage.is.not.within.expected.range");
+
+        for (Map.Entry<String, String> attempt : invalid.entrySet()) {
+            String ref = uniqueRef();
+            String code = uniqueCode();
+            Reply reply = put(ADMIN, ref, "{\"name\":\"Type check\",\"glCode\":\"" + code + "\"," + attempt.getKey() + ",\"manualEntriesAllowed\":false}");
+
+            assertThat(reply.status()).as(attempt.getKey()).isEqualTo(400);
+            assertThat(reply.body().getAsJsonArray("errors").get(0).getAsJsonObject().get("userMessageGlobalisationCode").getAsString())
+                    .as(attempt.getKey()).isEqualTo(attempt.getValue());
+            assertThat(get(ADMIN, "/erp-accounts/" + ref).status()).as(attempt.getKey()).isEqualTo(404);
+            assertThat(glAccountsWithCode(code)).as(attempt.getKey()).isZero();
+        }
+    }
+
     // --- helpers
 
     private static String account(String code, String name) {
