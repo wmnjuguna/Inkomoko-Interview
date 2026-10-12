@@ -177,7 +177,68 @@ class ErpAccountsApiIntegrationTest {
         }
     }
 
+    @Test
+    @DisplayName("parent accounts: a DETAIL sub-ledger syncs under a HEADER parent of the same type, and Fineract records the hierarchy")
+    void syncsChildUnderHeaderParent() throws Exception {
+        String parentRef = uniqueRef();
+        String childRef = uniqueRef();
+        Reply parent = put(ADMIN, parentRef, account(uniqueCode(), "Assets", 1, 2, null));
+
+        Reply child = put(ADMIN, childRef, account(uniqueCode(), "Loan Receivable", 1, 1, parentRef));
+
+        assertThat(parent.status()).isEqualTo(200);
+        assertThat(child.status()).isEqualTo(200);
+        assertThat(child.body().get("parentAccount").getAsString()).isEqualTo(parentRef);
+        long parentId = parent.body().get("glAccountId").getAsLong();
+        long childId = child.body().get("glAccountId").getAsLong();
+
+        JsonObject childView = get(ADMIN, "/erp-accounts/" + childRef).body();
+        assertThat(childView.get("usage").getAsString()).isEqualTo("DETAIL");
+        assertThat(childView.get("type").getAsString()).isEqualTo("ASSET");
+        assertThat(childView.get("parentAccount").getAsString()).isEqualTo(parentRef);
+        JsonObject parentView = get(ADMIN, "/erp-accounts/" + parentRef).body();
+        assertThat(parentView.get("usage").getAsString()).isEqualTo("HEADER");
+        assertThat(parentView.get("glAccountId").getAsLong()).isEqualTo(parentId);
+        // Core's rule (GLAccount.generateHierarchy): child path = parent path + child id + "."; a top-level account's path is "."
+        assertThat(childView.get("hierarchy").getAsString()).isEqualTo(parentView.get("hierarchy").getAsString() + childId + ".");
+    }
+
+    @Test
+    @DisplayName("parent accounts: not synced, a DETAIL parent, or a parent of another type are rejected with 409; a Fineract parentId with 400")
+    void rejectsInvalidParents() throws Exception {
+        String detailRef = uniqueRef();
+        put(ADMIN, detailRef, account(uniqueCode(), "Bank", 1, 1, null));
+        String incomeHeaderRef = uniqueRef();
+        put(ADMIN, incomeHeaderRef, account(uniqueCode(), "Income", 4, 2, null));
+
+        Map<String, String> expected = Map.of( //
+                uniqueRef(), "error.msg.glaccount.sync.parent.not.synced", //
+                detailRef, "error.msg.glaccount.sync.parent.not.header", //
+                incomeHeaderRef, "error.msg.glaccount.sync.parent.type.mismatch");
+        for (Map.Entry<String, String> parent : expected.entrySet()) {
+            String childRef = uniqueRef();
+            String code = uniqueCode();
+            Reply reply = put(ADMIN, childRef, account(code, "Child", 1, 1, parent.getKey()));
+
+            assertThat(reply.status()).as(parent.getValue()).isEqualTo(409);
+            assertThat(reply.body().get("userMessageGlobalisationCode").getAsString()).isEqualTo(parent.getValue());
+            assertThat(glAccountsWithCode(code)).as(parent.getValue()).isZero();
+        }
+
+        Reply rawParentId = put(ADMIN, uniqueRef(),
+                "{\"name\":\"Child\",\"glCode\":\"" + uniqueCode() + "\",\"type\":1,\"usage\":1,\"manualEntriesAllowed\":false,\"parentId\":1}");
+        assertThat(rawParentId.status()).isEqualTo(400);
+        assertThat(rawParentId.body().getAsJsonArray("errors").get(0).getAsJsonObject().get("parameterName").getAsString())
+                .isEqualTo("parentId");
+    }
+
     // --- helpers
+
+    private static String account(String code, String name, int type, int usage, String parentAccount) {
+        return "{\"name\":\"" + name + "\",\"glCode\":\"" + code + "\",\"type\":" + type + ",\"usage\":" + usage
+                + ",\"manualEntriesAllowed\":false" + (parentAccount == null ? "" : ",\"parentAccount\":\"" + parentAccount + "\"")
+                + "}";
+    }
 
     private static String account(String code, String name) {
         return "{\"name\":\"" + name + "\",\"glCode\":\"" + code + "\",\"type\":1,\"usage\":1,\"manualEntriesAllowed\":false}";
