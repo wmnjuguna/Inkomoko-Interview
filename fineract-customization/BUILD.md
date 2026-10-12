@@ -1,56 +1,75 @@
-# Building and testing the Fineract customisation
+# Building and testing the Fineract plugin
 
-Everything builds inside Docker; no local JDK or Gradle is needed. Versions are pinned in [`VERSIONS`](VERSIONS).
+Everything is built inside Docker. You do not need Java or Gradle on your machine. The exact versions are in [`VERSIONS`](VERSIONS).
 
-## What gets built
+## What the build does
 
-The Dockerfile clones Apache Fineract tag `1.15.0`, fails unless it resolves to commit `d5636847`, copies our module into Fineract's `custom/` tree, and builds with the Gradle wrapper bundled with the tag. Our two jars go to `/app/libs` and are loaded at runtime by Spring Boot's `loader.path`. No core file is changed.
+1. Downloads Apache Fineract `1.15.0`.
+2. Checks that it is exactly commit `d5636847`. If not, the build stops.
+3. Copies my plugin into Fineract's `custom/` folder.
+4. Runs the plugin's unit tests. If one fails, the build stops.
+5. Builds Fineract and the two plugin jars.
+6. Puts it all in an image. The plugin jars sit in `/app/libs`, and Fineract loads them when it starts.
+
+No Fineract source file is changed.
 
 ```
 custom/inkomoko/glsync/
-├── service/   resource, command handler, service, entity, 409 mapper, OpenAPI spec, tests
-└── starter/   auto-configuration and Liquibase changelogs
+├── service/   the API, the rules, the table code, the errors, the OpenAPI spec, the tests
+└── starter/   switches the plugin on, and the database migrations
 ```
 
 ## Commands
 
-Run from the repository root.
+Run these from the repository root.
+
+| What | Command |
+|---|---|
+| Build everything and run the unit tests | `make build` |
+| Start Postgres and Fineract | `make up` |
+| Run all Java tests (builds and starts first) | `make test-java` |
+
+What `make` runs underneath:
 
 | Step | Command |
 |---|---|
-| Build the image and run the unit tests | `docker buildx build --load --progress=plain -t fineract-inkomoko:1.15.0 fineract-customization 2>&1 \| tee fineract-customization/build.log` |
-| Start Postgres and Fineract | `cp .env.example .env && docker compose up -d --no-build --wait` |
-| Build the integration test image (seconds; reuses the cached build stage) | `docker buildx build --load --target integration-test -t fineract-inkomoko-it:1.15.0 fineract-customization` |
-| Run the integration tests against the running stack | `docker run --rm --network inkomoko-fineract_default -e FINERACT_URL=http://fineract:8080 fineract-inkomoko-it:1.15.0 \| tee fineract-customization/integration-test.log` |
+| Build the image | `docker buildx build --load -t fineract-inkomoko:1.15.0 fineract-customization` |
+| Build the test image (takes seconds, reuses the build) | `docker buildx build --load --target integration-test -t fineract-inkomoko-it:1.15.0 fineract-customization` |
+| Start | `docker compose up -d --no-build --wait` |
+| Run the integration tests | `docker run --rm --network inkomoko-fineract_default -e FINERACT_URL=http://fineract:8080 fineract-inkomoko-it:1.15.0` |
 
-A failing unit test fails the image build. The integration tests only speak HTTP to Fineract, so the image build packages the compiled tests with JUnit, AssertJ and Gson into a small image that runs on the compose network, with no Gradle at test time. Each run uses fresh references and GL codes, so it can be repeated against the same database.
+The integration tests only talk to Fineract over HTTP. So they run as a small container on the same network, with no Gradle. A run takes a few seconds. Each run uses new references and GL codes, so you can run it again on the same database.
+
+`make build` also copies the OpenAPI spec out of the plugin jar into `docs/openapi/fineract-erp-accounts.yaml`. So the copy in the repo always matches the build.
 
 ## Tests
 
-| Kind | Class | What it proves |
+| Kind | Class | What it checks |
 |---|---|---|
-| Unit | `PayloadHasherTest` | "Same payload" ignores key order, whitespace, nulls and `1` vs `"1"`; a changed value changes the hash |
-| Unit | `ErpAccountCommandsTest` | The command is `GLACCOUNT`/`SYNC` guarded by `SYNC_GLACCOUNT`; reference validation; `type` only 1–5 and `usage` only 1–2, with core's error codes and the right field named |
-| Unit | `GlAccountSyncServiceTest` | Create, unchanged, payload conflict, GL-code conflict, trimming, and locks taken before any read |
-| Unit | `AdvisoryLocksTest` | Locks are taken in sorted order, so two requests can't deadlock |
-| Integration | `ErpAccountsApiIntegrationTest` | Against real Fineract and Postgres: behaviours 1–4, GL-code conflict, unsupported types and usages rejected with nothing written, 403 without permission, 10 parallel syncs create one account, `Idempotency-Key` replay, 404 and 400 cases |
+| Unit | `PayloadHasherTest` | "Same data" ignores key order, extra spaces, empty fields, and `1` vs `"1"`. Changed data gives a different hash. |
+| Unit | `ErpAccountCommandsTest` | The request becomes a Fineract `GLACCOUNT`/`SYNC` command that needs `SYNC_GLACCOUNT`. Bad references, bad `type` or `usage`, Fineract's `parentId`, and an account that is its own parent are all rejected, and the error names the right field. |
+| Unit | `GlAccountSyncServiceTest` | Create, unchanged, data conflict, GL code conflict, parent rules, and that locks are taken before anything is read |
+| Unit | `AdvisoryLocksTest` | Locks are always taken in the same order, so two requests cannot block each other forever |
+| Integration | `ErpAccountsApiIntegrationTest` | Against real Fineract and Postgres: the four Part A behaviours, GL code conflict, bad types and usages, parent accounts and the hierarchy, 403 without permission, 10 requests at once create one account, `Idempotency-Key` replay, 404 and 400 |
 
-## Evidence
+Totals: 51 unit tests and 10 integration tests.
 
-| File | Contents |
+## Evidence files
+
+| File | What it shows |
 |---|---|
-| `build.log` | Image build from the pinned tag, with every unit test result |
-| `integration-test.log` | Integration test results against the running image |
-| `patch/glsync.diff` | `git diff 1.15.0` with the module added: 30 new files, 1,492 lines, nothing outside `custom/inkomoko/`. Check with `git apply --check patch/glsync.diff` on a clean 1.15.0 checkout. |
-| `../docs/openapi/fineract-erp-accounts.yaml` | The module's OpenAPI spec, as served at `/fineract-provider/glsync.json` |
+| `build.log` | The image build from the pinned tag, with every unit test result |
+| `integration-test.log` | The integration test results against the running image |
+| `patch/glsync.diff` | My change as a diff against 1.15.0: 30 new files, 1,793 lines, nothing outside `custom/inkomoko/`. Check it with `git apply --check patch/glsync.diff` on a clean 1.15.0 checkout. |
+| `../docs/openapi/fineract-erp-accounts.yaml` | The plugin's OpenAPI spec |
 
-## Developing in an IDE
+## Working in an IDE
 
-`fineract/` is the 1.15.0 submodule. Symlink the module into its `custom/` tree and hide the link from git:
+`fineract/` is the Fineract 1.15.0 submodule. Link the plugin into it, and tell git to ignore the link:
 
 ```bash
 ln -s ../../custom/inkomoko fineract-customization/fineract/custom/inkomoko
 echo "custom/inkomoko" >> .git/modules/fineract-upstream/info/exclude
 ```
 
-Then open `fineract-customization/fineract` as a Gradle project in IntelliJ (JDK 21).
+Then open `fineract-customization/fineract` in IntelliJ as a Gradle project, with JDK 21.
