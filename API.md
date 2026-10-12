@@ -1,6 +1,18 @@
 # API
 
-> **Status:** contract draft. Examples will be replaced with captured responses once the services run. OpenAPI is served by each FastAPI service at `/docs` and `/openapi.json` (planned).
+> **Status:** contract draft. Examples will be replaced with captured responses once the services run.
+
+## OpenAPI specifications *(planned)*
+
+Each API has a machine-readable OpenAPI 3 spec generated from its code. `make openapi` exports them to `docs/openapi/`, lints them with Redocly, and fails if an export drifts from the running service.
+
+| API | Served at | Exported to |
+|---|---|---|
+| Integration Service | `/openapi.json`, `/docs` | `docs/openapi/integration-service.yaml` |
+| Mock ERP | `/openapi.json`, `/docs` | `docs/openapi/mock-erp.yaml` |
+| Fineract GL sync (custom module) | `/fineract-provider/glsync.json` | `docs/openapi/fineract-glsync.yaml` |
+
+Every operation documents its summary, operation ID, all response codes (including 202, 409, 422 and 425) with the error envelope and examples, the `X-API-Key` security scheme, and the `X-Correlation-ID` header. The Fineract endpoint needs its own spec because Fineract's built-in `fineract.json` is generated at build time from `fineract-provider` only, and doesn't include custom modules.
 
 ## Conventions (Integration Service)
 
@@ -8,6 +20,14 @@
 - **Correlation:** `X-Correlation-ID` is accepted or generated, echoed on every response, written to every log line, and forwarded to Fineract and the ERP.
 - **Identifiers:** callers use `client_uid` (`SME-000001`), `loan_reference` (`LN-2026-000001`, issued by us) and `external_reference` (one per business operation). Fineract numeric IDs are never accepted or returned.
 - **Money:** RWF, integer amounts (RWF has no minor unit).
+
+### Rules for `external_reference` (partner contract)
+
+- Required on every state-changing request; missing → `422`.
+- Generate it **once**, when the business action is decided (e.g. "disburse loan X"), store it, and resend the **same value on every retry**. Never derive it from a timestamp or create a new one per HTTP attempt.
+- One reference per business action. Two genuine repayments of the same amount on the same day need two references.
+- At most 40 characters of `[A-Za-z0-9._:-]`; longer → `422`. This keeps the derived Fineract key within Fineract's 50-character limit.
+- `X-Correlation-ID` is different: it traces a request and may change on every retry.
 
 ### Error envelope
 
@@ -82,7 +102,9 @@ Every state-changing request carries `external_reference`. The request hash is S
 
 ## Fineract custom endpoint *(planned)*
 
-`PUT /fineract-provider/api/v1/glaccounts/sync/{externalReference}`. Basic auth as the least-privilege API user, tenant header `Fineract-Platform-TenantId: default`, requires permission `SYNC_GLACCOUNT`.
+`PUT /fineract-provider/api/v1/glaccounts/sync/{externalReference}`. Basic auth as the least-privilege API user, tenant header `Fineract-Platform-TenantId: default`, requires permission `SYNC_GLACCOUNT`. Spec: `/fineract-provider/glsync.json`.
+
+Only the Integration Service calls it, as part of `POST /api/accounts/sync`. GL accounts are never created in Fineract any other way.
 
 | Case | Response |
 |---|---|
