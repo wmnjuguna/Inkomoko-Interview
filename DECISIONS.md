@@ -20,6 +20,12 @@
 
 Checked on 1.15.0: `GLAccount` has no external-id column, so all six Part A behaviours are implemented in our module. The module is real enforcement inside Fineract's transaction boundary, not a wrapper around the existing API.
 
+**One module (`glsync`, split into `service` and `starter`).** Every other requirement is met by configuration through Fineract's REST API, or by built-in features (`externalId`, external-ID lookups, loan states, transaction breakdowns). This keeps the diff against 1.15.0 small.
+
+**Data tables were considered and rejected for Part A.** In 1.15.0 they can only attach to client, group, center, office, loan product, loan, savings, share product and working-capital loan, not GL accounts. They also store data without enforcing rules, and Part A needs logic (compare the payload, return the existing account or 409, check a permission). Identities don't need them either, because clients and loans already have a unique `externalId`.
+
+**409 for conflicts.** Core maps rule violations to 403 (`PlatformDomainRuleExceptionMapper`) and has no 409 mapper, so the module registers its own.
+
 ## Sync vs async
 
 **Chosen: synchronous call to Fineract; ERP posting through a transactional outbox delivered by an in-process poller. No broker.**
@@ -29,12 +35,42 @@ Checked on 1.15.0: `GLAccount` has no external-id column, so all six Part A beha
 - A broker (Kafka, RabbitMQ, Celery) would still need an outbox to avoid the dual-write problem, still deliver at-least-once (so idempotency is still required), and adds infrastructure the evidence would have to cover. Not needed at this scale.
 - No Redis: idempotency and locks must be transactional with business state, and a TTL would reopen the door.
 
+### Fineract business events: considered, not used
+
+1.15.0 has in-process business event listeners, plus optional external events. External events are written to `m_external_event` in the same transaction as the change, then published as Avro to ActiveMQ or Kafka by the "Send Asynchronous Events" job, each with its own `idempotencyKey`.
+
+| Option | Verdict |
+|---|---|
+| A. Command-driven + our outbox | **Chosen.** No broker; one owner for idempotency and state; every failure scenario is a visible, testable state. Downside: transactions made outside the integration reach the ERP only through reconciliation (MISSING_IN_ERP). |
+| B. Fineract external events → broker → Python consumer (inbox de-duplication on the event `idempotencyKey`, ERP unique reference as the final guard) | The production next step if transactions reach Fineract from other channels. It brings Fineract's own outbox and catches every transaction, but adds a broker, Avro, at-least-once delivery and scheduled-job delay. |
+| C. Java listener in our module | Rejected. A remote call inside Fineract's transaction is unsafe, and it would move integration logic into Java and bloat the change. |
+| D. Poll Fineract | Rejected. It duplicates reconciliation. |
+
+There is no business event for GL account creation, so GL sync stays a direct call. Because every transaction is keyed by `externalId`, moving from A to B later only replaces the outbox poller with a consumer. External events stay switched off in our image.
+
 ## Database constraints and idempotency
 
 - Idempotency is a Postgres row claimed with `INSERT … ON CONFLICT DO NOTHING` on `UNIQUE(operation_type, external_reference)`, storing the request hash and the final response. Never held in application memory.
 - One live approval and one live disbursement per loan: partial unique index excluding `FAILED`, so a definitively failed attempt doesn't block a later one.
 - Per-loan serialisation of Fineract writes with a Postgres advisory lock, because Fineract may reject or fail concurrent writes to the same loan *(verify on 1.15.0)*.
-- Our reference is sent to Fineract as the transaction `externalId`, and as the `Idempotency-Key` header (Fineract 1.15.0 has `IdempotencyKeyResolver`) *(verify header name and behaviour)*.
+- Our reference is sent to Fineract as the transaction `externalId`, and a key derived from it as the `Idempotency-Key` header.
+
+### What Fineract 1.15.0 provides natively (read in source; to be confirmed in M8)
+
+- **`Idempotency-Key` header** on write commands. The key is claimed in `m_portfolio_command_source`, unique on (`action_name`, `entity_name`, `idempotency_key`), with status `UNDER_PROCESSING`, in its own transaction. The command's effect and its stored result then commit together (`PROCESSED`), or the error is stored (`ERROR`). A repeat returns the original status and body with `x-served-from-cache: true`; a repeat while running returns 425; a repeat after an error returns the stored error. The key column is VARCHAR(50).
+- **Unique `external_id`** on `m_client`, `m_loan` and `m_loan_transaction`.
+- **Gaps we cover ourselves:**
+  - No payload comparison, so we check `request_hash` and return 409 before calling Fineract.
+  - With no header, Fineract generates a random key, so we always send one.
+  - Different keys aren't stopped, so we add a one-disbursement-per-loan index, a per-loan lock and Fineract's loan state.
+  - Errors are replayed, not retried, so a new attempt uses a new key.
+  - A crash mid-command may leave a key stuck `UNDER_PROCESSING`, so recovery looks up by `externalId` first.
+
+**Consequence:** the unique transaction `externalId` is the real guarantee, and the header is a replay cache on top.
+
+### Key derivation
+
+Keys are deterministic and stored before the call: `Idempotency-Key = <OP>:<external_reference>:<attempt>`. The attempt number increases only after a lookup by `externalId` proves nothing happened. Keys are never derived from the payload alone, because two genuine identical repayments must both post.
 - The ERP enforces its own `UNIQUE(external_reference)` and balance rule; it doesn't trust the caller.
 
 ## Retries and partial failure
