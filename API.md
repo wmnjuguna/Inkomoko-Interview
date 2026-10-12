@@ -10,7 +10,7 @@ Each API has a machine-readable OpenAPI 3 spec generated from its code. `make op
 |---|---|---|
 | Integration Service | `/openapi.json`, `/docs` | `docs/openapi/integration-service.yaml` |
 | Mock ERP | `/openapi.json`, `/docs` | `docs/openapi/mock-erp.yaml` |
-| Fineract GL sync (custom module) | `/fineract-provider/glsync.json` | `docs/openapi/fineract-glsync.yaml` |
+| Fineract ERP accounts (custom module) | `/fineract-provider/glsync.json` (and `.yaml`) | `docs/openapi/fineract-erp-accounts.yaml` |
 
 Every operation documents its summary, operation ID, all response codes (including 202, 409, 422 and 425) with the error envelope and examples, the `X-API-Key` security scheme, and the `X-Correlation-ID` header. The Fineract endpoint needs its own spec because Fineract's built-in `fineract.json` is generated at build time from `fineract-provider` only, and doesn't include custom modules.
 
@@ -100,16 +100,38 @@ Every state-changing request carries `external_reference`. The request hash is S
 | `GET /api/journal-entries/{external_reference}` | Fetch an entry |
 | `POST /admin/faults` | `down`, `timeout`, `timeout-after-write`, `429` |
 
-## Fineract custom endpoint *(planned)*
+## Fineract custom endpoints: ERP accounts
 
-`PUT /fineract-provider/api/v1/glaccounts/sync/{externalReference}`. Basic auth as the least-privilege API user, tenant header `Fineract-Platform-TenantId: default`, requires permission `SYNC_GLACCOUNT`. Spec: `/fineract-provider/glsync.json`.
+Served by the `glsync` custom module inside Fineract. Full contract, with every field constraint and error example: [`docs/openapi/fineract-erp-accounts.yaml`](docs/openapi/fineract-erp-accounts.yaml), also served at `/fineract-provider/glsync.json`.
 
-Only the Integration Service calls it, as part of `POST /api/accounts/sync`. GL accounts are never created in Fineract any other way.
+Basic auth, tenant header `Fineract-Platform-TenantId: default`. Only the Integration Service calls these, as part of `POST /api/accounts/sync`; GL accounts are never created in Fineract any other way.
+
+### `PUT /fineract-provider/api/v1/erp-accounts/{erpReference}`
+
+Permission `SYNC_GLACCOUNT`. Body: core's GL account fields.
+
+| Field | Rule (as enforced by Fineract 1.15.0) |
+|---|---|
+| `name` | required, 1–200 characters |
+| `glCode` | required, 1–45 characters, unique across GL accounts |
+| `type` | required: `1` ASSET, `2` LIABILITY, `3` EQUITY, `4` INCOME, `5` EXPENSE |
+| `usage` | required: `1` DETAIL, `2` HEADER (core's validator allows null but the column is NOT NULL, so the module requires it) |
+| `manualEntriesAllowed` | required boolean |
+| `description` | optional, ≤ 500 characters |
+| `parentId`, `tagId` | optional; parent must exist and be a HEADER account; tag must be a valid code value |
+| anything else | `400 error.msg.parameter.unsupported` |
+| `{erpReference}` | 1–100 characters of `A–Z a–z 0–9 . _ : -` |
 
 | Case | Response |
 |---|---|
-| New reference | 200, new `resourceId` |
-| Same reference, identical payload | 200, existing `resourceId` |
-| Same reference, different payload | 409 |
-| GL code already used by another account | 409 |
-| Missing permission | 403 |
+| New reference, GL code free | `200 {"erpReference":"GL-1200","glAccountId":1,"glCode":"1200","outcome":"CREATED"}` |
+| Same reference, same payload (key order, whitespace and nulls ignored) | `200 … "outcome":"UNCHANGED"`, nothing written |
+| Same reference, different payload | `409 error.msg.glaccount.sync.payload.conflict`, nothing written |
+| New reference, GL code already used | `409 error.msg.glaccount.sync.code.conflict`, nothing written |
+| Missing permission | `403 error.msg.not.authorized` |
+| Repeated `Idempotency-Key` | original body replayed, header `x-served-from-cache: true` |
+| Same `Idempotency-Key` while the first call runs | `425` |
+
+### `GET /fineract-provider/api/v1/erp-accounts/{erpReference}`
+
+Permission `READ_GLACCOUNT`. `200 {"erpReference","glAccountId","glCode","name","syncedAt"}`, or `404` if not synced yet. Used to resolve a sync whose response was lost, instead of retrying blindly.
