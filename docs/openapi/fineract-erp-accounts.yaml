@@ -135,6 +135,14 @@ paths:
           content:
             application/json:
               examples:
+                Fineract parentId instead of parentAccount:
+                  description: Fineract parentId instead of parentAccount
+                  value:
+                    httpStatusCode: "400"
+                    userMessageGlobalisationCode: validation.msg.validation.errors.exist
+                    errors:
+                    - userMessageGlobalisationCode: validation.msg.erpaccount.parentId.not.supported
+                      parameterName: parentId
                 invalid ERP reference:
                   description: invalid ERP reference
                   value:
@@ -188,6 +196,28 @@ paths:
                     userMessageGlobalisationCode: error.msg.glaccount.sync.code.conflict
                     defaultUserMessage: GL code 1200 already belongs to another GL
                       account
+                parent is a DETAIL account:
+                  description: parent is a DETAIL account
+                  value:
+                    httpStatusCode: "409"
+                    userMessageGlobalisationCode: error.msg.glaccount.sync.parent.not.header
+                    defaultUserMessage: Parent ERP account GL-1100 is a DETAIL account;
+                      only HEADER accounts can have child accounts
+                parent not synced:
+                  description: parent not synced
+                  value:
+                    httpStatusCode: "409"
+                    userMessageGlobalisationCode: error.msg.glaccount.sync.parent.not.synced
+                    defaultUserMessage: Parent ERP account GL-1000 has not been synced
+                      yet; sync parents before their children
+                parent of another type:
+                  description: parent of another type
+                  value:
+                    httpStatusCode: "409"
+                    userMessageGlobalisationCode: error.msg.glaccount.sync.parent.type.mismatch
+                    defaultUserMessage: Parent ERP account GL-1000 has type 1 but
+                      this account has type 4; a child account must have its parent's
+                      type
                 payload conflict:
                   description: payload conflict
                   value:
@@ -197,8 +227,9 @@ paths:
                       with a different payload
               schema:
                 $ref: "#/components/schemas/FineractError"
-          description: "ERP reference already synced with a different payload, or\
-            \ GL code already in use"
+          description: "ERP reference already synced with a different payload, GL\
+            \ code already in use, or the parent is not synced, not a HEADER account,\
+            \ or of a different type"
         "425":
           description: A request with the same Idempotency-Key is still being processed;
             retry later
@@ -224,20 +255,50 @@ components:
         glCode:
           type: string
           example: "1200"
+        hierarchy:
+          type: string
+          description: "Fineract's hierarchy path, as stored in `acc_gl_account.hierarchy`:\
+            \ a top-level account is `.`, and each child adds its own GL account id\
+            \ to its parent's path (`.7.`, then `.7.12.`)."
+          example: .7.
         name:
           type: string
           description: The name as currently stored in Fineract.
           example: Loan Receivable
+        parentAccount:
+          type: string
+          description: Parent account ERP reference; absent for a top-level account.
+          example: GL-1000
         syncedAt:
           type: string
           description: "When the mapping was created, UTC, ISO-8601."
           example: 2026-10-12T14:30:00Z
+        type:
+          type: string
+          enum:
+          - ASSET
+          - LIABILITY
+          - EQUITY
+          - INCOME
+          - EXPENSE
+          example: ASSET
+        usage:
+          type: string
+          description: "`DETAIL`: a sub-ledger that transactions post to. `HEADER`:\
+            \ a ledger heading that groups other accounts; nothing posts to it."
+          enum:
+          - DETAIL
+          - HEADER
+          example: DETAIL
       required:
       - erpReference
       - glAccountId
       - glCode
+      - hierarchy
       - name
       - syncedAt
+      - type
+      - usage
     ErpAccountSyncResult:
       type: object
       description: "Which GL account the ERP account maps to, and whether this call\
@@ -264,6 +325,11 @@ components:
           - CREATED
           - UNCHANGED
           example: CREATED
+        parentAccount:
+          type: string
+          description: "Parent account ERP reference, when the account was synced\
+            \ under a parent."
+          example: GL-1000
       required:
       - erpReference
       - glAccountId
@@ -343,13 +409,17 @@ components:
           example: Loan Receivable
           maxLength: 200
           minLength: 1
-        parentId:
-          type: integer
-          format: int64
-          description: Optional Fineract id of the parent account. It must exist (404)
-            and be a HEADER account (403).
-          example: 10
-          minimum: 1
+        parentAccount:
+          type: string
+          description: "Parent account ERP reference (optional). The parent must already\
+            \ be synced (409 `parent.not.synced`), must be a HEADER account (409 `parent.not.header`)\
+            \ and must have the same type (409 `parent.type.mismatch`). The account\
+            \ being synced can itself be a HEADER or a DETAIL (sub-ledger) account.\
+            \ Core's `parentId` is not accepted (400): parents are always named by\
+            \ ERP reference."
+          example: GL-1000
+          maxLength: 100
+          pattern: "^[A-Za-z0-9._:-]{1,100}$"
         tagId:
           type: integer
           format: int64
