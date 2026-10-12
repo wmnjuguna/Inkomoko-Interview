@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+                   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                   xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.1.xsd">
+    <!-- Same shape as core's CREATE_GLACCOUNT. Granting it to a role is done by the setup script, not here. -->
+    <changeSet author="inkomoko" id="glsync-0002-permission">
+        <insert tableName="m_permission">
+            <column name="grouping" value="accounting"/>
+            <column name="code" value="SYNC_GLACCOUNT"/>
+            <column name="entity_name" value="GLACCOUNT"/>
+            <column name="action_name" value="SYNC"/>
+            <column name="can_maker_checker" valueBoolean="false"/>
+        </insert>
+    </changeSet>
+</databaseChangeLog>
