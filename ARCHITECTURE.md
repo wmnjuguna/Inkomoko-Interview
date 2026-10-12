@@ -25,7 +25,7 @@ flowchart LR
   IS -->|sync: clients, loans, disburse, repay<br/>externalId = our reference| F
   IS -->|outbox: journal entries| E
   E -.->|chart of accounts| IS
-  IS -->|GL sync: PUT glaccounts/sync/{ref}| F
+  IS -->|GL sync: PUT /v1/erp-accounts/{erpReference}| F
   IS --- DB
   F --- DB
   E --- DB
@@ -79,15 +79,15 @@ sequenceDiagram
   │              external-ref entity + repository, payload hasher, conflict exception + 409 mapper
   └── starter/   auto-configuration, Liquibase db/custom-changelog/*, JUnit tests
   ```
-- **OpenAPI:** the resource carries Swagger annotations like core's `GLAccountsApiResource`. Fineract's own `fineract.json` is generated at build time from `fineract-provider` only, so the module generates and serves its own `glsync.json`.
-- **What it enforces, in one `@Transactional` boundary inside Fineract** (planned):
+- **OpenAPI:** the resource carries Swagger annotations like core's `GLAccountsApiResource`. Fineract's own `fineract.json` is generated at build time from `fineract-provider` only, so the module generates and serves its own `glsync.json`, exported to `docs/openapi/fineract-erp-accounts.yaml`.
+- **What it enforces, in one `@Transactional` boundary inside Fineract** (built in M3, verified against the running image):
   1. ERP `external_reference` persisted against the GL account and unique (side table `glsync_external_ref`, unique index). Checked: `GLAccount` in 1.15.0 has no external-id column.
   2. Same reference + identical payload → returns the existing GL account.
   3. Same reference + different payload → 409.
   4. Endpoint guarded by a new Fineract permission `SYNC_GLACCOUNT` through the standard command pipeline (permission check + `m_portfolio_command_source` audit).
   5. Schema and permission ship as a Liquibase changelog in the module.
   6. JUnit unit and integration tests.
-- **Race fallback:** a unique-index violation on the reference rolls back, re-reads in a fresh transaction, and returns the existing account or 409.
+- **Concurrency:** the service takes Postgres transaction-scoped advisory locks on the ERP reference and the GL code (sorted, so no deadlock) before reading. A second request waits, then sees the committed row. Unique indexes stay as the backstop. A re-read after a unique violation isn't possible: Postgres aborts the command transaction on a constraint violation.
 - **Image:** the Dockerfile checks out 1.15.0, copies our modules into `custom/`, runs the module tests, and builds the image. The build log and `git diff 1.15.0` are kept as evidence.
 
 ## Where data comes from

@@ -24,6 +24,16 @@ Checked on 1.15.0: `GLAccount` has no external-id column, so all six Part A beha
 
 **Data tables were considered and rejected for Part A.** In 1.15.0 they can only attach to client, group, center, office, loan product, loan, savings, share product and working-capital loan, not GL accounts. They also store data without enforcing rules, and Part A needs logic (compare the payload, return the existing account or 409, check a permission). Identities don't need them either, because clients and loans already have a unique `externalId`.
 
+**It is a plugin, not a fork.** `glsync` is a Fineract custom module compiled against the pinned 1.15.0 source and loaded at runtime from `/app/libs` via `loader.path`. It uses only Fineract's own extension points: Spring auto-configuration, `@Path`/`@Provider` bean discovery, the `@CommandType` handler registry, `EntityManagerFactoryCustomizer` for its entity, and `db/custom-changelog` for its Liquibase changes. No core file is edited.
+
+**It calls core accounting in-process.** The sync service calls core's `GLAccountWritePlatformService.createGLAccount` and `GLAccountRepository` directly, inside the command transaction Fineract opens in `CommandSourceService.processCommandAndSaveResult`. The core GL row, our reference row and Fineract's audit row commit together. Calling Fineract's REST API from Java instead would be the "thin wrapper" the brief warns against.
+
+**API: `PUT`/`GET /v1/erp-accounts/{erpReference}`.** It names the thing being mirrored. The body is exactly core's GL body, so core's validator applies unchanged. The module adds one rule: `usage` is required, because core's validator allows null but the column is NOT NULL. GET exists so a lost sync response can be resolved by lookup.
+
+**Concurrency: advisory locks, not "retry after a unique violation".** Postgres aborts the whole command transaction on a constraint violation, so the handler can't recover from one. The service takes `pg_advisory_xact_lock` on the reference and GL code (sorted) through Fineract's `JdbcTemplate`, which is bound to the transaction's own connection. Fineract's dialect starts database transactions lazily, so a plain read could otherwise land on another connection. Verified: 10 parallel identical calls give 1 CREATED, 9 UNCHANGED and one GL account. Advisory locks tie the module to Postgres, which this deployment pins.
+
+**The migration creates `SYNC_GLACCOUNT`; the setup script grants it.** Role setup stays in one place (Part B).
+
 **409 for conflicts.** Core maps rule violations to 403 (`PlatformDomainRuleExceptionMapper`) and has no 409 mapper, so the module registers its own.
 
 ## Sync vs async
