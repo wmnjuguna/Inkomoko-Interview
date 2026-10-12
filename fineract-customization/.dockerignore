@@ -1,0 +1,4 @@
+# The Dockerfile clones the pinned tag itself; never send the submodule as build context.
+fineract/
+patch/
+*.log
