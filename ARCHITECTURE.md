@@ -1,29 +1,29 @@
 # Architecture
 
-> **Status:** design. Sections describe the intended system; each will be checked against the running code and evidence before submission.
+> **Status:** the Fineract plugin is built and tested. The Python parts are still a design. Sections marked *planned* describe what I will build.
 
-## Components
+## The parts
 
-| Component | Language | Role |
+| Part | Language | What it does |
 |---|---|---|
-| **Customised Fineract** | Java 21 / Spring Boot (Fineract 1.15.0) | System of record for clients, loans, disbursements, repayments, balances. Our GL sync module enforces ERP-reference idempotency inside Fineract. |
-| **Integration Service** | Python (FastAPI) | The only partner-facing API. Owns business identifiers, idempotency, the operation state machine, the ERP outbox, recovery and reconciliation. |
-| **Mock ERP** | Python (FastAPI) | Accounting master: chart of accounts and balanced journal entries. Enforces its own uniqueness. Has a fault-injection switch. |
-| **PostgreSQL 18.3** | — | One server, one database and user per owner: `fineract_tenants` + `fineract_default`, `integration_db`, `erp_db`. |
+| **Fineract** (with my plugin) | Java 21, Fineract 1.15.0 | The bank's record of clients, loans, payments and balances. My plugin adds GL accounts from the ERP safely. |
+| **Integration Service** | Python, FastAPI | The only API that partners call. It keeps track of every request, stops duplicates, calls Fineract and sends journal entries to the ERP. |
+| **Mock ERP** | Python, FastAPI | The accounting system. It owns the chart of accounts and stores journal entries. It can pretend to be down or slow, for testing. |
+| **PostgreSQL 18.3** | — | One server. Each part has its own database and its own user: `fineract_tenants` and `fineract_default` for Fineract, `integration_db`, `erp_db`. |
 
-No message broker, cache or separate worker. See [DECISIONS.md](DECISIONS.md#sync-vs-async).
+There is no message queue, cache or separate worker. [DECISIONS.md](DECISIONS.md) explains why.
 
 ```mermaid
 flowchart LR
   P[Financing partner] -->|REST, business IDs only| IS
   subgraph compose [docker compose]
     IS[Integration Service<br/>FastAPI]
-    F[Customised Fineract 1.15.0<br/>+ glsync module]
+    F[Fineract 1.15.0<br/>+ glsync plugin]
     E[Mock ERP<br/>FastAPI]
     DB[(PostgreSQL 18.3<br/>fineract_tenants · fineract_default<br/>integration_db · erp_db)]
   end
-  IS -->|sync: clients, loans, disburse, repay<br/>externalId = our reference| F
-  IS -->|outbox: journal entries| E
+  IS -->|clients, loans, disbursements, repayments<br/>externalId = our reference| F
+  IS -->|journal entries, via an outbox| E
   E -.->|chart of accounts| IS
   IS -->|GL sync: PUT /v1/erp-accounts/{erpReference}| F
   IS --- DB
@@ -31,16 +31,16 @@ flowchart LR
   E --- DB
 ```
 
-Every request carries `X-Correlation-ID`; every state-changing request carries an `external_reference`.
+Every request carries an `X-Correlation-ID`, so one request can be followed through all the logs. Every request that changes something carries an `external_reference`.
 
-## Data flow
+## How data moves
 
-1. **GL sync (Part A).** `POST /api/accounts/sync` reads the ERP chart of accounts, upserts `gl_sync` rows as `SYNC_PENDING`, maps each ERP type to a Fineract GL type, and calls the glsync endpoint in Fineract. On success the row becomes `SYNCED` with the Fineract GL id stored internally. Runs before the loan product is created.
-2. **Partner operations (Parts C–F).** The Integration Service claims the operation in `integration_db` (unique on operation type + reference), commits intent, calls Fineract synchronously with our reference as Fineract's `externalId`, then records the result.
-3. **ERP posting (Part H).** For disbursements and repayments, the journal entry is built from Fineract's transaction breakdown and written to the outbox in the same transaction as `FINERACT_DONE`. An in-process poller delivers it to the ERP with backoff.
-4. **Reconciliation (Part K).** Reads Fineract's transactions from Fineract itself and the ERP's journal entries, joins on `external_reference`, reports `MATCHED`, `MISSING_IN_ERP`, `MISSING_IN_FINERACT`, `AMOUNT_MISMATCH`. Read-only.
+1. **GL accounts (Part A).** The Integration Service reads the ERP's chart of accounts. For each account it calls my Fineract plugin. The plugin creates the matching GL account in Fineract, once. This happens before the loan product is set up.
+2. **Partner requests (Parts C–F).** *(planned)* The Integration Service first saves the request in its own database. Then it calls Fineract and sends our reference as Fineract's `externalId`. Then it saves the result.
+3. **Journal entries (Part H).** *(planned)* After a disbursement or a repayment, the Integration Service reads how Fineract split the money (principal and interest). It builds the journal entry from that. It saves the entry in an outbox table, in the same database transaction as the Fineract result. A background loop sends it to the ERP and retries if the ERP is down.
+4. **Reconciliation (Part K).** *(planned)* It reads transactions from Fineract and journal entries from the ERP. It matches them by `external_reference`. It reports each one as `MATCHED`, `MISSING_IN_ERP`, `MISSING_IN_FINERACT` or `AMOUNT_MISMATCH`. It never changes anything.
 
-## Disbursement sequence
+## A disbursement, step by step *(planned)*
 
 ```mermaid
 sequenceDiagram
@@ -48,120 +48,123 @@ sequenceDiagram
   participant API as Integration API
   participant DB as integration_db
   participant F as Fineract
-  participant W as Outbox poller
+  participant W as Outbox loop
   participant E as Mock ERP
   P->>API: POST /loans/{ref}/disburse + external_reference
-  API->>DB: INSERT operation ON CONFLICT (claim)
-  API->>DB: FINERACT_PENDING, commit
+  API->>DB: save the request (claims the reference)
+  API->>DB: mark FINERACT_PENDING, commit
   API->>F: disburse (externalId = external_reference)
-  Note over API,F: J2 down / J3 timeout → look up by externalId, never blind-retry
+  Note over API,F: J2 Fineract down, J3 timeout: look it up by externalId, never retry blindly
   F-->>API: 200 + transaction id
-  API->>F: GET transaction (principal / interest split)
-  API->>DB: FINERACT_DONE + outbox row (one transaction)
-  Note over API,DB: J5 crash before this commit → startup sweep runs the lookup
+  API->>F: get the transaction (principal and interest)
+  API->>DB: mark FINERACT_DONE and add an outbox row, in one transaction
+  Note over API,DB: J5 crash before this commit: on restart, look it up again
   API-->>P: 200, erp_status PENDING
-  W->>DB: claim due rows (FOR UPDATE SKIP LOCKED)
+  W->>DB: pick up waiting outbox rows
   W->>E: POST /journal-entries (same reference)
-  Note over W,E: J1 down / J4 timeout → retry is safe, ERP is idempotent
-  E-->>W: 201 created / 200 existing
-  W->>DB: COMPLETED
+  Note over W,E: J1 ERP down, J4 ERP timeout: safe to retry, the ERP ignores duplicates
+  E-->>W: 201 created, or 200 already exists
+  W->>DB: mark COMPLETED
 ```
 
-## Fineract customisation
+## The Fineract plugin
 
-- **Base:** `fineract-customization/fineract` is a git submodule pinned to tag `1.15.0`. It is never edited.
-- **Mechanism:** Fineract 1.15.0 auto-includes Gradle modules under `custom/<company>/<category>/<module>` (`settings.gradle`) and ships an example in `custom/acme/`. Our module lives at `fineract-customization/custom/inkomoko/glsync/` and is copied into that tree for the build.
-- **One module, two sub-projects** (the upstream convention). Everything outside Part A uses configuration or built-in Fineract features, so no other Fineract module is needed.
+- **Fineract source.** `fineract-customization/fineract` is Fineract 1.15.0 as a git submodule. I never edit it.
+- **How the plugin gets in.** Fineract 1.15.0 picks up any module placed under `custom/<company>/<category>/<module>`. It even ships an example. My module is `custom/inkomoko/glsync/`. The build copies it into the Fineract source and compiles them together. At runtime the plugin is two jar files next to the unchanged Fineract jar.
+- **One module, two parts.** This is how Fineract's own example is laid out:
 
   ```
   custom/inkomoko/glsync/
-  ├── service/   API resource + Swagger schemas, command handler, @Transactional service,
-  │              external-ref entity + repository, payload hasher, conflict exception + 409 mapper
-  └── starter/   auto-configuration, Liquibase db/custom-changelog/*, JUnit tests
+  ├── service/   the API, the rules, the database table code, the error handling, the tests
+  └── starter/   switches the plugin on, and the database migrations
   ```
-- **OpenAPI:** the resource carries Swagger annotations like core's `GLAccountsApiResource`. Fineract's own `fineract.json` is generated at build time from `fineract-provider` only, so the module generates and serves its own `glsync.json`, exported to `docs/openapi/fineract-erp-accounts.yaml`.
-- **What it enforces, in one `@Transactional` boundary inside Fineract** (built in M3, verified against the running image):
-  1. ERP `external_reference` persisted against the GL account and unique (side table `glsync_external_ref`, unique index). Checked: `GLAccount` in 1.15.0 has no external-id column.
-  2. Same reference + identical payload → returns the existing GL account.
-  3. Same reference + different payload → 409.
-  4. Endpoint guarded by a new Fineract permission `SYNC_GLACCOUNT` through the standard command pipeline (permission check + `m_portfolio_command_source` audit).
-  5. Schema and permission ship as a Liquibase changelog in the module.
-  6. JUnit unit and integration tests.
-- **Concurrency:** the service takes Postgres transaction-scoped advisory locks on the ERP reference and the GL code (sorted, so no deadlock) before reading. A second request waits, then sees the committed row. Unique indexes stay as the backstop. A re-read after a unique violation isn't possible: Postgres aborts the command transaction on a constraint violation.
-- **Image:** the Dockerfile checks out 1.15.0, copies our modules into `custom/`, runs the module tests, and builds the image. The build log and `git diff 1.15.0` are kept as evidence.
+
+  Everything outside Part A uses Fineract's normal settings or built-in features. So no other plugin is needed.
+- **The API.** `PUT /v1/erp-accounts/{erpReference}` creates the GL account for an ERP account. `GET` on the same path shows which GL account an ERP account belongs to. Full rules are in [API.md](API.md).
+- **What it guarantees.** All of this runs inside one Fineract database transaction:
+  1. The ERP reference is saved with the GL account, in its own table `glsync_external_ref`, and it is unique. (Fineract's GL account table has no column for it.)
+  2. Same reference and same data: you get the existing account back. Nothing new is created.
+  3. Same reference but different data: 409 conflict.
+  4. Only users with the new `SYNC_GLACCOUNT` permission can call it. Fineract checks this itself.
+  5. The new table and permission are added by Liquibase migrations.
+  6. It is covered by JUnit unit and integration tests.
+- **Parent accounts.** An account can name its parent with `parentAccount`. The parent must already be synced, must be a HEADER account (a heading that nothing posts to), and must be the same type. The account itself can be a HEADER or a DETAIL account. DETAIL means a sub-ledger that transactions post to. Fineract then records the hierarchy path.
+- **Requests at the same time.** Before reading anything, the plugin takes a Postgres lock on the reference and on the GL code. A second request with the same reference waits. When the first one finishes, the second sees the saved row. The unique indexes are a second safety net.
+- **OpenAPI.** The build generates the spec from annotations in the Java code. Fineract serves it at `/fineract-provider/glsync.json`. A copy is in `docs/openapi/fineract-erp-accounts.yaml`.
+- **Building.** The Dockerfile downloads Fineract 1.15.0, checks it is the exact commit, adds my plugin, runs the unit tests and builds the image. See [BUILD.md](fineract-customization/BUILD.md).
 
 ## Where data comes from
 
-The Fineract database starts empty. Fineract's own migrations create its schema and baseline (Head Office, admin user, permissions); our module's migration adds only structure.
+The Fineract database starts empty. Fineract creates its own tables when it starts. My plugin only adds one table and one permission.
 
-| Data | Origin |
+| Data | Where it comes from |
 |---|---|
-| Office, RWF, loan product, API role and user | Setup script through Fineract's REST API |
-| Chart of accounts | Seeded in the Mock ERP (the accounting master) |
-| GL accounts in Fineract | ERP → Integration Service → glsync endpoint, nothing else |
-| Clients, loans, transactions | Partner → Integration Service → Fineract, nothing else |
+| Office, currency, loan product, API user | A setup script, through Fineract's API *(planned)* |
+| Chart of accounts | Seeded in the Mock ERP *(planned)* |
+| GL accounts in Fineract | Only from the ERP, through the Integration Service and my plugin |
+| Clients, loans, payments | Only from partners, through the Integration Service |
 
-## Idempotency keys
+## Duplicate-request keys
 
-| Key | Generated by | Value |
+| Key | Who makes it | Example |
 |---|---|---|
-| `external_reference` | The partner, once per business action | e.g. `DSB-2026-000123` |
-| Fineract `Idempotency-Key` header | Integration Service, stored on the operation row before the call | `DSB:DSB-2026-000123:1` |
-| Fineract transaction `externalId` | Integration Service | `DSB-2026-000123`, never changes |
-| ERP journal entry reference | Integration Service, from the Fineract transaction | `DSB-2026-000123`; reversal `DSB-2026-000123:REV` |
+| `external_reference` | The partner, once per business action | `DSB-2026-000123` |
+| Fineract `Idempotency-Key` header | The Integration Service, saved before the call | `DSB:DSB-2026-000123:1` |
+| Fineract transaction `externalId` | The Integration Service | `DSB-2026-000123`. It never changes. |
+| ERP journal entry reference | The Integration Service, from the Fineract transaction | `DSB-2026-000123`. A reversal is `DSB-2026-000123:REV`. |
 
-The attempt suffix moves from `:1` to `:2` only after a lookup by `externalId` proves Fineract has no such transaction. Fineract enforces `external_id` as unique on `m_loan_transaction`, so a new attempt still can't create a second transaction.
+The `:1` at the end only becomes `:2` after we check Fineract and see the transaction does not exist. Fineract keeps `externalId` unique, so a second try can never create a second transaction.
 
-## Data model *(planned)*
+## Database tables *(planned, except the plugin table)*
 
 **integration_db**
 
-| Table | Key columns | Constraints |
+| Table | Main columns | Rules |
 |---|---|---|
-| `operations` | `operation_type, external_reference, scope_key, request_hash, status, attempts, next_attempt_at, response_body, fineract_tx_id, erp_entry_id, correlation_id` | `UNIQUE(operation_type, external_reference)`; partial `UNIQUE(scope_key) WHERE operation_type IN ('APPROVE','DISBURSE') AND status <> 'FAILED'` |
-| `operation_events` | `operation_id, from_status, to_status, at, detail` | append-only timeline |
-| `clients` | `client_uid, fineract_client_id (internal), name, status` | `UNIQUE(client_uid)` |
-| `loans` | `loan_reference, client_uid, fineract_loan_id (internal), status` | `UNIQUE(loan_reference)` |
-| `gl_sync` | `erp_code, external_reference, fineract_gl_id (internal), sync_status, attempts` | `UNIQUE(erp_code)`, `UNIQUE(external_reference)` |
-| `outbox` | `operation_id, payload, status, attempts, next_attempt_at` | |
+| `operations` | type, `external_reference`, request hash, status, attempts, next attempt time, saved response, correlation id | One row per type and reference. Only one live approval or disbursement per loan. |
+| `operation_events` | operation, from status, to status, time | History of every status change |
+| `clients` | `client_uid`, Fineract client id (internal only), name, status | `client_uid` is unique |
+| `loans` | `loan_reference`, `client_uid`, Fineract loan id (internal only), status | `loan_reference` is unique |
+| `gl_sync` | ERP code, ERP reference, Fineract GL id (internal only), sync status, attempts | Code and reference are unique |
+| `outbox` | operation, journal entry, status, attempts, next attempt time | |
 
-**erp_db**: `accounts (code PK, external_reference UNIQUE, name, type, currency)`, `journal_entries (external_reference UNIQUE, request_hash, entry_date, source_tx_type)`, `journal_lines (entry_id, account_code FK, debit, credit)` with Σdebit = Σcredit enforced in the service and by a deferred trigger.
+**erp_db**: `accounts` (code, unique reference, name, type, currency), `journal_entries` (unique reference, request hash, date, source), `journal_lines` (entry, account, debit, credit). Debits must equal credits.
 
-**fineract_default** (Fineract): core tables untouched, plus `glsync_external_ref (gl_account_id FK UNIQUE, external_reference UNIQUE, payload_hash, created_at)`. Our identifiers are stored in Fineract's own `external_id` columns: `m_client` = `client_uid`, `m_loan` = `loan_reference`, `m_loan_transaction` = operation `external_reference`.
+**fineract_default** (Fineract): Fineract's own tables, unchanged, plus my table `glsync_external_ref` (GL account id, ERP reference, payload hash, created at). Our IDs go in Fineract's own `external_id` columns: `client_uid` on clients, `loan_reference` on loans, and the operation's `external_reference` on loan transactions.
 
-Fineract numeric IDs exist only in internal mapping columns and never appear in a public response.
+Fineract's numeric IDs are only stored in our own tables. They never appear in a public response.
 
-## Operation state machine *(planned)*
+## Request status *(planned)*
 
 ```mermaid
 stateDiagram-v2
   [*] --> RECEIVED
-  RECEIVED --> FINERACT_PENDING: claimed, intent committed
-  FINERACT_PENDING --> FINERACT_DONE: 2xx, or lookup by externalId finds it
-  FINERACT_PENDING --> FAILED: connection refused, or definitive business 4xx, or lookup says not found
-  FAILED --> FINERACT_PENDING: retry with the same reference (retryable failures only)
-  FINERACT_DONE --> ERP_PENDING: outbox row written (disburse, repay)
-  FINERACT_DONE --> COMPLETED: no ERP leg (client, application, approval)
-  ERP_PENDING --> COMPLETED: ERP 201, or 200 for an existing entry
-  FINERACT_PENDING --> NEEDS_RECONCILIATION: max attempts exhausted
-  ERP_PENDING --> NEEDS_RECONCILIATION: max attempts, or ERP 409
-  NEEDS_RECONCILIATION --> COMPLETED: explicit idempotent repair
+  RECEIVED --> FINERACT_PENDING: saved and claimed
+  FINERACT_PENDING --> FINERACT_DONE: Fineract said yes, or a lookup found it
+  FINERACT_PENDING --> FAILED: Fineract refused, or it was not reachable, or a lookup found nothing
+  FAILED --> FINERACT_PENDING: retried with the same reference
+  FINERACT_DONE --> ERP_PENDING: journal entry waiting (disbursement, repayment)
+  FINERACT_DONE --> COMPLETED: nothing to send to the ERP (client, application, approval)
+  ERP_PENDING --> COMPLETED: the ERP saved it, or already had it
+  FINERACT_PENDING --> NEEDS_RECONCILIATION: too many attempts
+  ERP_PENDING --> NEEDS_RECONCILIATION: too many attempts, or the ERP said 409
+  NEEDS_RECONCILIATION --> COMPLETED: fixed by an explicit repair call
 ```
 
-GL sync has its own machine: `SYNC_PENDING → SYNCED | FAILED`, `FAILED → SYNC_PENDING` on the next sync call.
+GL sync has its own simple status: `SYNC_PENDING`, then `SYNCED` or `FAILED`. A failed one goes back to `SYNC_PENDING` on the next sync.
 
-**Retry policy:** exponential backoff 1 s, 2 s, 4 s … capped at 60 s, with jitter, max 8 attempts. `attempts` and `next_attempt_at` are persisted, so the policy survives restarts. Nothing calls Fineract twice without first looking up the reference.
+**Retries:** wait 1 s, 2 s, 4 s and so on, up to 60 s, with some randomness. Stop after 8 attempts. The attempt count and the next attempt time are saved, so they survive a restart. We never call Fineract twice without first checking if the first call worked.
 
-**Recovery:** on startup and on a loop, the service re-examines every `*_PENDING` row whose `next_attempt_at` has passed. `POST /admin/recover` forces a pass.
+**Recovery:** on start-up, and then in a loop, the service looks at every request still marked `..._PENDING`. `POST /admin/recover` runs this on demand.
 
-## Double-disbursement defences
+## How a loan is protected from being paid out twice *(planned)*
 
-| Layer | Mechanism | Limit |
+| Layer | How | Limit |
 |---|---|---|
-| L1 | API idempotency: same reference replays | Different references pass |
-| L2 | Partial unique index: one live disbursement per loan | Only covers callers that go through us |
-| L3 | Per-loan Postgres advisory lock around the Fineract call | Same |
-| L4 | Fineract transaction `externalId` (unique column) + `Idempotency-Key` header (replays the stored response) | Reference-scoped |
-| L5 | Fineract loan state: single-tranche loan can only go APPROVED → ACTIVE once | **Last line of defence**; rejects late, after a remote call |
+| L1 | Same reference: the saved answer is returned | A different reference gets through |
+| L2 | Database rule: only one live disbursement per loan | Only for requests that come through us |
+| L3 | A Postgres lock per loan around the Fineract call | Same |
+| L4 | Fineract's unique transaction `externalId`, plus its `Idempotency-Key` header | Only for the same reference |
+| L5 | Fineract's loan state: a single-tranche loan can only be disbursed once | **The last safety net.** It works even if everything else fails, but it only rejects after the call reaches Fineract. |
 
-Repayments rely on L1, L3 and L4: many repayments per loan are legitimate, but they are serialised per loan.
+Repayments use L1, L3 and L4. A loan can have many repayments, so L2 does not apply. They are still handled one at a time per loan.
