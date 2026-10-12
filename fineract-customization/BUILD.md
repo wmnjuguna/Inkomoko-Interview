@@ -40,7 +40,7 @@ What `make` runs underneath:
 
 The integration tests only talk to Fineract over HTTP. So they run as a small container on the same network, with no Gradle. A run takes a few seconds. Each run uses new references and GL codes, so you can run it again on the same database.
 
-`make build` also copies the OpenAPI spec out of the plugin jar into `docs/openapi/fineract-erp-accounts.yaml`. So the copy in the repo always matches the build.
+`make build` also copies the OpenAPI spec out of the plugin jar into `docs/openapi/fineract-erp-integration.yaml`. So the copy in the repo always matches the build.
 
 ## Tests
 
@@ -61,7 +61,7 @@ Totals: 51 unit tests and 10 integration tests.
 | `build.log` | The image build from the pinned tag, with every unit test result |
 | `integration-test.log` | The integration test results against the running image |
 | `patch/glsync.diff` | My change as a diff against 1.15.0: 30 new files, 1,793 lines, nothing outside `custom/inkomoko/`. Check it with `git apply --check patch/glsync.diff` on a clean 1.15.0 checkout. |
-| `../docs/openapi/fineract-erp-accounts.yaml` | The plugin's OpenAPI spec |
+| `../docs/openapi/fineract-erp-integration.yaml` | The plugin's OpenAPI spec |
 
 ## Working in an IDE
 

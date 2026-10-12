@@ -54,7 +54,7 @@ make up       # starts Postgres and Fineract
 1. Open http://localhost:8080/fineract-provider/swagger-ui/index.html
 2. Pick a spec in the **Select a definition** list at the top right:
    - **Fineract 1.15.0**: all of Fineract's own APIs
-   - **ERP accounts (glsync plugin)**: my plugin's `/v1/erp-accounts` endpoints
+   - **ERP integration (glsync plugin)**: my plugin's `/v1/erp-integration/accounts` endpoints
 3. Click **Authorize**. Fill in both:
    - `basicAuth`: user `mifos`, password `password`
    - `tenantid`: `default`
