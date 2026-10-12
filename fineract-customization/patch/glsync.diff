@@ -143,10 +143,10 @@ index 0000000..1e0ddde
 +}
 diff --git a/custom/inkomoko/glsync/service/src/main/java/com/inkomoko/fineract/glsync/api/ErpAccount.java b/custom/inkomoko/glsync/service/src/main/java/com/inkomoko/fineract/glsync/api/ErpAccount.java
 new file mode 100644
-index 0000000..b000b16
+index 0000000..f662440
 --- /dev/null
 +++ b/custom/inkomoko/glsync/service/src/main/java/com/inkomoko/fineract/glsync/api/ErpAccount.java
-@@ -0,0 +1,26 @@
+@@ -0,0 +1,35 @@
 +package com.inkomoko.fineract.glsync.api;
 +
 +import com.google.gson.Gson;
@@ -165,6 +165,15 @@ index 0000000..b000b16
 +
 +        @Schema(requiredMode = RequiredMode.REQUIRED, example = "Loan Receivable", description = "The name as currently stored in Fineract.") String name,
 +
++        @Schema(requiredMode = RequiredMode.REQUIRED, allowableValues = { "ASSET", "LIABILITY", "EQUITY", "INCOME", "EXPENSE" }, example = "ASSET") String type,
++
++        @Schema(requiredMode = RequiredMode.REQUIRED, allowableValues = { "DETAIL",
++                "HEADER" }, example = "DETAIL", description = "`DETAIL`: a sub-ledger that transactions post to. `HEADER`: a ledger heading that groups other accounts; nothing posts to it.") String usage,
++
++        @Schema(example = "GL-1000", description = "Parent account ERP reference; absent for a top-level account.") String parentAccount,
++
++        @Schema(requiredMode = RequiredMode.REQUIRED, example = ".7.", description = "Fineract's hierarchy path, as stored in `acc_gl_account.hierarchy`: a top-level account is `.`, and each child adds its own GL account id to its parent's path (`.7.`, then `.7.12.`).") String hierarchy,
++
 +        @Schema(requiredMode = RequiredMode.REQUIRED, example = "2026-10-12T14:30:00Z", description = "When the mapping was created, UTC, ISO-8601.") String syncedAt) {
 +
 +    private static final Gson GSON = new Gson();
@@ -175,10 +184,10 @@ index 0000000..b000b16
 +}
 diff --git a/custom/inkomoko/glsync/service/src/main/java/com/inkomoko/fineract/glsync/api/ErpAccountCommands.java b/custom/inkomoko/glsync/service/src/main/java/com/inkomoko/fineract/glsync/api/ErpAccountCommands.java
 new file mode 100644
-index 0000000..616ccf3
+index 0000000..38e015c
 --- /dev/null
 +++ b/custom/inkomoko/glsync/service/src/main/java/com/inkomoko/fineract/glsync/api/ErpAccountCommands.java
-@@ -0,0 +1,98 @@
+@@ -0,0 +1,139 @@
 +package com.inkomoko.fineract.glsync.api;
 +
 +import com.google.gson.JsonElement;
@@ -208,6 +217,7 @@ index 0000000..616ccf3
 +    public static CommandWrapper syncCommand(String erpReference, String json) {
 +        validate(erpReference);
 +        validateClassification(json);
++        validateParent(erpReference, json);
 +        return new CommandWrapper(null, null, null, null, null, ACTION, ENTITY, null, null, HREF_PREFIX + erpReference, json, null, null,
 +                null, null, null, null, null, null, null);
 +    }
@@ -241,6 +251,46 @@ index 0000000..616ccf3
 +        checkInRange(body.getAsJsonObject(), "usage", GLAccountUsage.getMinValue(), GLAccountUsage.getMaxValue(), errors);
 +        if (!errors.isEmpty()) {
 +            throw new PlatformApiDataValidationException("validation.msg.validation.errors.exist", "Validation errors exist.", errors);
++        }
++    }
++
++    /**
++     * The parent is named by its ERP reference, never by a Fineract id, so Fineract ids stay out of the contract. The
++     * module resolves it to core's parentId.
++     */
++    static void validateParent(String erpReference, String json) {
++        JsonObject body = parseObject(json);
++        if (body == null) {
++            return;
++        }
++        List<ApiParameterError> errors = new ArrayList<>();
++        if (body.has("parentId")) {
++            errors.add(ApiParameterError.parameterError("validation.msg.erpaccount.parentId.not.supported",
++                    "Name the parent with `parentAccount`, not a Fineract `parentId`.", "parentId", (Object) body.get("parentId").toString()));
++        }
++        JsonElement parent = body.get("parentAccount");
++        if (parent != null && !parent.isJsonNull()) {
++            String parentReference = parent.isJsonPrimitive() ? parent.getAsString().trim() : "";
++            if (!ERP_REFERENCE.matcher(parentReference).matches()) {
++                errors.add(ApiParameterError.parameterError("validation.msg.erpaccount.parentAccount.invalid",
++                        "parentAccount must be 1-100 characters of letters, digits, '.', '_', ':' or '-'", "parentAccount",
++                        (Object) parent.toString()));
++            } else if (parentReference.equals(erpReference)) {
++                errors.add(ApiParameterError.parameterError("validation.msg.erpaccount.parentAccount.self",
++                        "An account can't be its own parent.", "parentAccount", (Object) parentReference));
++            }
++        }
++        if (!errors.isEmpty()) {
++            throw new PlatformApiDataValidationException("validation.msg.validation.errors.exist", "Validation errors exist.", errors);
++        }
++    }
++
++    private static JsonObject parseObject(String json) {
++        try {
++            JsonElement body = JsonParser.parseString(json == null ? "" : json);
++            return body.isJsonObject() ? body.getAsJsonObject() : null;
++        } catch (JsonParseException e) {
++            return null; // malformed JSON is reported by core's own parser
 +        }
 +    }
 +
@@ -279,10 +329,10 @@ index 0000000..616ccf3
 +}
 diff --git a/custom/inkomoko/glsync/service/src/main/java/com/inkomoko/fineract/glsync/api/ErpAccountSyncResult.java b/custom/inkomoko/glsync/service/src/main/java/com/inkomoko/fineract/glsync/api/ErpAccountSyncResult.java
 new file mode 100644
-index 0000000..ae556cf
+index 0000000..404ae87
 --- /dev/null
 +++ b/custom/inkomoko/glsync/service/src/main/java/com/inkomoko/fineract/glsync/api/ErpAccountSyncResult.java
-@@ -0,0 +1,36 @@
+@@ -0,0 +1,38 @@
 +package com.inkomoko.fineract.glsync.api;
 +
 +import com.google.gson.Gson;
@@ -305,14 +355,16 @@ index 0000000..ae556cf
 +        @Schema(requiredMode = RequiredMode.REQUIRED, example = "1200") String glCode,
 +
 +        @Schema(requiredMode = RequiredMode.REQUIRED, allowableValues = { "CREATED",
-+                "UNCHANGED" }, example = "CREATED", description = "`CREATED`: this call created the GL account. `UNCHANGED`: the same payload was already synced, so nothing was written.") String outcome) {
++                "UNCHANGED" }, example = "CREATED", description = "`CREATED`: this call created the GL account. `UNCHANGED`: the same payload was already synced, so nothing was written.") String outcome,
++
++        @Schema(example = "GL-1000", description = "Parent account ERP reference, when the account was synced under a parent.") String parentAccount) {
 +
 +    private static final Gson GSON = new Gson();
 +
 +    static ErpAccountSyncResult from(CommandProcessingResult result) {
 +        Map<String, Object> changes = result.getChanges();
 +        return new ErpAccountSyncResult((String) changes.get("erpReference"), result.getResourceId(), (String) changes.get("glCode"),
-+                (String) changes.get("outcome"));
++                (String) changes.get("outcome"), (String) changes.get("parentAccount"));
 +    }
 +
 +    String toJson() {
@@ -321,10 +373,10 @@ index 0000000..ae556cf
 +}
 diff --git a/custom/inkomoko/glsync/service/src/main/java/com/inkomoko/fineract/glsync/api/ErpAccountsApiResource.java b/custom/inkomoko/glsync/service/src/main/java/com/inkomoko/fineract/glsync/api/ErpAccountsApiResource.java
 new file mode 100644
-index 0000000..83465d8
+index 0000000..869c139
 --- /dev/null
 +++ b/custom/inkomoko/glsync/service/src/main/java/com/inkomoko/fineract/glsync/api/ErpAccountsApiResource.java
-@@ -0,0 +1,110 @@
+@@ -0,0 +1,119 @@
 +package com.inkomoko.fineract.glsync.api;
 +
 +import com.inkomoko.fineract.glsync.service.ErpAccountReadService;
@@ -392,16 +444,24 @@ index 0000000..83465d8
 +                    {"httpStatusCode": "400", "userMessageGlobalisationCode": "validation.msg.validation.errors.exist", "errors": [{"userMessageGlobalisationCode": "validation.msg.GLAccount.glCode.cannot.be.blank", "parameterName": "glCode"}]}"""),
 +            @ExampleObject(name = "unsupported field", value = """
 +                    {"httpStatusCode": "400", "userMessageGlobalisationCode": "validation.msg.validation.errors.exist", "errors": [{"userMessageGlobalisationCode": "error.msg.parameter.unsupported", "parameterName": "currency"}]}"""),
++            @ExampleObject(name = "Fineract parentId instead of parentAccount", value = """
++                    {"httpStatusCode": "400", "userMessageGlobalisationCode": "validation.msg.validation.errors.exist", "errors": [{"userMessageGlobalisationCode": "validation.msg.erpaccount.parentId.not.supported", "parameterName": "parentId"}]}"""),
 +            @ExampleObject(name = "invalid ERP reference", value = """
 +                    {"httpStatusCode": "400", "errors": [{"userMessageGlobalisationCode": "validation.msg.erpaccount.erpReference.invalid", "parameterName": "erpReference"}]}""") }))
 +    @ApiResponse(responseCode = "401", description = "Missing or invalid credentials or tenant")
 +    @ApiResponse(responseCode = "403", description = "User lacks permission SYNC_GLACCOUNT, or parentId is not a HEADER account", content = @Content(schema = @Schema(implementation = ErpAccountsApiResourceSwagger.FineractError.class)))
 +    @ApiResponse(responseCode = "404", description = "parentId or tagId does not exist", content = @Content(schema = @Schema(implementation = ErpAccountsApiResourceSwagger.FineractError.class)))
-+    @ApiResponse(responseCode = "409", description = "ERP reference already synced with a different payload, or GL code already in use", content = @Content(schema = @Schema(implementation = ErpAccountsApiResourceSwagger.FineractError.class), examples = {
++    @ApiResponse(responseCode = "409", description = "ERP reference already synced with a different payload, GL code already in use, or the parent is not synced, not a HEADER account, or of a different type", content = @Content(schema = @Schema(implementation = ErpAccountsApiResourceSwagger.FineractError.class), examples = {
 +            @ExampleObject(name = "payload conflict", value = """
 +                    {"httpStatusCode": "409", "userMessageGlobalisationCode": "error.msg.glaccount.sync.payload.conflict", "defaultUserMessage": "External reference GL-1200 is already synced with a different payload"}"""),
 +            @ExampleObject(name = "GL code taken", value = """
-+                    {"httpStatusCode": "409", "userMessageGlobalisationCode": "error.msg.glaccount.sync.code.conflict", "defaultUserMessage": "GL code 1200 already belongs to another GL account"}""") }))
++                    {"httpStatusCode": "409", "userMessageGlobalisationCode": "error.msg.glaccount.sync.code.conflict", "defaultUserMessage": "GL code 1200 already belongs to another GL account"}"""),
++            @ExampleObject(name = "parent not synced", value = """
++                    {"httpStatusCode": "409", "userMessageGlobalisationCode": "error.msg.glaccount.sync.parent.not.synced", "defaultUserMessage": "Parent ERP account GL-1000 has not been synced yet; sync parents before their children"}"""),
++            @ExampleObject(name = "parent is a DETAIL account", value = """
++                    {"httpStatusCode": "409", "userMessageGlobalisationCode": "error.msg.glaccount.sync.parent.not.header", "defaultUserMessage": "Parent ERP account GL-1100 is a DETAIL account; only HEADER accounts can have child accounts"}"""),
++            @ExampleObject(name = "parent of another type", value = """
++                    {"httpStatusCode": "409", "userMessageGlobalisationCode": "error.msg.glaccount.sync.parent.type.mismatch", "defaultUserMessage": "Parent ERP account GL-1000 has type 1 but this account has type 4; a child account must have its parent's type"}""") }))
 +    @ApiResponse(responseCode = "425", description = "A request with the same Idempotency-Key is still being processed; retry later")
 +    public Response sync(@PathParam("erpReference") @Parameter(description = "The ERP's reference for the account", example = "GL-1200", schema = @Schema(type = "string", pattern = ErpAccountCommands.ERP_REFERENCE_PATTERN, minLength = 1, maxLength = 100)) String erpReference,
 +            @Parameter(hidden = true) String apiRequestBodyAsJson) {
@@ -432,15 +492,16 @@ index 0000000..83465d8
 +    public String retrieve(@PathParam("erpReference") @Parameter(description = "The ERP's reference for the account", example = "GL-1200", schema = @Schema(type = "string", pattern = ErpAccountCommands.ERP_REFERENCE_PATTERN, minLength = 1, maxLength = 100)) String erpReference) {
 +        context.authenticatedUser().validateHasReadPermission(READ_PERMISSION_RESOURCE);
 +        ErpAccountView view = readService.retrieve(erpReference);
-+        return new ErpAccount(view.erpReference(), view.glAccountId(), view.glCode(), view.name(), view.syncedAt()).toJson();
++        return new ErpAccount(view.erpReference(), view.glAccountId(), view.glCode(), view.name(), view.type(), view.usage(),
++                view.parentAccount(), view.hierarchy(), view.syncedAt()).toJson();
 +    }
 +}
 diff --git a/custom/inkomoko/glsync/service/src/main/java/com/inkomoko/fineract/glsync/api/ErpAccountsApiResourceSwagger.java b/custom/inkomoko/glsync/service/src/main/java/com/inkomoko/fineract/glsync/api/ErpAccountsApiResourceSwagger.java
 new file mode 100644
-index 0000000..8fe1626
+index 0000000..8a6a157
 --- /dev/null
 +++ b/custom/inkomoko/glsync/service/src/main/java/com/inkomoko/fineract/glsync/api/ErpAccountsApiResourceSwagger.java
-@@ -0,0 +1,69 @@
+@@ -0,0 +1,73 @@
 +package com.inkomoko.fineract.glsync.api;
 +
 +import io.swagger.v3.oas.annotations.media.ArraySchema;
@@ -479,7 +540,11 @@ index 0000000..8fe1626
 +
 +            @Schema(maxLength = 500, example = "Mirrored from ERP account GL-1200", description = "Optional free text.") String description,
 +
-+            @Schema(minimum = "1", example = "10", description = "Optional Fineract id of the parent account. It must exist (404) and be a HEADER account (403).") Long parentId,
++            @Schema(pattern = ErpAccountCommands.ERP_REFERENCE_PATTERN, maxLength = 100, example = "GL-1000", description = """
++                    Parent account ERP reference (optional). The parent must already be synced (409 \
++                    `parent.not.synced`), must be a HEADER account (409 `parent.not.header`) and must have the same type (409 \
++                    `parent.type.mismatch`). The account being synced can itself be a HEADER or a DETAIL (sub-ledger) account. Core's \
++                    `parentId` is not accepted (400): parents are always named by ERP reference.""") String parentAccount,
 +
 +            @Schema(minimum = "1", example = "3", description = "Optional tag: a code value from the tag code list for this account type (404 if unknown).") Long tagId) {
 +    }
@@ -565,10 +630,10 @@ index 0000000..9a1a293
 +}
 diff --git a/custom/inkomoko/glsync/service/src/main/java/com/inkomoko/fineract/glsync/domain/GlAccountExternalRefRepository.java b/custom/inkomoko/glsync/service/src/main/java/com/inkomoko/fineract/glsync/domain/GlAccountExternalRefRepository.java
 new file mode 100644
-index 0000000..59beee2
+index 0000000..c038aa4
 --- /dev/null
 +++ b/custom/inkomoko/glsync/service/src/main/java/com/inkomoko/fineract/glsync/domain/GlAccountExternalRefRepository.java
-@@ -0,0 +1,9 @@
+@@ -0,0 +1,11 @@
 +package com.inkomoko.fineract.glsync.domain;
 +
 +import java.util.Optional;
@@ -577,6 +642,8 @@ index 0000000..59beee2
 +public interface GlAccountExternalRefRepository extends JpaRepository<GlAccountExternalRef, Long> {
 +
 +    Optional<GlAccountExternalRef> findByExternalReference(String externalReference);
++
++    Optional<GlAccountExternalRef> findByGlAccountId(Long glAccountId);
 +}
 diff --git a/custom/inkomoko/glsync/service/src/main/java/com/inkomoko/fineract/glsync/domain/PayloadHasher.java b/custom/inkomoko/glsync/service/src/main/java/com/inkomoko/fineract/glsync/domain/PayloadHasher.java
 new file mode 100644
@@ -663,10 +730,10 @@ index 0000000..e700124
 +}
 diff --git a/custom/inkomoko/glsync/service/src/main/java/com/inkomoko/fineract/glsync/exception/GlAccountSyncConflictException.java b/custom/inkomoko/glsync/service/src/main/java/com/inkomoko/fineract/glsync/exception/GlAccountSyncConflictException.java
 new file mode 100644
-index 0000000..c0e1a65
+index 0000000..53e28d8
 --- /dev/null
 +++ b/custom/inkomoko/glsync/service/src/main/java/com/inkomoko/fineract/glsync/exception/GlAccountSyncConflictException.java
-@@ -0,0 +1,24 @@
+@@ -0,0 +1,42 @@
 +package com.inkomoko.fineract.glsync.exception;
 +
 +import org.apache.fineract.infrastructure.core.exception.AbstractPlatformDomainRuleException;
@@ -684,6 +751,24 @@ index 0000000..c0e1a65
 +    public static GlAccountSyncConflictException payloadMismatch(String externalReference) {
 +        return new GlAccountSyncConflictException("error.msg.glaccount.sync.payload.conflict",
 +                "External reference " + externalReference + " is already synced with a different payload", externalReference);
++    }
++
++    public static GlAccountSyncConflictException parentNotSynced(String parentAccount) {
++        return new GlAccountSyncConflictException("error.msg.glaccount.sync.parent.not.synced",
++                "Parent ERP account " + parentAccount + " has not been synced yet; sync parents before their children", parentAccount);
++    }
++
++    public static GlAccountSyncConflictException parentNotHeader(String parentAccount) {
++        return new GlAccountSyncConflictException("error.msg.glaccount.sync.parent.not.header",
++                "Parent ERP account " + parentAccount + " is a DETAIL account; only HEADER accounts can have child accounts",
++                parentAccount);
++    }
++
++    public static GlAccountSyncConflictException parentTypeMismatch(String parentAccount, Integer parentType, Integer childType) {
++        return new GlAccountSyncConflictException("error.msg.glaccount.sync.parent.type.mismatch",
++                "Parent ERP account " + parentAccount + " has type " + parentType + " but this account has type " + childType
++                        + "; a child account must have its parent's type",
++                parentAccount, parentType, childType);
 +    }
 +
 +    public static GlAccountSyncConflictException codeTaken(String glCode) {
@@ -822,10 +907,10 @@ index 0000000..dfa71ee
 +}
 diff --git a/custom/inkomoko/glsync/service/src/main/java/com/inkomoko/fineract/glsync/service/ErpAccountReadService.java b/custom/inkomoko/glsync/service/src/main/java/com/inkomoko/fineract/glsync/service/ErpAccountReadService.java
 new file mode 100644
-index 0000000..7820403
+index 0000000..09ffff6
 --- /dev/null
 +++ b/custom/inkomoko/glsync/service/src/main/java/com/inkomoko/fineract/glsync/service/ErpAccountReadService.java
-@@ -0,0 +1,28 @@
+@@ -0,0 +1,35 @@
 +package com.inkomoko.fineract.glsync.service;
 +
 +import com.inkomoko.fineract.glsync.domain.GlAccountExternalRef;
@@ -834,6 +919,8 @@ index 0000000..7820403
 +import lombok.RequiredArgsConstructor;
 +import org.apache.fineract.accounting.glaccount.domain.GLAccount;
 +import org.apache.fineract.accounting.glaccount.domain.GLAccountRepository;
++import org.apache.fineract.accounting.glaccount.domain.GLAccountType;
++import org.apache.fineract.accounting.glaccount.domain.GLAccountUsage;
 +import org.springframework.stereotype.Service;
 +import org.springframework.transaction.annotation.Transactional;
 +
@@ -845,32 +932,42 @@ index 0000000..7820403
 +    private final GlAccountExternalRefRepository refs;
 +    private final GLAccountRepository glAccounts;
 +
-+    public record ErpAccountView(String erpReference, Long glAccountId, String glCode, String name, String syncedAt) {}
++    public record ErpAccountView(String erpReference, Long glAccountId, String glCode, String name, String type, String usage,
++            String parentAccount, String hierarchy, String syncedAt) {}
 +
 +    @Transactional(readOnly = true)
 +    public ErpAccountView retrieve(String erpReference) {
 +        GlAccountExternalRef ref = refs.findByExternalReference(erpReference).orElseThrow(() -> new ErpAccountNotFoundException(erpReference));
 +        GLAccount glAccount = glAccounts.findById(ref.getGlAccountId()).orElseThrow(() -> new ErpAccountNotFoundException(erpReference));
-+        return new ErpAccountView(erpReference, glAccount.getId(), glAccount.getGlCode(), glAccount.getName(), ref.getCreatedAt().toString());
++        String parentAccount = glAccount.getParent() == null ? null
++                : refs.findByGlAccountId(glAccount.getParent().getId()).map(GlAccountExternalRef::getExternalReference).orElse(null);
++        return new ErpAccountView(erpReference, glAccount.getId(), glAccount.getGlCode(), glAccount.getName(),
++                GLAccountType.fromInt(glAccount.getType()).name(), GLAccountUsage.fromInt(glAccount.getUsage()).name(), parentAccount,
++                glAccount.getHierarchy(), ref.getCreatedAt().toString());
 +    }
 +}
 diff --git a/custom/inkomoko/glsync/service/src/main/java/com/inkomoko/fineract/glsync/service/GlAccountSyncService.java b/custom/inkomoko/glsync/service/src/main/java/com/inkomoko/fineract/glsync/service/GlAccountSyncService.java
 new file mode 100644
-index 0000000..2db4094
+index 0000000..6d286d5
 --- /dev/null
 +++ b/custom/inkomoko/glsync/service/src/main/java/com/inkomoko/fineract/glsync/service/GlAccountSyncService.java
-@@ -0,0 +1,64 @@
+@@ -0,0 +1,108 @@
 +package com.inkomoko.fineract.glsync.service;
 +
 +import com.inkomoko.fineract.glsync.domain.GlAccountExternalRef;
 +import com.inkomoko.fineract.glsync.domain.GlAccountExternalRefRepository;
 +import com.inkomoko.fineract.glsync.domain.PayloadHasher;
 +import com.inkomoko.fineract.glsync.exception.GlAccountSyncConflictException;
++import com.google.gson.JsonObject;
++import com.google.gson.JsonParser;
++import java.util.LinkedHashMap;
 +import java.util.Map;
++import java.util.Objects;
 +import java.util.Optional;
 +import lombok.RequiredArgsConstructor;
 +import org.apache.commons.lang3.StringUtils;
 +import lombok.extern.slf4j.Slf4j;
++import org.apache.fineract.accounting.glaccount.domain.GLAccount;
 +import org.apache.fineract.accounting.glaccount.domain.GLAccountRepository;
 +import org.apache.fineract.accounting.glaccount.service.GLAccountWritePlatformService;
 +import org.apache.fineract.infrastructure.core.api.JsonCommand;
@@ -888,6 +985,8 @@ index 0000000..2db4094
 +@Service
 +@RequiredArgsConstructor
 +public class GlAccountSyncService {
++
++    static final String PARENT_ACCOUNT = "parentAccount";
 +
 +    private final AdvisoryLocks locks;
 +    private final GlAccountExternalRefRepository refs;
@@ -912,24 +1011,61 @@ index 0000000..2db4094
 +            throw GlAccountSyncConflictException.codeTaken(glCode);
 +        }
 +
-+        CommandProcessingResult created = coreGlAccountService.createGLAccount(command);
++        String parentAccount = StringUtils.trimToNull(command.stringValueOfParameterNamed(PARENT_ACCOUNT));
++        JsonCommand coreCommand = parentAccount == null ? command
++                : withCoreParentId(command, resolveHeaderParent(parentAccount, command.integerValueSansLocaleOfParameterNamed("type")));
++
++        CommandProcessingResult created = coreGlAccountService.createGLAccount(coreCommand);
 +        refs.saveAndFlush(new GlAccountExternalRef(created.getResourceId(), erpReference, payloadHash));
 +        log.info("GL sync created: {} -> GL account {}", erpReference, created.getResourceId());
 +        return resultFor(command, erpReference, glCode, created.getResourceId(), "CREATED");
 +    }
 +
++    /**
++     * Header/detail rule: a parent must be a HEADER account (a ledger heading nothing posts to) of the same type. Core
++     * checks the header rule but not the type, so a child INCOME account could otherwise sit under an ASSET heading.
++     */
++    private GLAccount resolveHeaderParent(String parentAccount, Integer childType) {
++        GlAccountExternalRef parentLink = refs.findByExternalReference(parentAccount)
++                .orElseThrow(() -> GlAccountSyncConflictException.parentNotSynced(parentAccount));
++        GLAccount parent = glAccounts.findById(parentLink.getGlAccountId())
++                .orElseThrow(() -> GlAccountSyncConflictException.parentNotSynced(parentAccount));
++        if (!parent.isHeaderAccount()) {
++            throw GlAccountSyncConflictException.parentNotHeader(parentAccount);
++        }
++        if (!Objects.equals(parent.getType(), childType)) {
++            throw GlAccountSyncConflictException.parentTypeMismatch(parentAccount, parent.getType(), childType);
++        }
++        return parent;
++    }
++
++    /** Core only understands its own parentId; swap the ERP reference for it, keeping the original command's identity. */
++    private static JsonCommand withCoreParentId(JsonCommand command, GLAccount parent) {
++        JsonObject body = JsonParser.parseString(command.json()).getAsJsonObject();
++        body.remove(PARENT_ACCOUNT);
++        body.addProperty("parentId", parent.getId());
++        return JsonCommand.fromExistingCommand(command, body);
++    }
++
 +    private static CommandProcessingResult resultFor(JsonCommand command, String erpReference, String glCode, Long glAccountId,
 +            String outcome) {
-+        return new CommandProcessingResultBuilder().withCommandId(command.commandId()).withEntityId(glAccountId)
-+                .with(Map.of("erpReference", erpReference, "glCode", glCode, "outcome", outcome)).build();
++        Map<String, Object> changes = new LinkedHashMap<>();
++        changes.put("erpReference", erpReference);
++        changes.put("glCode", glCode);
++        changes.put("outcome", outcome);
++        String parentAccount = StringUtils.trimToNull(command.stringValueOfParameterNamed(PARENT_ACCOUNT));
++        if (parentAccount != null) {
++            changes.put("parentAccount", parentAccount);
++        }
++        return new CommandProcessingResultBuilder().withCommandId(command.commandId()).withEntityId(glAccountId).with(changes).build();
 +    }
 +}
 diff --git a/custom/inkomoko/glsync/service/src/test/java/com/inkomoko/fineract/glsync/api/ErpAccountCommandsTest.java b/custom/inkomoko/glsync/service/src/test/java/com/inkomoko/fineract/glsync/api/ErpAccountCommandsTest.java
 new file mode 100644
-index 0000000..92a7699
+index 0000000..43af81f
 --- /dev/null
 +++ b/custom/inkomoko/glsync/service/src/test/java/com/inkomoko/fineract/glsync/api/ErpAccountCommandsTest.java
-@@ -0,0 +1,108 @@
+@@ -0,0 +1,132 @@
 +package com.inkomoko.fineract.glsync.api;
 +
 +import static org.assertj.core.api.Assertions.assertThat;
@@ -1027,6 +1163,30 @@ index 0000000..92a7699
 +    }
 +
 +    @Test
++    @DisplayName("accepts a parent named by its ERP reference")
++    void acceptsParentAccount() {
++        String body = BODY.replace("}", ",\"parentAccount\":\"GL-1000\"}");
++        assertThatCode(() -> ErpAccountCommands.syncCommand("GL-1200", body)).doesNotThrowAnyException();
++    }
++
++    @ParameterizedTest(name = "{0} -> {1}")
++    @org.junit.jupiter.params.provider.CsvSource(delimiter = '|', value = { //
++            "\"parentId\":5                   | parentId           | validation.msg.erpaccount.parentId.not.supported", //
++            "\"parentAccount\":\"GL 1000\" | parentAccount | validation.msg.erpaccount.parentAccount.invalid", //
++            "\"parentAccount\":\"GL-1200\" | parentAccount | validation.msg.erpaccount.parentAccount.self" })
++    @DisplayName("rejects a Fineract parentId, a malformed parent reference, and an account that is its own parent")
++    void rejectsInvalidParent(String field, String parameter, String code) {
++        String body = BODY.replace("}", "," + field.trim() + "}");
++
++        assertThatThrownBy(() -> ErpAccountCommands.syncCommand("GL-1200", body)).isInstanceOf(PlatformApiDataValidationException.class)
++                .satisfies(e -> {
++                    var error = ((PlatformApiDataValidationException) e).getErrors().get(0);
++                    assertThat(error.getParameterName()).isEqualTo(parameter);
++                    assertThat(error.getUserMessageGlobalisationCode()).isEqualTo(code);
++                });
++    }
++
++    @Test
 +    @DisplayName("leaves malformed JSON to core's own parser")
 +    void malformedJsonLeftToCore() {
 +        assertThatCode(() -> ErpAccountCommands.syncCommand("GL-1100", "{not json")).doesNotThrowAnyException();
@@ -1103,10 +1263,10 @@ index 0000000..70062cb
 +}
 diff --git a/custom/inkomoko/glsync/service/src/test/java/com/inkomoko/fineract/glsync/integration/ErpAccountsApiIntegrationTest.java b/custom/inkomoko/glsync/service/src/test/java/com/inkomoko/fineract/glsync/integration/ErpAccountsApiIntegrationTest.java
 new file mode 100644
-index 0000000..99b8414
+index 0000000..058b3c3
 --- /dev/null
 +++ b/custom/inkomoko/glsync/service/src/test/java/com/inkomoko/fineract/glsync/integration/ErpAccountsApiIntegrationTest.java
-@@ -0,0 +1,235 @@
+@@ -0,0 +1,296 @@
 +package com.inkomoko.fineract.glsync.integration;
 +
 +import static org.assertj.core.api.Assertions.assertThat;
@@ -1286,7 +1446,68 @@ index 0000000..99b8414
 +        }
 +    }
 +
++    @Test
++    @DisplayName("parent accounts: a DETAIL sub-ledger syncs under a HEADER parent of the same type, and Fineract records the hierarchy")
++    void syncsChildUnderHeaderParent() throws Exception {
++        String parentRef = uniqueRef();
++        String childRef = uniqueRef();
++        Reply parent = put(ADMIN, parentRef, account(uniqueCode(), "Assets", 1, 2, null));
++
++        Reply child = put(ADMIN, childRef, account(uniqueCode(), "Loan Receivable", 1, 1, parentRef));
++
++        assertThat(parent.status()).isEqualTo(200);
++        assertThat(child.status()).isEqualTo(200);
++        assertThat(child.body().get("parentAccount").getAsString()).isEqualTo(parentRef);
++        long parentId = parent.body().get("glAccountId").getAsLong();
++        long childId = child.body().get("glAccountId").getAsLong();
++
++        JsonObject childView = get(ADMIN, "/erp-accounts/" + childRef).body();
++        assertThat(childView.get("usage").getAsString()).isEqualTo("DETAIL");
++        assertThat(childView.get("type").getAsString()).isEqualTo("ASSET");
++        assertThat(childView.get("parentAccount").getAsString()).isEqualTo(parentRef);
++        JsonObject parentView = get(ADMIN, "/erp-accounts/" + parentRef).body();
++        assertThat(parentView.get("usage").getAsString()).isEqualTo("HEADER");
++        assertThat(parentView.get("glAccountId").getAsLong()).isEqualTo(parentId);
++        // Core's rule (GLAccount.generateHierarchy): child path = parent path + child id + "."; a top-level account's path is "."
++        assertThat(childView.get("hierarchy").getAsString()).isEqualTo(parentView.get("hierarchy").getAsString() + childId + ".");
++    }
++
++    @Test
++    @DisplayName("parent accounts: not synced, a DETAIL parent, or a parent of another type are rejected with 409; a Fineract parentId with 400")
++    void rejectsInvalidParents() throws Exception {
++        String detailRef = uniqueRef();
++        put(ADMIN, detailRef, account(uniqueCode(), "Bank", 1, 1, null));
++        String incomeHeaderRef = uniqueRef();
++        put(ADMIN, incomeHeaderRef, account(uniqueCode(), "Income", 4, 2, null));
++
++        Map<String, String> expected = Map.of( //
++                uniqueRef(), "error.msg.glaccount.sync.parent.not.synced", //
++                detailRef, "error.msg.glaccount.sync.parent.not.header", //
++                incomeHeaderRef, "error.msg.glaccount.sync.parent.type.mismatch");
++        for (Map.Entry<String, String> parent : expected.entrySet()) {
++            String childRef = uniqueRef();
++            String code = uniqueCode();
++            Reply reply = put(ADMIN, childRef, account(code, "Child", 1, 1, parent.getKey()));
++
++            assertThat(reply.status()).as(parent.getValue()).isEqualTo(409);
++            assertThat(reply.body().get("userMessageGlobalisationCode").getAsString()).isEqualTo(parent.getValue());
++            assertThat(glAccountsWithCode(code)).as(parent.getValue()).isZero();
++        }
++
++        Reply rawParentId = put(ADMIN, uniqueRef(),
++                "{\"name\":\"Child\",\"glCode\":\"" + uniqueCode() + "\",\"type\":1,\"usage\":1,\"manualEntriesAllowed\":false,\"parentId\":1}");
++        assertThat(rawParentId.status()).isEqualTo(400);
++        assertThat(rawParentId.body().getAsJsonArray("errors").get(0).getAsJsonObject().get("parameterName").getAsString())
++                .isEqualTo("parentId");
++    }
++
 +    // --- helpers
++
++    private static String account(String code, String name, int type, int usage, String parentAccount) {
++        return "{\"name\":\"" + name + "\",\"glCode\":\"" + code + "\",\"type\":" + type + ",\"usage\":" + usage
++                + ",\"manualEntriesAllowed\":false" + (parentAccount == null ? "" : ",\"parentAccount\":\"" + parentAccount + "\"")
++                + "}";
++    }
 +
 +    private static String account(String code, String name) {
 +        return "{\"name\":\"" + name + "\",\"glCode\":\"" + code + "\",\"type\":1,\"usage\":1,\"manualEntriesAllowed\":false}";
@@ -1390,10 +1611,10 @@ index 0000000..69e922c
 +}
 diff --git a/custom/inkomoko/glsync/service/src/test/java/com/inkomoko/fineract/glsync/service/GlAccountSyncServiceTest.java b/custom/inkomoko/glsync/service/src/test/java/com/inkomoko/fineract/glsync/service/GlAccountSyncServiceTest.java
 new file mode 100644
-index 0000000..b9979b9
+index 0000000..5e6960a
 --- /dev/null
 +++ b/custom/inkomoko/glsync/service/src/test/java/com/inkomoko/fineract/glsync/service/GlAccountSyncServiceTest.java
-@@ -0,0 +1,142 @@
+@@ -0,0 +1,222 @@
 +package com.inkomoko.fineract.glsync.service;
 +
 +import static org.assertj.core.api.Assertions.assertThat;
@@ -1529,6 +1750,86 @@ index 0000000..b9979b9
 +        var order = org.mockito.Mockito.inOrder(locks, refs);
 +        order.verify(locks).lockInOrder("glsync:ref:GL-1200", "glsync:code:1200");
 +        order.verify(refs).findByExternalReference("GL-1200");
++    }
++
++    @Test
++    @DisplayName("child account: resolves the parent's ERP reference and hands core its parentId, not the ERP reference")
++    void createsChildUnderHeaderParent() {
++        String body = BODY.replace("}", ",\"parentAccount\":\"GL-1000\"}");
++        JsonCommand command = command(body);
++        GLAccount parent = headerParent(7L, 1, true);
++        when(refs.findByExternalReference("GL-1200")).thenReturn(Optional.empty());
++        when(glAccounts.findOneByGlCode("1200")).thenReturn(Optional.empty());
++        when(refs.findByExternalReference("GL-1000")).thenReturn(Optional.of(new GlAccountExternalRef(7L, "GL-1000", "hash")));
++        when(glAccounts.findById(7L)).thenReturn(Optional.of(parent));
++        when(coreGlAccountService.createGLAccount(any())).thenReturn(new CommandProcessingResultBuilder().withEntityId(42L).build());
++
++        CommandProcessingResult result = service.sync("GL-1200", command);
++
++        ArgumentCaptor<JsonCommand> sentToCore = ArgumentCaptor.forClass(JsonCommand.class);
++        verify(coreGlAccountService).createGLAccount(sentToCore.capture());
++        var coreBody = JsonParser.parseString(sentToCore.getValue().json()).getAsJsonObject();
++        assertThat(coreBody.get("parentId").getAsLong()).isEqualTo(7L);
++        assertThat(coreBody.has("parentAccount")).isFalse();
++        assertThat(result.getChanges()).containsEntry("parentAccount", "GL-1000").containsEntry("outcome", "CREATED");
++        ArgumentCaptor<GlAccountExternalRef> saved = ArgumentCaptor.forClass(GlAccountExternalRef.class);
++        verify(refs).saveAndFlush(saved.capture());
++        assertThat(saved.getValue().getPayloadHash()).isEqualTo(PayloadHasher.sha256(body));
++    }
++
++    @Test
++    @DisplayName("parent not synced yet: 409 and nothing written")
++    void rejectsUnsyncedParent() {
++        String body = BODY.replace("}", ",\"parentAccount\":\"GL-1000\"}");
++        when(refs.findByExternalReference("GL-1200")).thenReturn(Optional.empty());
++        when(glAccounts.findOneByGlCode("1200")).thenReturn(Optional.empty());
++        when(refs.findByExternalReference("GL-1000")).thenReturn(Optional.empty());
++
++        assertThatThrownBy(() -> service.sync("GL-1200", command(body))).isInstanceOf(GlAccountSyncConflictException.class)
++                .hasFieldOrPropertyWithValue("globalisationMessageCode", "error.msg.glaccount.sync.parent.not.synced");
++        verify(coreGlAccountService, never()).createGLAccount(any());
++        verify(refs, never()).saveAndFlush(any());
++    }
++
++    @Test
++    @DisplayName("parent is a DETAIL (sub-ledger) account: 409, only HEADER accounts can have children")
++    void rejectsDetailParent() {
++        String body = BODY.replace("}", ",\"parentAccount\":\"GL-1100\"}");
++        when(refs.findByExternalReference("GL-1200")).thenReturn(Optional.empty());
++        when(glAccounts.findOneByGlCode("1200")).thenReturn(Optional.empty());
++        when(refs.findByExternalReference("GL-1100")).thenReturn(Optional.of(new GlAccountExternalRef(8L, "GL-1100", "hash")));
++        GLAccount detail = mock(GLAccount.class);
++        when(detail.isHeaderAccount()).thenReturn(false);
++        when(glAccounts.findById(8L)).thenReturn(Optional.of(detail));
++
++        assertThatThrownBy(() -> service.sync("GL-1200", command(body))).isInstanceOf(GlAccountSyncConflictException.class)
++                .hasFieldOrPropertyWithValue("globalisationMessageCode", "error.msg.glaccount.sync.parent.not.header");
++        verify(coreGlAccountService, never()).createGLAccount(any());
++    }
++
++    @Test
++    @DisplayName("parent of another type: 409, a child must have its parent's type (core doesn't check this)")
++    void rejectsParentOfAnotherType() {
++        String body = BODY.replace("}", ",\"parentAccount\":\"GL-4000\"}");
++        when(refs.findByExternalReference("GL-1200")).thenReturn(Optional.empty());
++        when(glAccounts.findOneByGlCode("1200")).thenReturn(Optional.empty());
++        when(refs.findByExternalReference("GL-4000")).thenReturn(Optional.of(new GlAccountExternalRef(9L, "GL-4000", "hash")));
++        GLAccount incomeHeader = mock(GLAccount.class);
++        when(incomeHeader.isHeaderAccount()).thenReturn(true);
++        when(incomeHeader.getType()).thenReturn(4);
++        when(glAccounts.findById(9L)).thenReturn(Optional.of(incomeHeader));
++
++        assertThatThrownBy(() -> service.sync("GL-1200", command(body))).isInstanceOf(GlAccountSyncConflictException.class)
++                .hasFieldOrPropertyWithValue("globalisationMessageCode", "error.msg.glaccount.sync.parent.type.mismatch");
++        verify(coreGlAccountService, never()).createGLAccount(any());
++    }
++
++    private static GLAccount headerParent(Long id, int type, boolean header) {
++        GLAccount parent = mock(GLAccount.class);
++        when(parent.getId()).thenReturn(id);
++        when(parent.getType()).thenReturn(type);
++        when(parent.isHeaderAccount()).thenReturn(header);
++        return parent;
 +    }
 +
 +    private static JsonCommand command(String json) {
