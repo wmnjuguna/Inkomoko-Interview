@@ -1,0 +1,18 @@
+dependencies {
+    implementation(project(':fineract-core'))
+    implementation(project(':fineract-accounting'))
+    implementation(project(':fineract-provider'))
+    implementation(
+            'org.springframework.boot:spring-boot-starter-web',
+            'org.springframework.boot:spring-boot-starter-security',
+            'jakarta.ws.rs:jakarta.ws.rs-api',
+            'io.swagger.core.v3:swagger-annotations-jakarta',
+            'com.google.code.gson:gson',
+            )
+    implementation('org.springframework.boot:spring-boot-starter-data-jpa') {
+        exclude group: 'org.hibernate'
+    }
+    implementation('org.eclipse.persistence:org.eclipse.persistence.jpa') {
+        exclude group: 'org.eclipse.persistence', module: 'jakarta.persistence'
+    }
+}

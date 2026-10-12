@@ -1,0 +1,8 @@
+description = 'Inkomoko Fineract GL Sync Service'
+group = 'com.inkomoko.fineract'
+
+base {
+    archivesName = 'inkomoko-fineract-glsync-service'
+}
+
+apply from: 'dependencies.gradle'
