@@ -30,10 +30,10 @@ A failing unit test fails the image build. The integration tests only speak HTTP
 | Kind | Class | What it proves |
 |---|---|---|
 | Unit | `PayloadHasherTest` | "Same payload" ignores key order, whitespace, nulls and `1` vs `"1"`; a changed value changes the hash |
-| Unit | `ErpAccountCommandsTest` | The command is `GLACCOUNT`/`SYNC` guarded by `SYNC_GLACCOUNT`; reference validation; `usage` is required |
+| Unit | `ErpAccountCommandsTest` | The command is `GLACCOUNT`/`SYNC` guarded by `SYNC_GLACCOUNT`; reference validation; `type` only 1–5 and `usage` only 1–2, with core's error codes and the right field named |
 | Unit | `GlAccountSyncServiceTest` | Create, unchanged, payload conflict, GL-code conflict, trimming, and locks taken before any read |
 | Unit | `AdvisoryLocksTest` | Locks are taken in sorted order, so two requests can't deadlock |
-| Integration | `ErpAccountsApiIntegrationTest` | Against real Fineract and Postgres: behaviours 1–4, GL-code conflict, 403 without permission, 10 parallel syncs create one account, `Idempotency-Key` replay, 404 and 400 cases |
+| Integration | `ErpAccountsApiIntegrationTest` | Against real Fineract and Postgres: behaviours 1–4, GL-code conflict, unsupported types and usages rejected with nothing written, 403 without permission, 10 parallel syncs create one account, `Idempotency-Key` replay, 404 and 400 cases |
 
 ## Evidence
 
@@ -41,7 +41,7 @@ A failing unit test fails the image build. The integration tests only speak HTTP
 |---|---|
 | `build.log` | Image build from the pinned tag, with every unit test result |
 | `integration-test.log` | Integration test results against the running image |
-| `patch/glsync.diff` | `git diff 1.15.0` with the module added: 30 new files, 1,399 lines, nothing outside `custom/inkomoko/`. Check with `git apply --check patch/glsync.diff` on a clean 1.15.0 checkout. |
+| `patch/glsync.diff` | `git diff 1.15.0` with the module added: 30 new files, 1,492 lines, nothing outside `custom/inkomoko/`. Check with `git apply --check patch/glsync.diff` on a clean 1.15.0 checkout. |
 | `../docs/openapi/fineract-erp-accounts.yaml` | The module's OpenAPI spec, as served at `/fineract-provider/glsync.json` |
 
 ## Developing in an IDE

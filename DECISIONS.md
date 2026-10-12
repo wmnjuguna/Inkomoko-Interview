@@ -32,6 +32,8 @@ Checked on 1.15.0: `GLAccount` has no external-id column, so all six Part A beha
 
 **Concurrency: advisory locks, not "retry after a unique violation".** Postgres aborts the whole command transaction on a constraint violation, so the handler can't recover from one. The service takes `pg_advisory_xact_lock` on the reference and GL code (sorted) through Fineract's `JdbcTemplate`, which is bound to the transaction's own connection. Fineract's dialect starts database transactions lazily, so a plain read could otherwise land on another connection. Verified: 10 parallel identical calls give 1 CREATED, 9 UNCHANGED and one GL account. Advisory locks tie the module to Postgres, which this deployment pins.
 
+**Account type and usage are validated in the module.** `acc_gl_account` has only NOT NULL on `classification_enum` and `account_usage`, no range constraint, so the database alone would accept type 9. The module rejects `type` outside 1–5 and `usage` outside 1–2 before Fineract processes the request. The ranges come from core's `GLAccountType`/`GLAccountUsage` enums and the error codes are core's, so the contract matches core `POST /glaccounts`. A database CHECK constraint was considered and not added, because it would change a core table's schema from the module.
+
 **The migration creates `SYNC_GLACCOUNT`; the setup script grants it.** Role setup stays in one place (Part B).
 
 **409 for conflicts.** Core maps rule violations to 403 (`PlatformDomainRuleExceptionMapper`) and has no 409 mapper, so the module registers its own.

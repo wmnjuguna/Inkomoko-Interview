@@ -46,7 +46,7 @@ The bootstrap step (office, currency, GL sync, loan product, API user) runs as a
 
 | Language | Command | Covers |
 |---|---|---|
-| Java | Unit: run by every Fineract image build (see below). Integration: `docker run --rm --network inkomoko-fineract_default -e FINERACT_URL=http://fineract:8080 fineract-inkomoko-it:1.15.0` | 28 unit tests and 7 integration tests for the GL sync module. Details and build commands: [fineract-customization/BUILD.md](fineract-customization/BUILD.md) |
+| Java | Unit: run by every Fineract image build (see below). Integration: `docker run --rm --network inkomoko-fineract_default -e FINERACT_URL=http://fineract:8080 fineract-inkomoko-it:1.15.0` | 43 unit tests and 8 integration tests for the GL sync module. Details and build commands: [fineract-customization/BUILD.md](fineract-customization/BUILD.md) |
 | Python | *(planned)* | ruff, mypy, pytest: unit, integration, failure, concurrency |
 
 ```bash
