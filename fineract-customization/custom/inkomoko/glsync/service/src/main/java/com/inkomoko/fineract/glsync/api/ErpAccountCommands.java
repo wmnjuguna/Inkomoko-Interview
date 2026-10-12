@@ -27,6 +27,7 @@ public final class ErpAccountCommands {
     public static CommandWrapper syncCommand(String erpReference, String json) {
         validate(erpReference);
         validateClassification(json);
+        validateParent(erpReference, json);
         return new CommandWrapper(null, null, null, null, null, ACTION, ENTITY, null, null, HREF_PREFIX + erpReference, json, null, null,
                 null, null, null, null, null, null, null);
     }
@@ -60,6 +61,46 @@ public final class ErpAccountCommands {
         checkInRange(body.getAsJsonObject(), "usage", GLAccountUsage.getMinValue(), GLAccountUsage.getMaxValue(), errors);
         if (!errors.isEmpty()) {
             throw new PlatformApiDataValidationException("validation.msg.validation.errors.exist", "Validation errors exist.", errors);
+        }
+    }
+
+    /**
+     * The parent is named by its ERP reference, never by a Fineract id, so Fineract ids stay out of the contract. The
+     * module resolves it to core's parentId.
+     */
+    static void validateParent(String erpReference, String json) {
+        JsonObject body = parseObject(json);
+        if (body == null) {
+            return;
+        }
+        List<ApiParameterError> errors = new ArrayList<>();
+        if (body.has("parentId")) {
+            errors.add(ApiParameterError.parameterError("validation.msg.erpaccount.parentId.not.supported",
+                    "Name the parent with `parentAccount`, not a Fineract `parentId`.", "parentId", (Object) body.get("parentId").toString()));
+        }
+        JsonElement parent = body.get("parentAccount");
+        if (parent != null && !parent.isJsonNull()) {
+            String parentReference = parent.isJsonPrimitive() ? parent.getAsString().trim() : "";
+            if (!ERP_REFERENCE.matcher(parentReference).matches()) {
+                errors.add(ApiParameterError.parameterError("validation.msg.erpaccount.parentAccount.invalid",
+                        "parentAccount must be 1-100 characters of letters, digits, '.', '_', ':' or '-'", "parentAccount",
+                        (Object) parent.toString()));
+            } else if (parentReference.equals(erpReference)) {
+                errors.add(ApiParameterError.parameterError("validation.msg.erpaccount.parentAccount.self",
+                        "An account can't be its own parent.", "parentAccount", (Object) parentReference));
+            }
+        }
+        if (!errors.isEmpty()) {
+            throw new PlatformApiDataValidationException("validation.msg.validation.errors.exist", "Validation errors exist.", errors);
+        }
+    }
+
+    private static JsonObject parseObject(String json) {
+        try {
+            JsonElement body = JsonParser.parseString(json == null ? "" : json);
+            return body.isJsonObject() ? body.getAsJsonObject() : null;
+        } catch (JsonParseException e) {
+            return null; // malformed JSON is reported by core's own parser
         }
     }
 

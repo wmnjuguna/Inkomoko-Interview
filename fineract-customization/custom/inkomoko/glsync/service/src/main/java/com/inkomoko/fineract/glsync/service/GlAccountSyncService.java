@@ -4,11 +4,16 @@ import com.inkomoko.fineract.glsync.domain.GlAccountExternalRef;
 import com.inkomoko.fineract.glsync.domain.GlAccountExternalRefRepository;
 import com.inkomoko.fineract.glsync.domain.PayloadHasher;
 import com.inkomoko.fineract.glsync.exception.GlAccountSyncConflictException;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
+import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import lombok.RequiredArgsConstructor;
 import org.apache.commons.lang3.StringUtils;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.fineract.accounting.glaccount.domain.GLAccount;
 import org.apache.fineract.accounting.glaccount.domain.GLAccountRepository;
 import org.apache.fineract.accounting.glaccount.service.GLAccountWritePlatformService;
 import org.apache.fineract.infrastructure.core.api.JsonCommand;
@@ -26,6 +31,8 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 @RequiredArgsConstructor
 public class GlAccountSyncService {
+
+    static final String PARENT_ACCOUNT = "parentAccount";
 
     private final AdvisoryLocks locks;
     private final GlAccountExternalRefRepository refs;
@@ -50,15 +57,52 @@ public class GlAccountSyncService {
             throw GlAccountSyncConflictException.codeTaken(glCode);
         }
 
-        CommandProcessingResult created = coreGlAccountService.createGLAccount(command);
+        String parentAccount = StringUtils.trimToNull(command.stringValueOfParameterNamed(PARENT_ACCOUNT));
+        JsonCommand coreCommand = parentAccount == null ? command
+                : withCoreParentId(command, resolveHeaderParent(parentAccount, command.integerValueSansLocaleOfParameterNamed("type")));
+
+        CommandProcessingResult created = coreGlAccountService.createGLAccount(coreCommand);
         refs.saveAndFlush(new GlAccountExternalRef(created.getResourceId(), erpReference, payloadHash));
         log.info("GL sync created: {} -> GL account {}", erpReference, created.getResourceId());
         return resultFor(command, erpReference, glCode, created.getResourceId(), "CREATED");
     }
 
+    /**
+     * Header/detail rule: a parent must be a HEADER account (a ledger heading nothing posts to) of the same type. Core
+     * checks the header rule but not the type, so a child INCOME account could otherwise sit under an ASSET heading.
+     */
+    private GLAccount resolveHeaderParent(String parentAccount, Integer childType) {
+        GlAccountExternalRef parentLink = refs.findByExternalReference(parentAccount)
+                .orElseThrow(() -> GlAccountSyncConflictException.parentNotSynced(parentAccount));
+        GLAccount parent = glAccounts.findById(parentLink.getGlAccountId())
+                .orElseThrow(() -> GlAccountSyncConflictException.parentNotSynced(parentAccount));
+        if (!parent.isHeaderAccount()) {
+            throw GlAccountSyncConflictException.parentNotHeader(parentAccount);
+        }
+        if (!Objects.equals(parent.getType(), childType)) {
+            throw GlAccountSyncConflictException.parentTypeMismatch(parentAccount, parent.getType(), childType);
+        }
+        return parent;
+    }
+
+    /** Core only understands its own parentId; swap the ERP reference for it, keeping the original command's identity. */
+    private static JsonCommand withCoreParentId(JsonCommand command, GLAccount parent) {
+        JsonObject body = JsonParser.parseString(command.json()).getAsJsonObject();
+        body.remove(PARENT_ACCOUNT);
+        body.addProperty("parentId", parent.getId());
+        return JsonCommand.fromExistingCommand(command, body);
+    }
+
     private static CommandProcessingResult resultFor(JsonCommand command, String erpReference, String glCode, Long glAccountId,
             String outcome) {
-        return new CommandProcessingResultBuilder().withCommandId(command.commandId()).withEntityId(glAccountId)
-                .with(Map.of("erpReference", erpReference, "glCode", glCode, "outcome", outcome)).build();
+        Map<String, Object> changes = new LinkedHashMap<>();
+        changes.put("erpReference", erpReference);
+        changes.put("glCode", glCode);
+        changes.put("outcome", outcome);
+        String parentAccount = StringUtils.trimToNull(command.stringValueOfParameterNamed(PARENT_ACCOUNT));
+        if (parentAccount != null) {
+            changes.put("parentAccount", parentAccount);
+        }
+        return new CommandProcessingResultBuilder().withCommandId(command.commandId()).withEntityId(glAccountId).with(changes).build();
     }
 }

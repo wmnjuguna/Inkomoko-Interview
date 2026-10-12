@@ -36,7 +36,11 @@ final class ErpAccountsApiResourceSwagger {
 
             @Schema(maxLength = 500, example = "Mirrored from ERP account GL-1200", description = "Optional free text.") String description,
 
-            @Schema(minimum = "1", example = "10", description = "Optional Fineract id of the parent account. It must exist (404) and be a HEADER account (403).") Long parentId,
+            @Schema(pattern = ErpAccountCommands.ERP_REFERENCE_PATTERN, maxLength = 100, example = "GL-1000", description = """
+                    Parent account ERP reference (optional). The parent must already be synced (409 \
+                    `parent.not.synced`), must be a HEADER account (409 `parent.not.header`) and must have the same type (409 \
+                    `parent.type.mismatch`). The account being synced can itself be a HEADER or a DETAIL (sub-ledger) account. Core's \
+                    `parentId` is not accepted (400): parents are always named by ERP reference.""") String parentAccount,
 
             @Schema(minimum = "1", example = "3", description = "Optional tag: a code value from the tag code list for this account type (404 if unknown).") Long tagId) {
     }

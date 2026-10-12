@@ -16,6 +16,15 @@ public record ErpAccount(
 
         @Schema(requiredMode = RequiredMode.REQUIRED, example = "Loan Receivable", description = "The name as currently stored in Fineract.") String name,
 
+        @Schema(requiredMode = RequiredMode.REQUIRED, allowableValues = { "ASSET", "LIABILITY", "EQUITY", "INCOME", "EXPENSE" }, example = "ASSET") String type,
+
+        @Schema(requiredMode = RequiredMode.REQUIRED, allowableValues = { "DETAIL",
+                "HEADER" }, example = "DETAIL", description = "`DETAIL`: a sub-ledger that transactions post to. `HEADER`: a ledger heading that groups other accounts; nothing posts to it.") String usage,
+
+        @Schema(example = "GL-1000", description = "Parent account ERP reference; absent for a top-level account.") String parentAccount,
+
+        @Schema(requiredMode = RequiredMode.REQUIRED, example = ".7.", description = "Fineract's hierarchy path, as stored in `acc_gl_account.hierarchy`: a top-level account is `.`, and each child adds its own GL account id to its parent's path (`.7.`, then `.7.12.`).") String hierarchy,
+
         @Schema(requiredMode = RequiredMode.REQUIRED, example = "2026-10-12T14:30:00Z", description = "When the mapping was created, UTC, ISO-8601.") String syncedAt) {
 
     private static final Gson GSON = new Gson();

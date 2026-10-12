@@ -6,4 +6,6 @@ import org.springframework.data.jpa.repository.JpaRepository;
 public interface GlAccountExternalRefRepository extends JpaRepository<GlAccountExternalRef, Long> {
 
     Optional<GlAccountExternalRef> findByExternalReference(String externalReference);
+
+    Optional<GlAccountExternalRef> findByGlAccountId(Long glAccountId);
 }

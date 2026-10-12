@@ -17,6 +17,24 @@ public class GlAccountSyncConflictException extends AbstractPlatformDomainRuleEx
                 "External reference " + externalReference + " is already synced with a different payload", externalReference);
     }
 
+    public static GlAccountSyncConflictException parentNotSynced(String parentAccount) {
+        return new GlAccountSyncConflictException("error.msg.glaccount.sync.parent.not.synced",
+                "Parent ERP account " + parentAccount + " has not been synced yet; sync parents before their children", parentAccount);
+    }
+
+    public static GlAccountSyncConflictException parentNotHeader(String parentAccount) {
+        return new GlAccountSyncConflictException("error.msg.glaccount.sync.parent.not.header",
+                "Parent ERP account " + parentAccount + " is a DETAIL account; only HEADER accounts can have child accounts",
+                parentAccount);
+    }
+
+    public static GlAccountSyncConflictException parentTypeMismatch(String parentAccount, Integer parentType, Integer childType) {
+        return new GlAccountSyncConflictException("error.msg.glaccount.sync.parent.type.mismatch",
+                "Parent ERP account " + parentAccount + " has type " + parentType + " but this account has type " + childType
+                        + "; a child account must have its parent's type",
+                parentAccount, parentType, childType);
+    }
+
     public static GlAccountSyncConflictException codeTaken(String glCode) {
         return new GlAccountSyncConflictException("error.msg.glaccount.sync.code.conflict",
                 "GL code " + glCode + " already belongs to another GL account", glCode);

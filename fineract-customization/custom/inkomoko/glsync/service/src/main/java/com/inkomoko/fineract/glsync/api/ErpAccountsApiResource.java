@@ -65,16 +65,24 @@ public class ErpAccountsApiResource {
                     {"httpStatusCode": "400", "userMessageGlobalisationCode": "validation.msg.validation.errors.exist", "errors": [{"userMessageGlobalisationCode": "validation.msg.GLAccount.glCode.cannot.be.blank", "parameterName": "glCode"}]}"""),
             @ExampleObject(name = "unsupported field", value = """
                     {"httpStatusCode": "400", "userMessageGlobalisationCode": "validation.msg.validation.errors.exist", "errors": [{"userMessageGlobalisationCode": "error.msg.parameter.unsupported", "parameterName": "currency"}]}"""),
+            @ExampleObject(name = "Fineract parentId instead of parentAccount", value = """
+                    {"httpStatusCode": "400", "userMessageGlobalisationCode": "validation.msg.validation.errors.exist", "errors": [{"userMessageGlobalisationCode": "validation.msg.erpaccount.parentId.not.supported", "parameterName": "parentId"}]}"""),
             @ExampleObject(name = "invalid ERP reference", value = """
                     {"httpStatusCode": "400", "errors": [{"userMessageGlobalisationCode": "validation.msg.erpaccount.erpReference.invalid", "parameterName": "erpReference"}]}""") }))
     @ApiResponse(responseCode = "401", description = "Missing or invalid credentials or tenant")
     @ApiResponse(responseCode = "403", description = "User lacks permission SYNC_GLACCOUNT, or parentId is not a HEADER account", content = @Content(schema = @Schema(implementation = ErpAccountsApiResourceSwagger.FineractError.class)))
     @ApiResponse(responseCode = "404", description = "parentId or tagId does not exist", content = @Content(schema = @Schema(implementation = ErpAccountsApiResourceSwagger.FineractError.class)))
-    @ApiResponse(responseCode = "409", description = "ERP reference already synced with a different payload, or GL code already in use", content = @Content(schema = @Schema(implementation = ErpAccountsApiResourceSwagger.FineractError.class), examples = {
+    @ApiResponse(responseCode = "409", description = "ERP reference already synced with a different payload, GL code already in use, or the parent is not synced, not a HEADER account, or of a different type", content = @Content(schema = @Schema(implementation = ErpAccountsApiResourceSwagger.FineractError.class), examples = {
             @ExampleObject(name = "payload conflict", value = """
                     {"httpStatusCode": "409", "userMessageGlobalisationCode": "error.msg.glaccount.sync.payload.conflict", "defaultUserMessage": "External reference GL-1200 is already synced with a different payload"}"""),
             @ExampleObject(name = "GL code taken", value = """
-                    {"httpStatusCode": "409", "userMessageGlobalisationCode": "error.msg.glaccount.sync.code.conflict", "defaultUserMessage": "GL code 1200 already belongs to another GL account"}""") }))
+                    {"httpStatusCode": "409", "userMessageGlobalisationCode": "error.msg.glaccount.sync.code.conflict", "defaultUserMessage": "GL code 1200 already belongs to another GL account"}"""),
+            @ExampleObject(name = "parent not synced", value = """
+                    {"httpStatusCode": "409", "userMessageGlobalisationCode": "error.msg.glaccount.sync.parent.not.synced", "defaultUserMessage": "Parent ERP account GL-1000 has not been synced yet; sync parents before their children"}"""),
+            @ExampleObject(name = "parent is a DETAIL account", value = """
+                    {"httpStatusCode": "409", "userMessageGlobalisationCode": "error.msg.glaccount.sync.parent.not.header", "defaultUserMessage": "Parent ERP account GL-1100 is a DETAIL account; only HEADER accounts can have child accounts"}"""),
+            @ExampleObject(name = "parent of another type", value = """
+                    {"httpStatusCode": "409", "userMessageGlobalisationCode": "error.msg.glaccount.sync.parent.type.mismatch", "defaultUserMessage": "Parent ERP account GL-1000 has type 1 but this account has type 4; a child account must have its parent's type"}""") }))
     @ApiResponse(responseCode = "425", description = "A request with the same Idempotency-Key is still being processed; retry later")
     public Response sync(@PathParam("erpReference") @Parameter(description = "The ERP's reference for the account", example = "GL-1200", schema = @Schema(type = "string", pattern = ErpAccountCommands.ERP_REFERENCE_PATTERN, minLength = 1, maxLength = 100)) String erpReference,
             @Parameter(hidden = true) String apiRequestBodyAsJson) {
@@ -105,6 +113,7 @@ public class ErpAccountsApiResource {
     public String retrieve(@PathParam("erpReference") @Parameter(description = "The ERP's reference for the account", example = "GL-1200", schema = @Schema(type = "string", pattern = ErpAccountCommands.ERP_REFERENCE_PATTERN, minLength = 1, maxLength = 100)) String erpReference) {
         context.authenticatedUser().validateHasReadPermission(READ_PERMISSION_RESOURCE);
         ErpAccountView view = readService.retrieve(erpReference);
-        return new ErpAccount(view.erpReference(), view.glAccountId(), view.glCode(), view.name(), view.syncedAt()).toJson();
+        return new ErpAccount(view.erpReference(), view.glAccountId(), view.glCode(), view.name(), view.type(), view.usage(),
+                view.parentAccount(), view.hierarchy(), view.syncedAt()).toJson();
     }
 }

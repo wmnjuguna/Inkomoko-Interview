@@ -20,14 +20,16 @@ public record ErpAccountSyncResult(
         @Schema(requiredMode = RequiredMode.REQUIRED, example = "1200") String glCode,
 
         @Schema(requiredMode = RequiredMode.REQUIRED, allowableValues = { "CREATED",
-                "UNCHANGED" }, example = "CREATED", description = "`CREATED`: this call created the GL account. `UNCHANGED`: the same payload was already synced, so nothing was written.") String outcome) {
+                "UNCHANGED" }, example = "CREATED", description = "`CREATED`: this call created the GL account. `UNCHANGED`: the same payload was already synced, so nothing was written.") String outcome,
+
+        @Schema(example = "GL-1000", description = "Parent account ERP reference, when the account was synced under a parent.") String parentAccount) {
 
     private static final Gson GSON = new Gson();
 
     static ErpAccountSyncResult from(CommandProcessingResult result) {
         Map<String, Object> changes = result.getChanges();
         return new ErpAccountSyncResult((String) changes.get("erpReference"), result.getResourceId(), (String) changes.get("glCode"),
-                (String) changes.get("outcome"));
+                (String) changes.get("outcome"), (String) changes.get("parentAccount"));
     }
 
     String toJson() {
