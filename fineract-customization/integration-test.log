@@ -4,25 +4,27 @@
 │  └─ ErpAccountsApiIntegrationTest ✔
 │     ├─ GL code uniqueness: a new reference cannot reuse an existing code ✔
 │     ├─ unknown reference: 404; invalid reference or missing usage: 400 ✔
+│     ├─ parent accounts: a DETAIL sub-ledger syncs under a HEADER parent of the same typ... ✔
 │     ├─ 10 parallel identical syncs create exactly one GL account ✔
 │     ├─ only Fineract's account types (1-5) and usages (1-2) are accepted; nothing is wr... ✔
+│     ├─ parent accounts: not synced, a DETAIL parent, or a parent of another type are re... ✔
 │     ├─ behaviour 3: same reference with a different payload is rejected with 409 and ch... ✔
 │     ├─ behaviours 1 and 2: first sync creates the GL account, an identical repeat retur... ✔
 │     ├─ behaviour 4: a user without SYNC_GLACCOUNT gets 403 from Fineract's permission m... ✔
 │     └─ a repeated Idempotency-Key replays the original response from Fineract's command... ✔
 └─ JUnit Vintage ✔
 
-Test run finished after 4461 ms
+Test run finished after 6126 ms
 [         4 containers found      ]
 [         0 containers skipped    ]
 [         4 containers started    ]
 [         0 containers aborted    ]
 [         4 containers successful ]
 [         0 containers failed     ]
-[         8 tests found           ]
+[        10 tests found           ]
 [         0 tests skipped         ]
-[         8 tests started         ]
+[        10 tests started         ]
 [         0 tests aborted         ]
-[         8 tests successful      ]
+[        10 tests successful      ]
 [         0 tests failed          ]
 

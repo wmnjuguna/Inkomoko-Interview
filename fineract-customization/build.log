@@ -1,385 +1,385 @@
 #0 building with "default" instance using docker driver
 
 #1 [internal] load build definition from Dockerfile
+#1 DONE 0.0s
+
+#1 [internal] load build definition from Dockerfile
 #1 transferring dockerfile: 4.00kB done
 #1 DONE 0.0s
 
-#2 [auth] docker/dockerfile:pull token for registry-1.docker.io
-#2 DONE 0.0s
+#2 resolve image config for docker-image://docker.io/docker/dockerfile:1.7
+#2 DONE 1.4s
 
-#3 resolve image config for docker-image://docker.io/docker/dockerfile:1.7
-#3 DONE 1.4s
+#3 docker-image://docker.io/docker/dockerfile:1.7@sha256:a57df69d0ea827fb7266491f2813635de6f17269be881f696fbfdf2d83dda33e
+#3 resolve docker.io/docker/dockerfile:1.7@sha256:a57df69d0ea827fb7266491f2813635de6f17269be881f696fbfdf2d83dda33e 0.0s done
+#3 CACHED
 
-#4 docker-image://docker.io/docker/dockerfile:1.7@sha256:a57df69d0ea827fb7266491f2813635de6f17269be881f696fbfdf2d83dda33e
-#4 resolve docker.io/docker/dockerfile:1.7@sha256:a57df69d0ea827fb7266491f2813635de6f17269be881f696fbfdf2d83dda33e 0.0s done
-#4 CACHED
+#4 [internal] load metadata for docker.io/library/eclipse-temurin:21-jdk-alpine
+#4 DONE 1.0s
 
-#5 [internal] load metadata for docker.io/library/eclipse-temurin:21-jdk-alpine
-#5 ...
+#5 [internal] load metadata for docker.io/library/eclipse-temurin:21-jre-alpine
+#5 DONE 1.0s
 
-#6 [auth] library/eclipse-temurin:pull token for registry-1.docker.io
+#6 [internal] load .dockerignore
+#6 transferring context: 153B done
 #6 DONE 0.0s
 
-#7 [internal] load metadata for docker.io/library/eclipse-temurin:21-jre-alpine
-#7 ...
+#7 [build 1/6] FROM docker.io/library/eclipse-temurin:21-jdk-alpine@sha256:0bfc69a4758a86710e5c474032d28400a8bd00874766f9e8b1642ac2fd293159
+#7 resolve docker.io/library/eclipse-temurin:21-jdk-alpine@sha256:0bfc69a4758a86710e5c474032d28400a8bd00874766f9e8b1642ac2fd293159 0.0s done
+#7 DONE 0.0s
 
-#5 [internal] load metadata for docker.io/library/eclipse-temurin:21-jdk-alpine
-#5 DONE 1.2s
-
-#7 [internal] load metadata for docker.io/library/eclipse-temurin:21-jre-alpine
-#7 DONE 1.2s
-
-#8 [internal] load .dockerignore
-#8 transferring context: 153B done
+#8 [stage-2 1/5] FROM docker.io/library/eclipse-temurin:21-jre-alpine@sha256:51ab5e3302e7141ce665ca3ea85e8b5cd648eafbc3c0c90dd79d6537684e4555
+#8 resolve docker.io/library/eclipse-temurin:21-jre-alpine@sha256:51ab5e3302e7141ce665ca3ea85e8b5cd648eafbc3c0c90dd79d6537684e4555 0.0s done
 #8 DONE 0.0s
 
 #9 [internal] load build context
+#9 transferring context: 25.35kB done
 #9 DONE 0.0s
 
-#10 [stage-2 1/5] FROM docker.io/library/eclipse-temurin:21-jre-alpine@sha256:51ab5e3302e7141ce665ca3ea85e8b5cd648eafbc3c0c90dd79d6537684e4555
-#10 resolve docker.io/library/eclipse-temurin:21-jre-alpine@sha256:51ab5e3302e7141ce665ca3ea85e8b5cd648eafbc3c0c90dd79d6537684e4555 0.0s done
-#10 DONE 0.0s
+#10 [build 3/6] WORKDIR /src
+#10 CACHED
 
-#11 [build 1/6] FROM docker.io/library/eclipse-temurin:21-jdk-alpine@sha256:0bfc69a4758a86710e5c474032d28400a8bd00874766f9e8b1642ac2fd293159
-#11 resolve docker.io/library/eclipse-temurin:21-jdk-alpine@sha256:0bfc69a4758a86710e5c474032d28400a8bd00874766f9e8b1642ac2fd293159 0.0s done
-#11 DONE 0.0s
+#11 [build 2/6] RUN apk add --no-cache git bash
+#11 CACHED
 
-#9 [internal] load build context
-#9 transferring context: 17.94kB done
-#9 DONE 0.0s
-
-#12 [build 2/6] RUN apk add --no-cache git bash
+#12 [build 4/6] RUN git clone --depth 1 --branch "1.15.0" https://github.com/apache/fineract.git .  && test "$(git rev-parse HEAD)" = "d5636847ac556c30b437254c353f05526d172b97"  || (echo "Tag 1.15.0 does not point at d5636847ac556c30b437254c353f05526d172b97" >&2 && exit 1)
 #12 CACHED
 
-#13 [build 3/6] WORKDIR /src
-#13 CACHED
+#13 [build 5/6] COPY custom/inkomoko /src/custom/inkomoko
+#13 DONE 0.0s
 
-#14 [build 4/6] RUN git clone --depth 1 --branch "1.15.0" https://github.com/apache/fineract.git .  && test "$(git rev-parse HEAD)" = "d5636847ac556c30b437254c353f05526d172b97"  || (echo "Tag 1.15.0 does not point at d5636847ac556c30b437254c353f05526d172b97" >&2 && exit 1)
-#14 CACHED
+#14 [build 6/6] RUN --mount=type=cache,target=/root/.gradle     ./gradlew --no-daemon --max-workers=3       "-Dorg.gradle.jvmargs=-Xmx6g --add-exports jdk.compiler/com.sun.tools.javac.api=ALL-UNNAMED --add-exports jdk.compiler/com.sun.tools.javac.file=ALL-UNNAMED --add-exports jdk.compiler/com.sun.tools.javac.parser=ALL-UNNAMED --add-exports jdk.compiler/com.sun.tools.javac.tree=ALL-UNNAMED --add-exports jdk.compiler/com.sun.tools.javac.util=ALL-UNNAMED --add-exports=java.naming/com.sun.jndi.ldap=ALL-UNNAMED --add-opens=java.base/java.lang=ALL-UNNAMED --add-opens=java.base/java.lang.invoke=ALL-UNNAMED --add-opens=java.base/java.io=ALL-UNNAMED --add-opens=java.base/java.security=ALL-UNNAMED --add-opens=java.base/java.util=ALL-UNNAMED --add-opens=java.management/javax.management=ALL-UNNAMED --add-opens=java.naming/javax.naming=ALL-UNNAMED"       :custom:inkomoko:glsync:service:test :custom:inkomoko:glsync:service:integrationTestBundle       :fineract-provider:bootJar       :custom:inkomoko:glsync:service:jar :custom:inkomoko:glsync:starter:jar  && mkdir -p /out/libs  && cp "$(ls -S fineract-provider/build/libs/fineract-provider-*.jar | grep -v plain | head -1)" /out/fineract-provider.jar  && find custom/inkomoko -path '*/build/libs/*.jar' ! -name '*-sources.jar' ! -name '*-javadoc.jar' -exec cp {} /out/libs/ ;  && cp -r custom/inkomoko/glsync/service/build/integration-test-bundle /out/integration-test  && ls -l /out/libs
+#14 0.951 To honour the JVM settings for this build a single-use Daemon process will be forked. For more on this, please refer to https://docs.gradle.org/8.14.5/userguide/gradle_daemon.html#sec:disabling_the_daemon in the Gradle documentation.
+#14 2.149 Daemon will be stopped at the end of the build 
+#14 6.050 Did not find udev library in operating system. Some features may not work.
+#14 6.152 Disk Store information requires libudev, which is not present.
+#14 9.957 > Task :buildSrc:extractPluginRequests FROM-CACHE
+#14 9.957 > Task :buildSrc:generatePluginAdapters FROM-CACHE
+#14 10.15 > Task :buildSrc:compileJava FROM-CACHE
+#14 10.25 > Task :buildSrc:compileGroovy FROM-CACHE
+#14 10.25 > Task :buildSrc:compileGroovyPlugins FROM-CACHE
+#14 10.25 > Task :buildSrc:pluginDescriptors
+#14 10.35 > Task :buildSrc:processResources
+#14 10.35 > Task :buildSrc:classes
+#14 10.55 > Task :buildSrc:jar
+#14 16.86 
+#14 16.86 > Configure project :
+#14 16.86 matching ref: TAG - 1.15.0
+#14 16.86   ref configuration: TAG - pattern: (\d+\.\d+\.\d+)
+#14 16.86     version: ${describe.tag.version.major}.${describe.tag.version.minor}.${describe.tag.version.patch}
+#14 16.86     describeTagPattern: .*(\d+\.\d+\.\d+).*
+#14 16.86     describeTagFirstParent: false
+#14 16.95 
+#14 16.95 project version: 1.15.0
+#14 47.95 
+#14 47.95 > Task :spotlessInternalRegisterDependencies
+#14 48.15 > Task :fineract-avro-schemas:preprocessAvroSchemas
+#14 48.41 > Task :fineract-avro-schemas:spotlessJson FROM-CACHE
+#14 48.41 > Task :fineract-avro-schemas:spotlessJsonApply UP-TO-DATE
+#14 48.55 > Task :fineract-avro-schemas:buildJavaSdk FROM-CACHE
+#14 48.65 
+#14 48.65 > Task :fineract-accounting:generateStaticWeavingPersistenceXml
+#14 48.65 Generated EclipseLink static weaving persistence.xml for :fineract-accounting with 55 managed classes from 4 modules
+#14 48.65 
+#14 48.65 > Task :fineract-charge:generateStaticWeavingPersistenceXml
+#14 48.65 Generated EclipseLink static weaving persistence.xml for :fineract-charge with 47 managed classes from 3 modules
+#14 49.17 
+#14 49.17 > Task :fineract-command:compileJava FROM-CACHE
+#14 49.17 > Task :fineract-command:processResources
+#14 49.17 > Task :fineract-command:classes
+#14 49.17 > Task :fineract-command:jar
+#14 49.25 > Task :fineract-validation:compileJava FROM-CACHE
+#14 49.25 > Task :fineract-validation:processResources
+#14 49.25 > Task :fineract-validation:classes
+#14 49.25 > Task :fineract-avro-schemas:compileJava FROM-CACHE
+#14 49.25 > Task :fineract-validation:jar
+#14 49.35 
+#14 49.35 > Task :fineract-core:generateStaticWeavingPersistenceXml
+#14 49.35 Generated EclipseLink static weaving persistence.xml for :fineract-core with 40 managed classes from 1 modules
+#14 49.35 
+#14 49.35 > Task :fineract-core:processResources NO-SOURCE
+#14 49.35 > Task :fineract-charge:processResources
+#14 49.35 > Task :fineract-accounting:processResources
+#14 49.45 > Task :fineract-avro-schemas:processResources
+#14 49.45 > Task :fineract-avro-schemas:classes
+#14 49.55 
+#14 49.55 > Task :fineract-tax:generateStaticWeavingPersistenceXml
+#14 49.55 Generated EclipseLink static weaving persistence.xml for :fineract-tax with 44 managed classes from 2 modules
+#14 49.55 
+#14 49.55 > Task :fineract-tax:processResources NO-SOURCE
+#14 49.85 > Task :fineract-avro-schemas:jar
+#14 49.85 
+#14 49.85 > Task :fineract-cob:generateStaticWeavingPersistenceXml
+#14 49.85 Generated EclipseLink static weaving persistence.xml for :fineract-cob with 42 managed classes from 2 modules
+#14 49.98 
+#14 49.98 > Task :fineract-cob:processResources NO-SOURCE
+#14 49.98 
+#14 49.98 > Task :fineract-branch:generateStaticWeavingPersistenceXml
+#14 49.98 Generated EclipseLink static weaving persistence.xml for :fineract-branch with 59 managed classes from 5 modules
+#14 49.98 
+#14 49.98 > Task :fineract-branch:processResources
+#14 50.08 > Task :fineract-command-audit:compileJava FROM-CACHE
+#14 50.08 > Task :fineract-command-audit:processResources
+#14 50.08 > Task :fineract-command-audit:classes
+#14 50.08 > Task :fineract-command-audit:jar
+#14 50.08 > Task :fineract-document:processResources NO-SOURCE
+#14 50.08 > Task :fineract-command-jdbc:compileJava FROM-CACHE
+#14 50.15 > Task :fineract-command-jdbc:processResources
+#14 50.15 > Task :fineract-command-jdbc:classes
+#14 50.25 > Task :fineract-command-jdbc:jar
+#14 50.95 
+#14 50.95 > Task :fineract-investor:generateStaticWeavingPersistenceXml
+#14 50.95 Generated EclipseLink static weaving persistence.xml for :fineract-investor with 122 managed classes from 8 modules
+#14 51.15 
+#14 51.15 > Task :fineract-loan:generateStaticWeavingPersistenceXml
+#14 51.15 Generated EclipseLink static weaving persistence.xml for :fineract-loan with 114 managed classes from 7 modules
+#14 51.15 
+#14 51.15 > Task :fineract-loan:processResources
+#14 51.25 > Task :fineract-investor:processResources
+#14 51.25 
+#14 51.25 > Task :fineract-rates:generateStaticWeavingPersistenceXml
+#14 51.25 Generated EclipseLink static weaving persistence.xml for :fineract-rates with 42 managed classes from 2 modules
+#14 51.25 
+#14 51.25 > Task :fineract-rates:processResources
+#14 51.55 > Task :fineract-core:compileJava FROM-CACHE
+#14 51.55 > Task :fineract-core:classes UP-TO-DATE
+#14 52.15 
+#14 52.15 > Task :fineract-loan-origination:generateStaticWeavingPersistenceXml
+#14 52.15 Generated EclipseLink static weaving persistence.xml for :fineract-loan-origination with 142 managed classes from 9 modules
+#14 52.15 
+#14 52.15 > Task :fineract-loan-origination:processResources
+#14 52.15 > Task :fineract-mix:processResources NO-SOURCE
+#14 52.45 > Task :fineract-core:jar
+#14 52.75 
+#14 52.75 > Task :fineract-working-capital-loan:generateStaticWeavingPersistenceXml
+#14 52.75 Generated EclipseLink static weaving persistence.xml for :fineract-working-capital-loan with 139 managed classes from 8 modules
+#14 52.95 
+#14 52.95 > Task :fineract-tax:compileJava FROM-CACHE
+#14 52.95 > Task :fineract-tax:classes UP-TO-DATE
+#14 52.95 > Task :fineract-tax:jar
+#14 53.15 > Task :fineract-charge:compileJava FROM-CACHE
+#14 53.15 > Task :fineract-charge:classes
+#14 53.15 > Task :fineract-cob:compileJava FROM-CACHE
+#14 53.15 > Task :fineract-cob:classes UP-TO-DATE
+#14 53.15 > Task :fineract-charge:jar
+#14 53.26 
+#14 53.26 > Task :fineract-progressive-loan:generateStaticWeavingPersistenceXml
+#14 53.26 Generated EclipseLink static weaving persistence.xml for :fineract-progressive-loan with 117 managed classes from 8 modules
+#14 53.26 
+#14 53.26 > Task :fineract-cob:jar
+#14 53.26 > Task :fineract-rates:compileJava FROM-CACHE
+#14 53.26 > Task :fineract-rates:classes
+#14 53.35 > Task :fineract-rates:jar
+#14 53.35 > Task :fineract-document:compileJava FROM-CACHE
+#14 53.35 > Task :fineract-document:classes UP-TO-DATE
+#14 53.45 > Task :fineract-working-capital-loan:processResources
+#14 53.45 > Task :fineract-document:jar
+#14 53.45 > Task :fineract-accounting:compileJava FROM-CACHE
+#14 53.45 > Task :fineract-accounting:classes
+#14 53.45 > Task :fineract-progressive-loan:processResources
+#14 53.55 > Task :fineract-mix:compileJava FROM-CACHE
+#14 53.55 > Task :fineract-mix:classes UP-TO-DATE
+#14 53.55 > Task :fineract-mix:jar
+#14 53.55 > Task :fineract-accounting:jar
+#14 53.55 > Task :fineract-report:compileJava FROM-CACHE
+#14 53.75 > Task :fineract-branch:compileJava FROM-CACHE
+#14 53.75 > Task :fineract-branch:classes
+#14 54.35 > Task :fineract-branch:jar
+#14 54.35 > Task :fineract-report:processResources NO-SOURCE
+#14 54.35 > Task :fineract-report:classes UP-TO-DATE
+#14 54.45 > Task :fineract-report:jar
+#14 54.45 > Task :fineract-loan:compileJava FROM-CACHE
+#14 54.45 > Task :fineract-loan:classes
+#14 54.75 > Task :fineract-loan:jar
+#14 54.85 
+#14 54.85 > Task :fineract-savings:generateStaticWeavingPersistenceXml
+#14 54.85 Generated EclipseLink static weaving persistence.xml for :fineract-savings with 82 managed classes from 7 modules
+#14 55.05 
+#14 55.05 > Task :fineract-investor:compileJava FROM-CACHE
+#14 55.05 > Task :fineract-investor:classes
+#14 55.15 > Task :fineract-investor:jar
+#14 55.15 > Task :fineract-working-capital-loan:compileJava FROM-CACHE
+#14 55.15 > Task :fineract-working-capital-loan:classes
+#14 55.25 > Task :fineract-progressive-loan:compileJava FROM-CACHE
+#14 55.25 > Task :fineract-progressive-loan:classes
+#14 55.25 > Task :fineract-progressive-loan:jar
+#14 55.35 > Task :fineract-working-capital-loan:jar
+#14 55.55 > Task :fineract-savings:compileJava FROM-CACHE
+#14 55.55 > Task :fineract-savings:processResources
+#14 55.55 > Task :fineract-savings:classes
+#14 55.65 > Task :fineract-loan-origination:compileJava FROM-CACHE
+#14 55.65 > Task :fineract-loan-origination:classes
+#14 55.65 > Task :fineract-savings:jar
+#14 55.65 > Task :fineract-loan-origination:jar
+#14 56.05 
+#14 56.06 > Task :fineract-security:generateStaticWeavingPersistenceXml
+#14 56.06 Generated EclipseLink static weaving persistence.xml for :fineract-security with 42 managed classes from 2 modules
+#14 56.15 
+#14 56.15 > Task :fineract-provider:generateStaticWeavingPersistenceXml
+#14 56.15 Generated EclipseLink static weaving persistence.xml for :fineract-provider with 273 managed classes from 15 modules
+#14 56.25 
+#14 56.25 > Task :fineract-security:compileJava FROM-CACHE
+#14 56.25 > Task :fineract-security:processResources NO-SOURCE
+#14 56.25 > Task :fineract-security:classes UP-TO-DATE
+#14 56.25 > Task :fineract-security:jar
+#14 56.35 > Task :custom:inkomoko:glsync:starter:processResources
+#14 57.35 
+#14 57.35 > Task :custom:inkomoko:glsync:service:generateStaticWeavingPersistenceXml
+#14 57.35 Generated EclipseLink static weaving persistence.xml for :custom:inkomoko:glsync:service with 274 managed classes from 16 modules
+#14 57.35 
+#14 57.35 > Task :custom:inkomoko:glsync:service:processResources NO-SOURCE
+#14 57.35 > Task :custom:inkomoko:glsync:service:processTestResources NO-SOURCE
+#14 57.65 > Task :fineract-provider:generateGitProperties
+#14 59.25 > Task :fineract-provider:compileJava FROM-CACHE
+#14 59.35 > Task :fineract-provider:generateRebelMain
+#14 59.55 > Task :fineract-provider:processResources
+#14 59.55 > Task :fineract-provider:classes
+#14 59.55 > Task :fineract-provider:prepareInputYaml
+#14 89.55 > Task :fineract-provider:resolve
+#14 102.4 > Task :fineract-provider:jar
+#14 102.4 > Task :fineract-provider:resolveMainClassName
+#14 106.3 > Task :fineract-provider:bootJar
+#14 109.9 > Task :custom:inkomoko:glsync:service:compileJava
+#14 109.9 > Task :custom:inkomoko:glsync:service:classes
+#14 112.0 > Task :custom:inkomoko:glsync:service:resolve
+#14 112.0 > Task :custom:inkomoko:glsync:service:jar
+#14 112.7 > Task :custom:inkomoko:glsync:starter:compileJava
+#14 112.7 > Task :custom:inkomoko:glsync:starter:classes
+#14 112.7 > Task :custom:inkomoko:glsync:starter:jar
+#14 115.2 > Task :custom:inkomoko:glsync:service:compileTestJava
+#14 115.2 > Task :custom:inkomoko:glsync:service:testClasses
+#14 117.3 
+#14 117.3 > Task :custom:inkomoko:glsync:service:test
+#14 117.3 
+#14 117.3 com.inkomoko.fineract.glsync.api.ErpAccountCommandsTest
+#14 117.3 
+#14 117.3   Test refuses to read a reference from a URL that isn't an ERP account command PASSED
+#14 117.4 
+#14 117.4   rejects a Fineract parentId, a malformed parent reference, and an account that is its own parent
+#14 117.4 
+#14 117.4     Test "parentId":5 -> parentId PASSED
+#14 117.6     Test "parentAccount":"GL 1000" -> parentAccount PASSED
+#14 117.6     Test "parentAccount":"GL-1200" -> parentAccount PASSED
+#14 117.6 
+#14 117.6   rejects references with other characters
+#14 117.6 
+#14 117.6     Test [1] reference= PASSED
+#14 117.6     Test [2] reference=GL 1200 PASSED
+#14 117.6     Test [3] reference=GL/1200 PASSED
+#14 117.6     Test [4] reference=GL-1200?x=1 PASSED
+#14 117.7 
+#14 117.7   accepts references made of letters, digits and . _ : -
+#14 117.7 
+#14 117.7     Test [1] reference=GL-1200 PASSED
+#14 117.7     Test [2] reference=1100 PASSED
+#14 117.7     Test [3] reference=acct.4000_v2 PASSED
+#14 117.7     Test [4] reference=ERP:GL:1200 PASSED
+#14 117.7 
+#14 117.7   Test builds a GLACCOUNT/SYNC command guarded by SYNC_GLACCOUNT, carrying the reference in its URL PASSED
+#14 117.7   Test leaves malformed JSON to core's own parser PASSED
+#14 117.7   Test accepts a parent named by its ERP reference PASSED
+#14 117.7   Test rejects references longer than 100 characters (the column size) PASSED
+#14 117.7 
+#14 117.7   requires usage, because acc_gl_account.account_usage is NOT NULL
+#14 117.7 
+#14 117.7     Test [1] body={"name":"Bank","glCode":"1100","type":1,"manualEntriesAllowed":false} PASSED
+#14 117.7     Test [2] body={"name":"Bank","glCode":"1100","type":1,"usage":null,"manualEntriesAllowed":false} PASSED
+#14 117.7 
+#14 117.7   accepts every Fineract account type, as a number or a numeric string
+#14 117.7 
+#14 117.7     Test [1] type=1 PASSED
+#14 117.7     Test [2] type=2 PASSED
+#14 117.7     Test [3] type=3 PASSED
+#14 117.7     Test [4] type=4 PASSED
+#14 117.7     Test [5] type=5 PASSED
+#14 117.8     Test [6] type="3" PASSED
+#14 117.8 
+#14 117.8   rejects account types outside 1-5 and usages outside 1-2, with core's error codes
+#14 117.8 
+#14 117.8     Test "type":0,"usage":1 -> type PASSED
+#14 117.8     Test "type":6,"usage":1 -> type PASSED
+#14 117.8     Test "type":"ASSET","usage":1 -> type PASSED
+#14 117.8     Test "type":1.5,"usage":1 -> type PASSED
+#14 117.8     Test "type":null,"usage":1 -> type PASSED
+#14 117.8     Test "usage":1 -> type PASSED
+#14 117.8     Test "type":1,"usage":0 -> usage PASSED
+#14 117.8     Test "type":1,"usage":3 -> usage PASSED
+#14 117.8     Test "type":1,"usage":"DETAIL" -> usage PASSED
+#14 117.8 
+#14 117.8 com.inkomoko.fineract.glsync.domain.PayloadHasherTest
+#14 117.8 
+#14 117.8   Test a null field is the same as an absent one PASSED
+#14 117.8   Test a changed value changes the hash PASSED
+#14 117.8   Test key order does not change the hash PASSED
+#14 117.8   Test whitespace around values does not change the hash PASSED
+#14 117.8   Test the hash is 64 lowercase hex characters (fits CHAR(64)) PASSED
+#14 117.8   Test 1 and "1" hash the same, as core accepts both PASSED
+#14 118.1 
+#14 118.2 OpenJDK 64-Bit Server VM warning: Sharing is only supported for boot loader classes because bootstrap classpath has been appended
+#14 119.8 
+#14 119.8 > Task :custom:inkomoko:glsync:service:test
+#14 119.8 
+#14 119.8 com.inkomoko.fineract.glsync.service.AdvisoryLocksTest
+#14 119.8 
+#14 119.8   Test locks a repeated key once PASSED
+#14 119.8   Test locks keys in sorted order whatever order they are passed in, so two requests can't deadlock PASSED
+#14 120.6 
+#14 120.6 com.inkomoko.fineract.glsync.service.GlAccountSyncServiceTest
+#14 120.6 
+#14 120.6   Test new reference, GL code already used: 409 conflict and nothing written PASSED
+#14 120.6   Test locks and looks up the trimmed GL code, as core stores it trimmed PASSED
+#14 120.6   Test takes the locks before reading anything PASSED
+#14 120.7   Test child account: resolves the parent's ERP reference and hands core its parentId, not the ERP reference PASSED
+#14 120.7   Test parent is a DETAIL (sub-ledger) account: 409, only HEADER accounts can have children PASSED
+#14 120.7   Test parent of another type: 409, a child must have its parent's type (core doesn't check this) PASSED
+#14 120.7   Test new reference, free code: creates through core, stores the reference with the payload hash PASSED
+#14 120.7   Test same reference, different payload: 409 conflict and nothing written PASSED
+#14 120.7   Test same reference, same payload: returns the existing account and writes nothing PASSED
+#14 120.7   Test parent not synced yet: 409 and nothing written PASSED
+#14 120.8 
+#14 120.8 SUCCESS: Executed 51 tests in 5.4s
+#14 120.9 
+#14 120.9 
+#14 120.9 > Task :custom:inkomoko:glsync:service:integrationTestBundle
+#14 121.0 
+#14 121.0 [Incubating] Problems report is available at: file:///src/build/reports/problems/problems-report.html
+#14 121.0 
+#14 121.0 Deprecated Gradle features were used in this build, making it incompatible with Gradle 9.0.
+#14 121.0 
+#14 121.0 You can use '--warning-mode all' to show the individual deprecation warnings and determine if they come from your own scripts or plugins.
+#14 121.0 
+#14 121.0 For more on this, please refer to https://docs.gradle.org/8.14.5/userguide/command_line_interface.html#sec:command_line_warnings in the Gradle documentation.
+#14 121.0 
+#14 121.0 BUILD SUCCESSFUL in 2m
+#14 121.0 106 actionable tasks: 75 executed, 30 from cache, 1 up-to-date
+#14 121.7 total 56
+#14 121.7 -rw-r--r-- 1 root root 46164 Oct 12 17:08 inkomoko-fineract-glsync-service-1.15.0.jar
+#14 121.7 -rw-r--r-- 1 root root  4826 Oct 12 17:08 inkomoko-fineract-glsync-starter-1.15.0.jar
+#14 DONE 121.9s
 
-#15 [build 5/6] COPY custom/inkomoko /src/custom/inkomoko
-#15 DONE 0.0s
+#15 [stage-2 2/5] RUN apk add --no-cache curl
+#15 CACHED
 
-#16 [build 6/6] RUN --mount=type=cache,target=/root/.gradle     ./gradlew --no-daemon --max-workers=3       "-Dorg.gradle.jvmargs=-Xmx6g --add-exports jdk.compiler/com.sun.tools.javac.api=ALL-UNNAMED --add-exports jdk.compiler/com.sun.tools.javac.file=ALL-UNNAMED --add-exports jdk.compiler/com.sun.tools.javac.parser=ALL-UNNAMED --add-exports jdk.compiler/com.sun.tools.javac.tree=ALL-UNNAMED --add-exports jdk.compiler/com.sun.tools.javac.util=ALL-UNNAMED --add-exports=java.naming/com.sun.jndi.ldap=ALL-UNNAMED --add-opens=java.base/java.lang=ALL-UNNAMED --add-opens=java.base/java.lang.invoke=ALL-UNNAMED --add-opens=java.base/java.io=ALL-UNNAMED --add-opens=java.base/java.security=ALL-UNNAMED --add-opens=java.base/java.util=ALL-UNNAMED --add-opens=java.management/javax.management=ALL-UNNAMED --add-opens=java.naming/javax.naming=ALL-UNNAMED"       :custom:inkomoko:glsync:service:test :custom:inkomoko:glsync:service:integrationTestBundle       :fineract-provider:bootJar       :custom:inkomoko:glsync:service:jar :custom:inkomoko:glsync:starter:jar  && mkdir -p /out/libs  && cp "$(ls -S fineract-provider/build/libs/fineract-provider-*.jar | grep -v plain | head -1)" /out/fineract-provider.jar  && find custom/inkomoko -path '*/build/libs/*.jar' ! -name '*-sources.jar' ! -name '*-javadoc.jar' -exec cp {} /out/libs/ ;  && cp -r custom/inkomoko/glsync/service/build/integration-test-bundle /out/integration-test  && ls -l /out/libs
-#16 1.117 To honour the JVM settings for this build a single-use Daemon process will be forked. For more on this, please refer to https://docs.gradle.org/8.14.5/userguide/gradle_daemon.html#sec:disabling_the_daemon in the Gradle documentation.
-#16 2.216 Daemon will be stopped at the end of the build 
-#16 6.121 Did not find udev library in operating system. Some features may not work.
-#16 6.316 Disk Store information requires libudev, which is not present.
-#16 10.02 > Task :buildSrc:extractPluginRequests FROM-CACHE
-#16 10.02 > Task :buildSrc:generatePluginAdapters FROM-CACHE
-#16 10.22 > Task :buildSrc:compileJava FROM-CACHE
-#16 10.22 > Task :buildSrc:compileGroovy FROM-CACHE
-#16 10.32 > Task :buildSrc:compileGroovyPlugins FROM-CACHE
-#16 10.42 > Task :buildSrc:pluginDescriptors
-#16 10.42 > Task :buildSrc:processResources
-#16 10.42 > Task :buildSrc:classes
-#16 10.62 > Task :buildSrc:jar
-#16 16.72 
-#16 16.72 > Configure project :
-#16 16.72 matching ref: TAG - 1.15.0
-#16 16.72   ref configuration: TAG - pattern: (\d+\.\d+\.\d+)
-#16 16.72     version: ${describe.tag.version.major}.${describe.tag.version.minor}.${describe.tag.version.patch}
-#16 16.72     describeTagPattern: .*(\d+\.\d+\.\d+).*
-#16 16.72     describeTagFirstParent: false
-#16 16.72 
-#16 16.72 project version: 1.15.0
-#16 49.22 
-#16 49.22 > Task :spotlessInternalRegisterDependencies
-#16 49.33 > Task :fineract-avro-schemas:preprocessAvroSchemas
-#16 49.42 > Task :fineract-avro-schemas:spotlessJson FROM-CACHE
-#16 49.42 > Task :fineract-avro-schemas:spotlessJsonApply UP-TO-DATE
-#16 49.62 > Task :fineract-avro-schemas:buildJavaSdk FROM-CACHE
-#16 49.62 
-#16 49.62 > Task :fineract-charge:generateStaticWeavingPersistenceXml
-#16 49.62 Generated EclipseLink static weaving persistence.xml for :fineract-charge with 47 managed classes from 3 modules
-#16 49.62 
-#16 49.62 > Task :fineract-accounting:generateStaticWeavingPersistenceXml
-#16 49.62 Generated EclipseLink static weaving persistence.xml for :fineract-accounting with 55 managed classes from 4 modules
-#16 49.92 
-#16 49.92 > Task :fineract-command:compileJava FROM-CACHE
-#16 49.92 > Task :fineract-command:processResources
-#16 50.02 > Task :fineract-command:classes
-#16 50.02 > Task :fineract-command:jar
-#16 50.02 > Task :fineract-validation:compileJava FROM-CACHE
-#16 50.12 > Task :fineract-validation:processResources
-#16 50.12 > Task :fineract-validation:classes
-#16 50.12 > Task :fineract-validation:jar
-#16 50.12 > Task :fineract-avro-schemas:compileJava FROM-CACHE
-#16 50.12 
-#16 50.12 > Task :fineract-core:generateStaticWeavingPersistenceXml
-#16 50.12 Generated EclipseLink static weaving persistence.xml for :fineract-core with 40 managed classes from 1 modules
-#16 50.12 
-#16 50.12 > Task :fineract-core:processResources NO-SOURCE
-#16 50.12 > Task :fineract-charge:processResources
-#16 50.12 > Task :fineract-accounting:processResources
-#16 50.22 > Task :fineract-avro-schemas:processResources
-#16 50.22 > Task :fineract-avro-schemas:classes
-#16 50.32 
-#16 50.32 > Task :fineract-tax:generateStaticWeavingPersistenceXml
-#16 50.32 Generated EclipseLink static weaving persistence.xml for :fineract-tax with 44 managed classes from 2 modules
-#16 50.32 
-#16 50.32 > Task :fineract-tax:processResources NO-SOURCE
-#16 50.52 
-#16 50.52 > Task :fineract-branch:generateStaticWeavingPersistenceXml
-#16 50.52 Generated EclipseLink static weaving persistence.xml for :fineract-branch with 59 managed classes from 5 modules
-#16 50.52 
-#16 50.52 > Task :fineract-branch:processResources
-#16 50.52 > Task :fineract-avro-schemas:jar
-#16 50.52 > Task :fineract-command-audit:compileJava FROM-CACHE
-#16 50.62 > Task :fineract-command-audit:processResources
-#16 50.62 > Task :fineract-command-audit:classes
-#16 50.62 > Task :fineract-command-audit:jar
-#16 50.62 
-#16 50.62 > Task :fineract-cob:generateStaticWeavingPersistenceXml
-#16 50.62 Generated EclipseLink static weaving persistence.xml for :fineract-cob with 42 managed classes from 2 modules
-#16 50.62 
-#16 50.62 > Task :fineract-command-jdbc:compileJava FROM-CACHE
-#16 50.62 > Task :fineract-cob:processResources NO-SOURCE
-#16 50.62 > Task :fineract-document:processResources NO-SOURCE
-#16 50.72 > Task :fineract-command-jdbc:processResources
-#16 50.72 > Task :fineract-command-jdbc:classes
-#16 50.72 > Task :fineract-command-jdbc:jar
-#16 51.42 
-#16 51.42 > Task :fineract-investor:generateStaticWeavingPersistenceXml
-#16 51.42 Generated EclipseLink static weaving persistence.xml for :fineract-investor with 122 managed classes from 8 modules
-#16 51.52 
-#16 51.52 > Task :fineract-loan:generateStaticWeavingPersistenceXml
-#16 51.52 Generated EclipseLink static weaving persistence.xml for :fineract-loan with 114 managed classes from 7 modules
-#16 51.62 
-#16 51.62 > Task :fineract-core:compileJava FROM-CACHE
-#16 51.62 > Task :fineract-loan:processResources
-#16 51.62 > Task :fineract-core:classes UP-TO-DATE
-#16 51.62 
-#16 51.62 > Task :fineract-rates:generateStaticWeavingPersistenceXml
-#16 51.62 Generated EclipseLink static weaving persistence.xml for :fineract-rates with 42 managed classes from 2 modules
-#16 51.62 
-#16 51.63 > Task :fineract-rates:processResources
-#16 51.72 > Task :fineract-investor:processResources
-#16 52.12 > Task :fineract-core:jar
-#16 52.32 > Task :fineract-tax:compileJava FROM-CACHE
-#16 52.32 > Task :fineract-tax:classes UP-TO-DATE
-#16 52.42 
-#16 52.42 > Task :fineract-loan-origination:generateStaticWeavingPersistenceXml
-#16 52.42 Generated EclipseLink static weaving persistence.xml for :fineract-loan-origination with 142 managed classes from 9 modules
-#16 52.42 
-#16 52.42 > Task :fineract-tax:jar
-#16 52.42 > Task :fineract-cob:compileJava FROM-CACHE
-#16 52.42 > Task :fineract-cob:classes UP-TO-DATE
-#16 52.52 > Task :fineract-charge:compileJava FROM-CACHE
-#16 52.52 > Task :fineract-charge:classes
-#16 52.52 > Task :fineract-cob:jar
-#16 52.52 > Task :fineract-charge:jar
-#16 52.52 
-#16 52.52 > Task :fineract-working-capital-loan:generateStaticWeavingPersistenceXml
-#16 52.52 Generated EclipseLink static weaving persistence.xml for :fineract-working-capital-loan with 139 managed classes from 8 modules
-#16 52.62 
-#16 52.62 > Task :fineract-rates:compileJava FROM-CACHE
-#16 52.62 > Task :fineract-rates:classes
-#16 52.62 > Task :fineract-rates:jar
-#16 52.62 > Task :fineract-document:compileJava FROM-CACHE
-#16 52.62 > Task :fineract-document:classes UP-TO-DATE
-#16 52.72 > Task :fineract-accounting:compileJava FROM-CACHE
-#16 52.72 > Task :fineract-accounting:classes
-#16 52.72 > Task :fineract-document:jar
-#16 52.72 > Task :fineract-working-capital-loan:processResources
-#16 52.72 > Task :fineract-loan-origination:processResources
-#16 52.82 > Task :fineract-accounting:jar
-#16 52.82 > Task :fineract-mix:compileJava FROM-CACHE
-#16 52.92 > Task :fineract-branch:compileJava FROM-CACHE
-#16 52.92 > Task :fineract-branch:classes
-#16 52.92 > Task :fineract-branch:jar
-#16 52.92 > Task :fineract-mix:processResources NO-SOURCE
-#16 52.93 > Task :fineract-mix:classes UP-TO-DATE
-#16 52.93 > Task :fineract-mix:jar
-#16 53.22 
-#16 53.22 > Task :fineract-progressive-loan:generateStaticWeavingPersistenceXml
-#16 53.22 Generated EclipseLink static weaving persistence.xml for :fineract-progressive-loan with 117 managed classes from 8 modules
-#16 53.42 
-#16 53.42 > Task :fineract-loan:compileJava FROM-CACHE
-#16 53.42 > Task :fineract-loan:classes
-#16 53.62 > Task :fineract-progressive-loan:processResources
-#16 53.72 > Task :fineract-report:compileJava FROM-CACHE
-#16 53.72 > Task :fineract-report:processResources NO-SOURCE
-#16 53.72 > Task :fineract-report:classes UP-TO-DATE
-#16 53.72 > Task :fineract-report:jar
-#16 53.72 > Task :fineract-loan:jar
-#16 54.02 > Task :fineract-investor:compileJava FROM-CACHE
-#16 54.02 > Task :fineract-investor:classes
-#16 54.02 > Task :fineract-investor:jar
-#16 54.12 
-#16 54.12 > Task :fineract-savings:generateStaticWeavingPersistenceXml
-#16 54.12 Generated EclipseLink static weaving persistence.xml for :fineract-savings with 82 managed classes from 7 modules
-#16 54.32 
-#16 54.32 > Task :fineract-progressive-loan:compileJava FROM-CACHE
-#16 54.32 > Task :fineract-progressive-loan:classes
-#16 54.32 > Task :fineract-working-capital-loan:compileJava FROM-CACHE
-#16 54.32 > Task :fineract-working-capital-loan:classes
-#16 54.32 > Task :fineract-progressive-loan:jar
-#16 54.52 > Task :fineract-working-capital-loan:jar
-#16 54.62 > Task :fineract-savings:compileJava FROM-CACHE
-#16 54.62 > Task :fineract-savings:processResources
-#16 54.62 > Task :fineract-savings:classes
-#16 54.72 > Task :fineract-loan-origination:compileJava FROM-CACHE
-#16 54.72 > Task :fineract-loan-origination:classes
-#16 54.72 > Task :fineract-savings:jar
-#16 54.72 > Task :fineract-loan-origination:jar
-#16 55.02 
-#16 55.02 > Task :fineract-security:generateStaticWeavingPersistenceXml
-#16 55.02 Generated EclipseLink static weaving persistence.xml for :fineract-security with 42 managed classes from 2 modules
-#16 55.12 
-#16 55.12 > Task :fineract-security:compileJava FROM-CACHE
-#16 55.12 > Task :fineract-security:processResources NO-SOURCE
-#16 55.12 > Task :fineract-security:classes UP-TO-DATE
-#16 55.12 > Task :fineract-security:jar
-#16 55.12 > Task :custom:inkomoko:glsync:starter:processResources
-#16 55.32 
-#16 55.32 > Task :fineract-provider:generateStaticWeavingPersistenceXml
-#16 55.32 Generated EclipseLink static weaving persistence.xml for :fineract-provider with 273 managed classes from 15 modules
-#16 56.22 
-#16 56.22 > Task :custom:inkomoko:glsync:service:generateStaticWeavingPersistenceXml
-#16 56.22 Generated EclipseLink static weaving persistence.xml for :custom:inkomoko:glsync:service with 274 managed classes from 16 modules
-#16 56.22 
-#16 56.22 > Task :custom:inkomoko:glsync:service:processResources NO-SOURCE
-#16 56.22 > Task :custom:inkomoko:glsync:service:processTestResources NO-SOURCE
-#16 56.92 > Task :fineract-provider:compileJava FROM-CACHE
-#16 58.32 > Task :fineract-provider:generateGitProperties
-#16 58.32 > Task :fineract-provider:generateRebelMain
-#16 58.62 > Task :fineract-provider:processResources
-#16 58.62 > Task :fineract-provider:classes
-#16 58.62 > Task :fineract-provider:prepareInputYaml
-#16 88.62 > Task :fineract-provider:resolve
-#16 100.5 > Task :fineract-provider:jar
-#16 100.5 > Task :fineract-provider:resolveMainClassName
-#16 103.7 > Task :fineract-provider:bootJar
-#16 108.2 > Task :custom:inkomoko:glsync:service:compileJava
-#16 108.2 > Task :custom:inkomoko:glsync:service:classes
-#16 110.5 > Task :custom:inkomoko:glsync:service:resolve
-#16 110.6 > Task :custom:inkomoko:glsync:service:jar
-#16 110.6 > Task :custom:inkomoko:glsync:starter:compileJava FROM-CACHE
-#16 110.6 > Task :custom:inkomoko:glsync:starter:classes
-#16 110.6 > Task :custom:inkomoko:glsync:starter:jar
-#16 112.2 > Task :custom:inkomoko:glsync:service:compileTestJava
-#16 112.2 > Task :custom:inkomoko:glsync:service:testClasses
-#16 114.2 
-#16 114.2 > Task :custom:inkomoko:glsync:service:test
-#16 114.2 
-#16 114.7 com.inkomoko.fineract.glsync.api.ErpAccountCommandsTest
-#16 114.7 
-#16 114.7   Test refuses to read a reference from a URL that isn't an ERP account command PASSED
-#16 114.8 
-#16 114.8   rejects references with other characters
-#16 114.8 
-#16 114.8     Test [1] reference= PASSED
-#16 114.8     Test [2] reference=GL 1200 PASSED
-#16 114.8     Test [3] reference=GL/1200 PASSED
-#16 114.8     Test [4] reference=GL-1200?x=1 PASSED
-#16 114.8 
-#16 114.8   accepts references made of letters, digits and . _ : -
-#16 114.8 
-#16 114.8     Test [1] reference=GL-1200 PASSED
-#16 114.8     Test [2] reference=1100 PASSED
-#16 114.8     Test [3] reference=acct.4000_v2 PASSED
-#16 114.8     Test [4] reference=ERP:GL:1200 PASSED
-#16 114.8 
-#16 114.8   Test builds a GLACCOUNT/SYNC command guarded by SYNC_GLACCOUNT, carrying the reference in its URL PASSED
-#16 114.9   Test leaves malformed JSON to core's own parser PASSED
-#16 114.9   Test rejects references longer than 100 characters (the column size) PASSED
-#16 114.9 
-#16 114.9   requires usage, because acc_gl_account.account_usage is NOT NULL
-#16 114.9 
-#16 114.9     Test [1] body={"name":"Bank","glCode":"1100","type":1,"manualEntriesAllowed":false} PASSED
-#16 114.9     Test [2] body={"name":"Bank","glCode":"1100","type":1,"usage":null,"manualEntriesAllowed":false} PASSED
-#16 114.9 
-#16 114.9   accepts every Fineract account type, as a number or a numeric string
-#16 114.9 
-#16 114.9     Test [1] type=1 PASSED
-#16 114.9     Test [2] type=2 PASSED
-#16 114.9     Test [3] type=3 PASSED
-#16 114.9     Test [4] type=4 PASSED
-#16 114.9     Test [5] type=5 PASSED
-#16 115.0     Test [6] type="3" PASSED
-#16 115.0 
-#16 115.0   rejects account types outside 1-5 and usages outside 1-2, with core's error codes
-#16 115.0 
-#16 115.0     Test "type":0,"usage":1 -> type PASSED
-#16 115.0     Test "type":6,"usage":1 -> type PASSED
-#16 115.0     Test "type":"ASSET","usage":1 -> type PASSED
-#16 115.0     Test "type":1.5,"usage":1 -> type PASSED
-#16 115.0     Test "type":null,"usage":1 -> type PASSED
-#16 115.0     Test "usage":1 -> type PASSED
-#16 115.0     Test "type":1,"usage":0 -> usage PASSED
-#16 115.0     Test "type":1,"usage":3 -> usage PASSED
-#16 115.0     Test "type":1,"usage":"DETAIL" -> usage PASSED
-#16 115.0 
-#16 115.1 com.inkomoko.fineract.glsync.domain.PayloadHasherTest
-#16 115.1 
-#16 115.1   Test a null field is the same as an absent one PASSED
-#16 115.1   Test a changed value changes the hash PASSED
-#16 115.1   Test key order does not change the hash PASSED
-#16 115.1   Test whitespace around values does not change the hash PASSED
-#16 115.1   Test the hash is 64 lowercase hex characters (fits CHAR(64)) PASSED
-#16 115.1   Test 1 and "1" hash the same, as core accepts both PASSED
-#16 115.5 
-#16 115.5 OpenJDK 64-Bit Server VM warning: Sharing is only supported for boot loader classes because bootstrap classpath has been appended
-#16 117.1 
-#16 117.1 > Task :custom:inkomoko:glsync:service:test
-#16 117.1 
-#16 117.1 com.inkomoko.fineract.glsync.service.AdvisoryLocksTest
-#16 117.1 
-#16 117.1   Test locks a repeated key once PASSED
-#16 117.1   Test locks keys in sorted order whatever order they are passed in, so two requests can't deadlock PASSED
-#16 118.3 
-#16 118.3 com.inkomoko.fineract.glsync.service.GlAccountSyncServiceTest
-#16 118.3 
-#16 118.4   Test new reference, GL code already used: 409 conflict and nothing written PASSED
-#16 118.4   Test locks and looks up the trimmed GL code, as core stores it trimmed PASSED
-#16 118.4   Test takes the locks before reading anything PASSED
-#16 118.4   Test new reference, free code: creates through core, stores the reference with the payload hash PASSED
-#16 118.4   Test same reference, different payload: 409 conflict and nothing written PASSED
-#16 118.4   Test same reference, same payload: returns the existing account and writes nothing PASSED
-#16 118.6 
-#16 118.6 SUCCESS: Executed 43 tests in 6.2s
-#16 118.6 
-#16 118.7 
-#16 118.7 > Task :custom:inkomoko:glsync:service:integrationTestBundle
-#16 118.7 
-#16 118.7 [Incubating] Problems report is available at: file:///src/build/reports/problems/problems-report.html
-#16 118.7 
-#16 118.7 Deprecated Gradle features were used in this build, making it incompatible with Gradle 9.0.
-#16 118.7 
-#16 118.7 You can use '--warning-mode all' to show the individual deprecation warnings and determine if they come from your own scripts or plugins.
-#16 118.7 
-#16 118.7 For more on this, please refer to https://docs.gradle.org/8.14.5/userguide/command_line_interface.html#sec:command_line_warnings in the Gradle documentation.
-#16 118.7 
-#16 118.7 BUILD SUCCESSFUL in 1m 58s
-#16 118.7 106 actionable tasks: 74 executed, 31 from cache, 1 up-to-date
-#16 119.4 total 52
-#16 119.4 -rw-r--r-- 1 root root 41145 Oct 12 16:05 inkomoko-fineract-glsync-service-1.15.0.jar
-#16 119.4 -rw-r--r-- 1 root root  4826 Oct 12 16:05 inkomoko-fineract-glsync-starter-1.15.0.jar
-#16 DONE 119.7s
+#16 [stage-2 3/5] WORKDIR /app
+#16 CACHED
 
-#17 [stage-2 2/5] RUN apk add --no-cache curl
-#17 CACHED
+#17 [stage-2 4/5] COPY --from=build /out/fineract-provider.jar /app/fineract-provider.jar
+#17 DONE 0.2s
 
-#18 [stage-2 3/5] WORKDIR /app
-#18 CACHED
+#18 [stage-2 5/5] COPY --from=build /out/libs/ /app/libs/
+#18 DONE 0.0s
 
-#19 [stage-2 4/5] COPY --from=build /out/fineract-provider.jar /app/fineract-provider.jar
-#19 DONE 0.2s
+#19 exporting to image
+#19 exporting layers
+#19 exporting layers 7.1s done
+#19 exporting manifest sha256:20c1ab4135d554cd211f9704d8f7f552dd96435898ff84c7728edfc78ec34753
+#19 exporting manifest sha256:20c1ab4135d554cd211f9704d8f7f552dd96435898ff84c7728edfc78ec34753 0.0s done
+#19 exporting config sha256:87055097218840c32dfd814acfb88be4ce080e9944df4226b4fe56d3693727cf done
+#19 exporting attestation manifest sha256:c6616d947129cc2e029fc7abb5ff20e1fe74b2da21af8fae798e86a75e161371 0.0s done
+#19 exporting manifest list sha256:b95d2ecb9eeae4810687cc7ee607e58b3f59a21576bb6731dac7bd3f5a86a2f2 0.0s done
+#19 naming to docker.io/library/fineract-inkomoko:1.15.0 done
+#19 unpacking to docker.io/library/fineract-inkomoko:1.15.0
+#19 unpacking to docker.io/library/fineract-inkomoko:1.15.0 1.3s done
+#19 DONE 8.4s
 
-#20 [stage-2 5/5] COPY --from=build /out/libs/ /app/libs/
-#20 DONE 0.0s
-
-#21 exporting to image
-#21 exporting layers
-#21 exporting layers 7.0s done
-#21 exporting manifest sha256:65440a3e761b9f55251987de2e923de4c74651d054134198d441d1ca149f22f6 done
-#21 exporting config sha256:a252777bcef6d2a9b9b928c3f7dae039f91a59754e6079bb8ad5689a15c2738c done
-#21 exporting attestation manifest sha256:6d417b09a416ea2fcc95f2483a2a08078207c7a765ca0d20fbef41c3cd623537 0.0s done
-#21 exporting manifest list sha256:60cfe026b85c69ffdd5d216ae6802e059b67112d9720f58c64c03b73b3e867ba 0.0s done
-#21 naming to docker.io/library/fineract-inkomoko:1.15.0 done
-#21 unpacking to docker.io/library/fineract-inkomoko:1.15.0
-#21 unpacking to docker.io/library/fineract-inkomoko:1.15.0 1.0s done
-#21 DONE 8.0s
-
-View build details: docker-desktop://dashboard/build/default/default/upbel40pngh5dv6eu0bgxemya
+View build details: docker-desktop://dashboard/build/default/default/mf5ukf0bpiidqj4z7lfmtaoxr
