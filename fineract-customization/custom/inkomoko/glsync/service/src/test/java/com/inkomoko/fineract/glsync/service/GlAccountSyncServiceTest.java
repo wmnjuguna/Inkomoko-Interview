@@ -135,6 +135,86 @@ class GlAccountSyncServiceTest {
         order.verify(refs).findByExternalReference("GL-1200");
     }
 
+    @Test
+    @DisplayName("child account: resolves the parent's ERP reference and hands core its parentId, not the ERP reference")
+    void createsChildUnderHeaderParent() {
+        String body = BODY.replace("}", ",\"parentAccount\":\"GL-1000\"}");
+        JsonCommand command = command(body);
+        GLAccount parent = headerParent(7L, 1, true);
+        when(refs.findByExternalReference("GL-1200")).thenReturn(Optional.empty());
+        when(glAccounts.findOneByGlCode("1200")).thenReturn(Optional.empty());
+        when(refs.findByExternalReference("GL-1000")).thenReturn(Optional.of(new GlAccountExternalRef(7L, "GL-1000", "hash")));
+        when(glAccounts.findById(7L)).thenReturn(Optional.of(parent));
+        when(coreGlAccountService.createGLAccount(any())).thenReturn(new CommandProcessingResultBuilder().withEntityId(42L).build());
+
+        CommandProcessingResult result = service.sync("GL-1200", command);
+
+        ArgumentCaptor<JsonCommand> sentToCore = ArgumentCaptor.forClass(JsonCommand.class);
+        verify(coreGlAccountService).createGLAccount(sentToCore.capture());
+        var coreBody = JsonParser.parseString(sentToCore.getValue().json()).getAsJsonObject();
+        assertThat(coreBody.get("parentId").getAsLong()).isEqualTo(7L);
+        assertThat(coreBody.has("parentAccount")).isFalse();
+        assertThat(result.getChanges()).containsEntry("parentAccount", "GL-1000").containsEntry("outcome", "CREATED");
+        ArgumentCaptor<GlAccountExternalRef> saved = ArgumentCaptor.forClass(GlAccountExternalRef.class);
+        verify(refs).saveAndFlush(saved.capture());
+        assertThat(saved.getValue().getPayloadHash()).isEqualTo(PayloadHasher.sha256(body));
+    }
+
+    @Test
+    @DisplayName("parent not synced yet: 409 and nothing written")
+    void rejectsUnsyncedParent() {
+        String body = BODY.replace("}", ",\"parentAccount\":\"GL-1000\"}");
+        when(refs.findByExternalReference("GL-1200")).thenReturn(Optional.empty());
+        when(glAccounts.findOneByGlCode("1200")).thenReturn(Optional.empty());
+        when(refs.findByExternalReference("GL-1000")).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.sync("GL-1200", command(body))).isInstanceOf(GlAccountSyncConflictException.class)
+                .hasFieldOrPropertyWithValue("globalisationMessageCode", "error.msg.glaccount.sync.parent.not.synced");
+        verify(coreGlAccountService, never()).createGLAccount(any());
+        verify(refs, never()).saveAndFlush(any());
+    }
+
+    @Test
+    @DisplayName("parent is a DETAIL (sub-ledger) account: 409, only HEADER accounts can have children")
+    void rejectsDetailParent() {
+        String body = BODY.replace("}", ",\"parentAccount\":\"GL-1100\"}");
+        when(refs.findByExternalReference("GL-1200")).thenReturn(Optional.empty());
+        when(glAccounts.findOneByGlCode("1200")).thenReturn(Optional.empty());
+        when(refs.findByExternalReference("GL-1100")).thenReturn(Optional.of(new GlAccountExternalRef(8L, "GL-1100", "hash")));
+        GLAccount detail = mock(GLAccount.class);
+        when(detail.isHeaderAccount()).thenReturn(false);
+        when(glAccounts.findById(8L)).thenReturn(Optional.of(detail));
+
+        assertThatThrownBy(() -> service.sync("GL-1200", command(body))).isInstanceOf(GlAccountSyncConflictException.class)
+                .hasFieldOrPropertyWithValue("globalisationMessageCode", "error.msg.glaccount.sync.parent.not.header");
+        verify(coreGlAccountService, never()).createGLAccount(any());
+    }
+
+    @Test
+    @DisplayName("parent of another type: 409, a child must have its parent's type (core doesn't check this)")
+    void rejectsParentOfAnotherType() {
+        String body = BODY.replace("}", ",\"parentAccount\":\"GL-4000\"}");
+        when(refs.findByExternalReference("GL-1200")).thenReturn(Optional.empty());
+        when(glAccounts.findOneByGlCode("1200")).thenReturn(Optional.empty());
+        when(refs.findByExternalReference("GL-4000")).thenReturn(Optional.of(new GlAccountExternalRef(9L, "GL-4000", "hash")));
+        GLAccount incomeHeader = mock(GLAccount.class);
+        when(incomeHeader.isHeaderAccount()).thenReturn(true);
+        when(incomeHeader.getType()).thenReturn(4);
+        when(glAccounts.findById(9L)).thenReturn(Optional.of(incomeHeader));
+
+        assertThatThrownBy(() -> service.sync("GL-1200", command(body))).isInstanceOf(GlAccountSyncConflictException.class)
+                .hasFieldOrPropertyWithValue("globalisationMessageCode", "error.msg.glaccount.sync.parent.type.mismatch");
+        verify(coreGlAccountService, never()).createGLAccount(any());
+    }
+
+    private static GLAccount headerParent(Long id, int type, boolean header) {
+        GLAccount parent = mock(GLAccount.class);
+        when(parent.getId()).thenReturn(id);
+        when(parent.getType()).thenReturn(type);
+        when(parent.isHeaderAccount()).thenReturn(header);
+        return parent;
+    }
+
     private static JsonCommand command(String json) {
         return JsonCommand.from(json, JsonParser.parseString(json), new FromJsonHelper(), "GLACCOUNT", null, null, null, null, null, null,
                 null, "/erp-accounts/GL-1200", null, null, null, null, null);

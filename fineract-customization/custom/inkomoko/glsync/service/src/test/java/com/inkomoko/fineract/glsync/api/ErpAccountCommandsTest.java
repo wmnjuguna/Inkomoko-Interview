@@ -95,6 +95,30 @@ class ErpAccountCommandsTest {
     }
 
     @Test
+    @DisplayName("accepts a parent named by its ERP reference")
+    void acceptsParentAccount() {
+        String body = BODY.replace("}", ",\"parentAccount\":\"GL-1000\"}");
+        assertThatCode(() -> ErpAccountCommands.syncCommand("GL-1200", body)).doesNotThrowAnyException();
+    }
+
+    @ParameterizedTest(name = "{0} -> {1}")
+    @org.junit.jupiter.params.provider.CsvSource(delimiter = '|', value = { //
+            "\"parentId\":5                   | parentId           | validation.msg.erpaccount.parentId.not.supported", //
+            "\"parentAccount\":\"GL 1000\" | parentAccount | validation.msg.erpaccount.parentAccount.invalid", //
+            "\"parentAccount\":\"GL-1200\" | parentAccount | validation.msg.erpaccount.parentAccount.self" })
+    @DisplayName("rejects a Fineract parentId, a malformed parent reference, and an account that is its own parent")
+    void rejectsInvalidParent(String field, String parameter, String code) {
+        String body = BODY.replace("}", "," + field.trim() + "}");
+
+        assertThatThrownBy(() -> ErpAccountCommands.syncCommand("GL-1200", body)).isInstanceOf(PlatformApiDataValidationException.class)
+                .satisfies(e -> {
+                    var error = ((PlatformApiDataValidationException) e).getErrors().get(0);
+                    assertThat(error.getParameterName()).isEqualTo(parameter);
+                    assertThat(error.getUserMessageGlobalisationCode()).isEqualTo(code);
+                });
+    }
+
+    @Test
     @DisplayName("leaves malformed JSON to core's own parser")
     void malformedJsonLeftToCore() {
         assertThatCode(() -> ErpAccountCommands.syncCommand("GL-1100", "{not json")).doesNotThrowAnyException();
