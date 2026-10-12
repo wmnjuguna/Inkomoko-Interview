@@ -7,7 +7,7 @@ import java.util.Map;
 import org.apache.fineract.infrastructure.core.data.CommandProcessingResult;
 
 /**
- * Response of PUT /v1/erp-accounts/{erpReference}, built from Fineract's command result. For a repeated Idempotency-Key,
+ * Response of PUT /v1/erp-integration/accounts/{erpReference}, built from Fineract's command result. For a repeated Idempotency-Key,
  * Fineract replays this exact body as it stored it.
  */
 @Schema(name = "ErpAccountSyncResult", description = "Which GL account the ERP account maps to, and whether this call created it.")

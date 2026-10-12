@@ -4,7 +4,7 @@ import com.google.gson.Gson;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.media.Schema.RequiredMode;
 
-/** Response of GET /v1/erp-accounts/{erpReference}: the GL account an ERP account is mapped to. */
+/** Response of GET /v1/erp-integration/accounts/{erpReference}: the GL account an ERP account is mapped to. */
 @Schema(name = "ErpAccount", description = "An ERP account as mirrored in Fineract. A 200 here proves an earlier sync succeeded.")
 public record ErpAccount(
 

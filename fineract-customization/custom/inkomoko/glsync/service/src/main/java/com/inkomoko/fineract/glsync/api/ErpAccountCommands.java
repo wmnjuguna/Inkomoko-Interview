@@ -18,7 +18,7 @@ public final class ErpAccountCommands {
 
     public static final String ENTITY = "GLACCOUNT";
     public static final String ACTION = "SYNC";
-    static final String HREF_PREFIX = "/erp-accounts/";
+    static final String HREF_PREFIX = "/erp-integration/accounts/";
     public static final String ERP_REFERENCE_PATTERN = "^[A-Za-z0-9._:-]{1,100}$";
     private static final Pattern ERP_REFERENCE = Pattern.compile(ERP_REFERENCE_PATTERN);
 

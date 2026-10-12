@@ -27,9 +27,9 @@ import org.apache.fineract.infrastructure.core.exception.IdempotentCommandProces
 import org.apache.fineract.infrastructure.security.service.PlatformSecurityContext;
 import org.springframework.stereotype.Component;
 
-@Path("/v1/erp-accounts")
+@Path("/v1/erp-integration/accounts")
 @Component
-@Tag(name = "ERP Accounts", description = """
+@Tag(name = "ERP Integration", description = """
         GL accounts mirrored from the ERP chart of accounts, keyed by the ERP reference. \
         The ERP owns the chart of accounts; Fineract holds a matching GL account for each ERP account.""")
 @RequiredArgsConstructor

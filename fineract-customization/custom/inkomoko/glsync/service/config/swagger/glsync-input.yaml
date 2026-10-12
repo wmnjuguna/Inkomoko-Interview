@@ -1,6 +1,6 @@
 openapi: 3.0.3
 info:
-  title: Fineract ERP Accounts API (Inkomoko GL sync module)
+  title: Fineract ERP Integration API (Inkomoko GL sync module)
   version: 1.15.0
   description: |-
     Custom module for Apache Fineract 1.15.0. Mirrors the ERP chart of accounts into Fineract GL accounts,
