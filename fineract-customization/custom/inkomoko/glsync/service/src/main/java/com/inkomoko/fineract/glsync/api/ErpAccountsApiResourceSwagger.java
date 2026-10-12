@@ -27,7 +27,7 @@ final class ErpAccountsApiResourceSwagger {
             @Schema(requiredMode = RequiredMode.REQUIRED, minLength = 1, maxLength = 45, example = "1200", description = "GL code, unique across all GL accounts in the tenant. A code already used by another account returns 409. Stored in `acc_gl_account.gl_code`.") String glCode,
 
             @Schema(requiredMode = RequiredMode.REQUIRED, allowableValues = { "1", "2", "3", "4",
-                    "5" }, example = "1", description = "Account type: `1` ASSET, `2` LIABILITY, `3` EQUITY, `4` INCOME, `5` EXPENSE. The Integration Service maps the ERP's type names to these values.") Integer type,
+                    "5" }, example = "1", description = "Account type: `1` ASSET, `2` LIABILITY, `3` EQUITY, `4` INCOME, `5` EXPENSE. Checked by this module before Fineract processes the request, because `acc_gl_account` has no range constraint on it. The Integration Service maps the ERP's type names to these values.") Integer type,
 
             @Schema(requiredMode = RequiredMode.REQUIRED, allowableValues = { "1",
                     "2" }, example = "1", description = "`1` DETAIL (transactions post to it), `2` HEADER (groups other accounts). Core's validator treats it as optional, but the column is NOT NULL, so this API requires it.") Integer usage,

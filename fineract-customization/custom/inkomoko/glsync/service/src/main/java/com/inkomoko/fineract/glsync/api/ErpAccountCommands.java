@@ -2,9 +2,13 @@ package com.inkomoko.fineract.glsync.api;
 
 import com.google.gson.JsonElement;
 import com.google.gson.JsonParseException;
+import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.regex.Pattern;
+import org.apache.fineract.accounting.glaccount.domain.GLAccountType;
+import org.apache.fineract.accounting.glaccount.domain.GLAccountUsage;
 import org.apache.fineract.commands.domain.CommandWrapper;
 import org.apache.fineract.infrastructure.core.data.ApiParameterError;
 import org.apache.fineract.infrastructure.core.exception.PlatformApiDataValidationException;
@@ -22,7 +26,7 @@ public final class ErpAccountCommands {
 
     public static CommandWrapper syncCommand(String erpReference, String json) {
         validate(erpReference);
-        requireUsage(json);
+        validateClassification(json);
         return new CommandWrapper(null, null, null, null, null, ACTION, ENTITY, null, null, HREF_PREFIX + erpReference, json, null, null,
                 null, null, null, null, null, null, null);
     }
@@ -35,20 +39,52 @@ public final class ErpAccountCommands {
     }
 
     /**
-     * Core's validator treats usage as optional, but acc_gl_account.account_usage is NOT NULL, so a missing value would
-     * fail at insert time. Reject it up front with the same error shape core uses.
+     * Account type and usage decide where a GL account sits in the chart of accounts and which loan product roles it can
+     * fill. The acc_gl_account table only has NOT NULL on those columns, no range check, so the allowed values are
+     * enforced here, before Fineract processes anything. The ranges come from core's own enums and the error codes are
+     * core's, so the contract matches core POST /glaccounts. Usage is required here even though core's validator treats it
+     * as optional, because the column is NOT NULL.
      */
-    static void requireUsage(String json) {
+    static void validateClassification(String json) {
         JsonElement body;
         try {
             body = JsonParser.parseString(json == null ? "" : json);
         } catch (JsonParseException e) {
             return; // malformed JSON is reported by core's own parser
         }
-        if (body.isJsonObject() && (!body.getAsJsonObject().has("usage") || body.getAsJsonObject().get("usage").isJsonNull())) {
-            throw new PlatformApiDataValidationException("validation.msg.validation.errors.exist", "Validation errors exist.",
-                    List.of(ApiParameterError.parameterError("validation.msg.GLAccount.usage.cannot.be.blank", "The parameter `usage` is mandatory.",
-                            "usage")));
+        if (!body.isJsonObject()) {
+            return;
+        }
+        List<ApiParameterError> errors = new ArrayList<>();
+        checkInRange(body.getAsJsonObject(), "type", GLAccountType.getMinValue(), GLAccountType.getMaxValue(), errors);
+        checkInRange(body.getAsJsonObject(), "usage", GLAccountUsage.getMinValue(), GLAccountUsage.getMaxValue(), errors);
+        if (!errors.isEmpty()) {
+            throw new PlatformApiDataValidationException("validation.msg.validation.errors.exist", "Validation errors exist.", errors);
+        }
+    }
+
+    private static void checkInRange(JsonObject body, String field, int min, int max, List<ApiParameterError> errors) {
+        JsonElement value = body.get(field);
+        if (value == null || value.isJsonNull() || (value.isJsonPrimitive() && value.getAsString().isBlank())) {
+            errors.add(ApiParameterError.parameterError("validation.msg.GLAccount." + field + ".cannot.be.blank",
+                    "The parameter `" + field + "` is mandatory.", field));
+            return;
+        }
+        Integer number = value.isJsonPrimitive() ? parseInteger(value.getAsString().trim()) : null;
+        if (number == null) {
+            errors.add(ApiParameterError.parameterError("validation.msg.invalid.integer",
+                    "The parameter `" + field + "` must be a whole number.", field, (Object) value.toString()));
+        } else if (number < min || number > max) {
+            errors.add(ApiParameterError.parameterError("validation.msg.GLAccount." + field + ".is.not.within.expected.range",
+                    "The parameter `" + field + "` must be between " + min + " and " + max + ".", field, number, min, max));
+        }
+    }
+
+    private static Integer parseInteger(String text) {
+        try {
+            return Integer.valueOf(text);
+        } catch (NumberFormatException e) {
+            return null;
         }
     }
 
@@ -56,7 +92,7 @@ public final class ErpAccountCommands {
         if (erpReference == null || !ERP_REFERENCE.matcher(erpReference).matches()) {
             throw new PlatformApiDataValidationException(List.of(ApiParameterError.parameterError(
                     "validation.msg.erpaccount.erpReference.invalid",
-                    "erpReference must be 1-100 characters of letters, digits, '.', '_', ':' or '-'", "erpReference", erpReference)));
+                    "erpReference must be 1-100 characters of letters, digits, '.', '_', ':' or '-'", "erpReference", (Object) erpReference)));
         }
     }
 }
