@@ -52,7 +52,22 @@ Fineract's data tables can't be attached to GL accounts in 1.15.0. They can only
 
 ### The API
 
-`PUT` and `GET` on `/v1/erp-accounts/{erpReference}`. The body uses the same fields as Fineract's own `POST /glaccounts`, so Fineract's own checks still apply. `GET` exists so a caller can check whether a sync worked when the answer was lost, instead of sending it again.
+`PUT` and `GET` on `/v1/erp-integration/accounts/{erpReference}`. The body uses the same fields as Fineract's own `POST /glaccounts`, so Fineract's own checks still apply. `GET` exists so a caller can check whether a sync worked when the answer was lost, instead of sending it again.
+
+### A separate path for the integration layer
+
+All integration endpoints live under their own path: `/fineract-provider/api/v1/erp-integration/...`. They do not mix with Fineract's core APIs, such as `/api/v1/glaccounts` or `/api/v1/loans`.
+
+Why:
+
+- **It keeps the integration layer apart from the core APIs.** Anyone can see at a glance which endpoints are mine and which are Fineract's.
+- **Access can be limited by path.** A gateway or proxy in front of Fineract can let the integration traffic reach only `/api/v1/erp-integration/**`, and keep the core APIs closed to it.
+- **It has room to grow.** Later integration endpoints go under the same prefix.
+- **It can change on its own.** The prefix can be versioned separately from Fineract's own APIs.
+
+The path still sits under `/fineract-provider/api`. That is on purpose. Only paths under `/api` go through Fineract's login, tenant check, permission check and audit log. A path outside `/api` would skip all of that, and I would have to rebuild it by hand.
+
+Who can reach Fineract at all is a separate question. It is controlled by the network, not by paths. For now Fineract's port is only open on `localhost`, so I can use Swagger UI and run the tests. Before I submit, I will close it, so that only the Integration Service can call Fineract.
 
 ### Parent accounts
 

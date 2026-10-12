@@ -25,7 +25,7 @@ flowchart LR
   IS -->|clients, loans, disbursements, repayments<br/>externalId = our reference| F
   IS -->|journal entries, via an outbox| E
   E -.->|chart of accounts| IS
-  IS -->|GL sync: PUT /v1/erp-accounts/{erpReference}| F
+  IS -->|GL sync: PUT /v1/erp-integration/accounts/{erpReference}| F
   IS --- DB
   F --- DB
   E --- DB
@@ -80,7 +80,8 @@ sequenceDiagram
   ```
 
   Everything outside Part A uses Fineract's normal settings or built-in features. So no other plugin is needed.
-- **The API.** `PUT /v1/erp-accounts/{erpReference}` creates the GL account for an ERP account. `GET` on the same path shows which GL account an ERP account belongs to. Full rules are in [API.md](API.md).
+- **The API.** `PUT /v1/erp-integration/accounts/{erpReference}` creates the GL account for an ERP account. `GET` on the same path shows which GL account an ERP account belongs to. Full rules are in [API.md](API.md).
+- **Its own path.** Every integration endpoint sits under `/api/v1/erp-integration/`, apart from Fineract's core APIs. This keeps the integration layer separate, and lets a proxy allow only that prefix. It stays under `/api` so Fineract's login, tenant, permission and audit checks still apply. [DECISIONS.md](DECISIONS.md) has the full reasons.
 - **What it guarantees.** All of this runs inside one Fineract database transaction:
   1. The ERP reference is saved with the GL account, in its own table `glsync_external_ref`, and it is unique. (Fineract's GL account table has no column for it.)
   2. Same reference and same data: you get the existing account back. Nothing new is created.
@@ -90,7 +91,7 @@ sequenceDiagram
   6. It is covered by JUnit unit and integration tests.
 - **Parent accounts.** An account can name its parent with `parentAccount`. The parent must already be synced, must be a HEADER account (a heading that nothing posts to), and must be the same type. The account itself can be a HEADER or a DETAIL account. DETAIL means a sub-ledger that transactions post to. Fineract then records the hierarchy path.
 - **Requests at the same time.** Before reading anything, the plugin takes a Postgres lock on the reference and on the GL code. A second request with the same reference waits. When the first one finishes, the second sees the saved row. The unique indexes are a second safety net.
-- **OpenAPI.** The build generates the spec from annotations in the Java code. Fineract serves it at `/fineract-provider/glsync.json`. A copy is in `docs/openapi/fineract-erp-accounts.yaml`.
+- **OpenAPI.** The build generates the spec from annotations in the Java code. Fineract serves it at `/fineract-provider/glsync.json`. A copy is in `docs/openapi/fineract-erp-integration.yaml`.
 - **Building.** The Dockerfile downloads Fineract 1.15.0, checks it is the exact commit, adds my plugin, runs the unit tests and builds the image. See [BUILD.md](fineract-customization/BUILD.md).
 
 ## Where data comes from

@@ -8,19 +8,21 @@ Each API has an OpenAPI 3 spec. The spec is generated from the code, not written
 
 | API | Served at | Copy in this repo |
 |---|---|---|
-| Fineract ERP accounts (my plugin) | `/fineract-provider/glsync.json` and `.yaml` | `docs/openapi/fineract-erp-accounts.yaml` |
+| Fineract ERP integration (my plugin) | `/fineract-provider/glsync.json` and `.yaml` | `docs/openapi/fineract-erp-integration.yaml` |
 | Integration Service *(planned)* | `/openapi.json`, `/docs` | `docs/openapi/integration-service.yaml` |
 | Mock ERP *(planned)* | `/openapi.json`, `/docs` | `docs/openapi/mock-erp.yaml` |
 
 For the plugin, the build reads the annotations on the Java classes and writes the spec. Fineract's own spec (`fineract.json`) only covers Fineract's built-in code, so the plugin makes its own.
 
-## Fineract plugin: ERP accounts
+## Fineract plugin: ERP integration
 
 These endpoints are inside Fineract. Only the Integration Service calls them. GL accounts are never created in Fineract any other way.
 
+All integration endpoints share one prefix: `/fineract-provider/api/v1/erp-integration/`. This keeps them apart from Fineract's core APIs, so access can be allowed by path. See [DECISIONS.md](DECISIONS.md).
+
 Every call needs Basic auth and the header `Fineract-Platform-TenantId: default`.
 
-### `PUT /fineract-provider/api/v1/erp-accounts/{erpReference}`
+### `PUT /fineract-provider/api/v1/erp-integration/accounts/{erpReference}`
 
 Creates the GL account for one ERP account. If it already exists with the same data, it returns the existing one.
 
@@ -65,7 +67,7 @@ Why `type` and `usage` are checked by the plugin: Fineract's GL table has no dat
 | Same `Idempotency-Key` sent again | The first response again, with header `x-served-from-cache: true` |
 | Same `Idempotency-Key` while the first call is still running | `425` |
 
-### `GET /fineract-provider/api/v1/erp-accounts/{erpReference}`
+### `GET /fineract-provider/api/v1/erp-integration/accounts/{erpReference}`
 
 Shows which GL account an ERP account belongs to. Use it when a sync timed out and you do not know if it worked. Check first, instead of sending again.
 
