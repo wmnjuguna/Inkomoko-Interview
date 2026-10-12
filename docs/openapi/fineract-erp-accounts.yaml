@@ -1,0 +1,396 @@
+openapi: 3.0.3
+info:
+  description: |-
+    Custom module for Apache Fineract 1.15.0. Mirrors the ERP chart of accounts into Fineract GL accounts,
+    one GL account per ERP reference. GL account fields and their validation are Fineract core's own
+    (the same rules as POST /glaccounts); this API adds the ERP reference, idempotent replay and 409 conflicts.
+  title: Fineract ERP Accounts API (Inkomoko GL sync module)
+  version: 1.15.0
+servers:
+- url: /fineract-provider/api
+security:
+- basicAuth: []
+  tenantid: []
+tags:
+- description: "GL accounts mirrored from the ERP chart of accounts, keyed by the\
+    \ ERP reference. The ERP owns the chart of accounts; Fineract holds a matching\
+    \ GL account for each ERP account."
+  name: ERP Accounts
+paths:
+  /v1/erp-accounts/{erpReference}:
+    get:
+      description: "Use this to resolve a sync whose response was lost (e.g. a timeout):\
+        \ if it returns 200, the sync happened. Requires permission READ_GLACCOUNT."
+      operationId: retrieveErpAccount
+      parameters:
+      - description: The ERP's reference for the account
+        example: GL-1200
+        in: path
+        name: erpReference
+        required: true
+        schema:
+          type: string
+          maxLength: 100
+          minLength: 1
+          pattern: "^[A-Za-z0-9._:-]{1,100}$"
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErpAccount"
+          description: Mapped
+        "401":
+          description: Missing or invalid credentials or tenant
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FineractError"
+          description: User lacks permission READ_GLACCOUNT
+        "404":
+          content:
+            application/json:
+              examples:
+                not synced:
+                  description: not synced
+                  value:
+                    httpStatusCode: "404"
+                    userMessageGlobalisationCode: error.msg.resource.not.found
+                    defaultUserMessage: The requested resource is not available.
+                    errors:
+                    - userMessageGlobalisationCode: error.msg.erpaccount.not.found
+                      defaultUserMessage: No GL account is synced for ERP reference
+                        GL-9999
+              schema:
+                $ref: "#/components/schemas/FineractError"
+          description: No GL account is synced for this ERP reference yet
+      summary: Show which GL account an ERP account is mapped to
+      tags:
+      - ERP Accounts
+    put:
+      description: |-
+        The body uses the same fields and validation as core POST /glaccounts.
+        - New ERP reference, GL code free: creates the GL account. 200, outcome CREATED.
+        - Same ERP reference, same payload (key order, whitespace and null fields ignored): 200, outcome UNCHANGED, nothing written.
+        - Same ERP reference, different payload: 409, nothing written.
+        - New ERP reference, GL code already used by another account: 409, nothing written.
+        Requires permission SYNC_GLACCOUNT. Send an Idempotency-Key header to have a retry return the original response (with header x-served-from-cache: true); a retry while the first call is still running returns 425.
+      operationId: syncErpAccount
+      parameters:
+      - description: The ERP's reference for the account
+        example: GL-1200
+        in: path
+        name: erpReference
+        required: true
+        schema:
+          type: string
+          maxLength: 100
+          minLength: 1
+          pattern: "^[A-Za-z0-9._:-]{1,100}$"
+      requestBody:
+        content:
+          application/json:
+            examples:
+              Loan Receivable:
+                description: Loan Receivable
+                value:
+                  name: Loan Receivable
+                  glCode: "1200"
+                  type: 1
+                  usage: 1
+                  manualEntriesAllowed: false
+            schema:
+              $ref: "#/components/schemas/SyncErpAccountRequest"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              examples:
+                created:
+                  description: created
+                  value:
+                    erpReference: GL-1200
+                    glAccountId: 42
+                    glCode: "1200"
+                    outcome: CREATED
+                unchanged:
+                  description: unchanged
+                  value:
+                    erpReference: GL-1200
+                    glAccountId: 42
+                    glCode: "1200"
+                    outcome: UNCHANGED
+              schema:
+                $ref: "#/components/schemas/ErpAccountSyncResult"
+          description: "Created, or already synced with the same payload"
+          headers:
+            x-served-from-cache:
+              description: true when the body is a replay for a repeated Idempotency-Key
+              schema:
+                type: string
+              style: simple
+        "400":
+          content:
+            application/json:
+              examples:
+                invalid ERP reference:
+                  description: invalid ERP reference
+                  value:
+                    httpStatusCode: "400"
+                    errors:
+                    - userMessageGlobalisationCode: validation.msg.erpaccount.erpReference.invalid
+                      parameterName: erpReference
+                missing glCode:
+                  description: missing glCode
+                  value:
+                    httpStatusCode: "400"
+                    userMessageGlobalisationCode: validation.msg.validation.errors.exist
+                    errors:
+                    - userMessageGlobalisationCode: validation.msg.GLAccount.glCode.cannot.be.blank
+                      parameterName: glCode
+                unsupported field:
+                  description: unsupported field
+                  value:
+                    httpStatusCode: "400"
+                    userMessageGlobalisationCode: validation.msg.validation.errors.exist
+                    errors:
+                    - userMessageGlobalisationCode: error.msg.parameter.unsupported
+                      parameterName: currency
+              schema:
+                $ref: "#/components/schemas/FineractError"
+          description: "Invalid ERP reference, missing or invalid field, or a field\
+            \ core doesn't support"
+        "401":
+          description: Missing or invalid credentials or tenant
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FineractError"
+          description: "User lacks permission SYNC_GLACCOUNT, or parentId is not a\
+            \ HEADER account"
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FineractError"
+          description: parentId or tagId does not exist
+        "409":
+          content:
+            application/json:
+              examples:
+                GL code taken:
+                  description: GL code taken
+                  value:
+                    httpStatusCode: "409"
+                    userMessageGlobalisationCode: error.msg.glaccount.sync.code.conflict
+                    defaultUserMessage: GL code 1200 already belongs to another GL
+                      account
+                payload conflict:
+                  description: payload conflict
+                  value:
+                    httpStatusCode: "409"
+                    userMessageGlobalisationCode: error.msg.glaccount.sync.payload.conflict
+                    defaultUserMessage: External reference GL-1200 is already synced
+                      with a different payload
+              schema:
+                $ref: "#/components/schemas/FineractError"
+          description: "ERP reference already synced with a different payload, or\
+            \ GL code already in use"
+        "425":
+          description: A request with the same Idempotency-Key is still being processed;
+            retry later
+      summary: "Create the GL account for an ERP account, or return the one already\
+        \ created"
+      tags:
+      - ERP Accounts
+components:
+  schemas:
+    ErpAccount:
+      type: object
+      description: An ERP account as mirrored in Fineract. A 200 here proves an earlier
+        sync succeeded.
+      properties:
+        erpReference:
+          type: string
+          example: GL-1200
+        glAccountId:
+          type: integer
+          format: int64
+          description: Fineract's GL account id.
+          example: 42
+        glCode:
+          type: string
+          example: "1200"
+        name:
+          type: string
+          description: The name as currently stored in Fineract.
+          example: Loan Receivable
+        syncedAt:
+          type: string
+          description: "When the mapping was created, UTC, ISO-8601."
+          example: 2026-10-12T14:30:00Z
+      required:
+      - erpReference
+      - glAccountId
+      - glCode
+      - name
+      - syncedAt
+    ErpAccountSyncResult:
+      type: object
+      description: "Which GL account the ERP account maps to, and whether this call\
+        \ created it."
+      properties:
+        erpReference:
+          type: string
+          description: The ERP reference from the path.
+          example: GL-1200
+        glAccountId:
+          type: integer
+          format: int64
+          description: Fineract's GL account id. Use it in loan product accounting
+            mappings.
+          example: 42
+        glCode:
+          type: string
+          example: "1200"
+        outcome:
+          type: string
+          description: "`CREATED`: this call created the GL account. `UNCHANGED`:\
+            \ the same payload was already synced, so nothing was written."
+          enum:
+          - CREATED
+          - UNCHANGED
+          example: CREATED
+      required:
+      - erpReference
+      - glAccountId
+      - glCode
+      - outcome
+    FineractError:
+      type: object
+      description: "Fineract's standard error envelope, used for every 4xx response."
+      properties:
+        defaultUserMessage:
+          type: string
+          example: External reference GL-1200 is already synced with a different payload
+        developerMessage:
+          type: string
+          example: The request conflicts with an existing GL account.
+        errors:
+          type: array
+          description: One entry per failed rule.
+          items:
+            $ref: "#/components/schemas/FineractErrorDetail"
+        httpStatusCode:
+          type: string
+          description: "The HTTP status, repeated as a string."
+          example: "409"
+        userMessageGlobalisationCode:
+          type: string
+          description: "Stable machine-readable code. Clients should branch on this,\
+            \ not on the message."
+          example: error.msg.glaccount.sync.payload.conflict
+    FineractErrorDetail:
+      type: object
+      description: One failed rule.
+      properties:
+        defaultUserMessage:
+          type: string
+          example: The parameter `glCode` is mandatory.
+        developerMessage:
+          type: string
+          example: The parameter `glCode` is mandatory.
+        parameterName:
+          type: string
+          description: "The request field the rule applies to, when there is one."
+          example: glCode
+        userMessageGlobalisationCode:
+          type: string
+          example: validation.msg.GLAccount.glCode.cannot.be.blank
+    SyncErpAccountRequest:
+      type: object
+      additionalProperties: false
+      description: "One account from the ERP chart of accounts, in Fineract's GL account\
+        \ shape. These are exactly the fields of core POST /glaccounts and are validated\
+        \ by core; anything else (for example the ERP's `currency`) is rejected with\
+        \ 400. The ERP reference is not in the body: it is the `{erpReference}` path\
+        \ segment."
+      properties:
+        description:
+          type: string
+          description: Optional free text.
+          example: Mirrored from ERP account GL-1200
+          maxLength: 500
+        glCode:
+          type: string
+          description: "GL code, unique across all GL accounts in the tenant. A code\
+            \ already used by another account returns 409. Stored in `acc_gl_account.gl_code`."
+          example: "1200"
+          maxLength: 45
+          minLength: 1
+        manualEntriesAllowed:
+          type: boolean
+          description: Whether manual journal entries may post to this account. ERP-owned
+            accounts normally use `false`.
+          example: false
+        name:
+          type: string
+          description: "Account name, shown in Fineract's chart of accounts. Stored\
+            \ in `acc_gl_account.name`."
+          example: Loan Receivable
+          maxLength: 200
+          minLength: 1
+        parentId:
+          type: integer
+          format: int64
+          description: Optional Fineract id of the parent account. It must exist (404)
+            and be a HEADER account (403).
+          example: 10
+          minimum: 1
+        tagId:
+          type: integer
+          format: int64
+          description: "Optional tag: a code value from the tag code list for this\
+            \ account type (404 if unknown)."
+          example: 3
+          minimum: 1
+        type:
+          type: integer
+          format: int32
+          description: "Account type: `1` ASSET, `2` LIABILITY, `3` EQUITY, `4` INCOME,\
+            \ `5` EXPENSE. The Integration Service maps the ERP's type names to these\
+            \ values."
+          enum:
+          - 1
+          - 2
+          - 3
+          - 4
+          - 5
+          example: 1
+        usage:
+          type: integer
+          format: int32
+          description: "`1` DETAIL (transactions post to it), `2` HEADER (groups other\
+            \ accounts). Core's validator treats it as optional, but the column is\
+            \ NOT NULL, so this API requires it."
+          enum:
+          - 1
+          - 2
+          example: 1
+      required:
+      - glCode
+      - manualEntriesAllowed
+      - name
+      - type
+      - usage
+  securitySchemes:
+    basicAuth:
+      scheme: basic
+      type: http
+    tenantid:
+      in: header
+      name: fineract-platform-tenantid
+      type: apiKey
