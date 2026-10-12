@@ -4,7 +4,7 @@ info:
     Custom module for Apache Fineract 1.15.0. Mirrors the ERP chart of accounts into Fineract GL accounts,
     one GL account per ERP reference. GL account fields and their validation are Fineract core's own
     (the same rules as POST /glaccounts); this API adds the ERP reference, idempotent replay and 409 conflicts.
-  title: Fineract ERP Accounts API (Inkomoko GL sync module)
+  title: Fineract ERP Integration API (Inkomoko GL sync module)
   version: 1.15.0
 servers:
 - url: /fineract-provider/api
@@ -15,9 +15,9 @@ tags:
 - description: "GL accounts mirrored from the ERP chart of accounts, keyed by the\
     \ ERP reference. The ERP owns the chart of accounts; Fineract holds a matching\
     \ GL account for each ERP account."
-  name: ERP Accounts
+  name: ERP Integration
 paths:
-  /v1/erp-accounts/{erpReference}:
+  /v1/erp-integration/accounts/{erpReference}:
     get:
       description: "Use this to resolve a sync whose response was lost (e.g. a timeout):\
         \ if it returns 200, the sync happened. Requires permission READ_GLACCOUNT."
@@ -67,7 +67,7 @@ paths:
           description: No GL account is synced for this ERP reference yet
       summary: Show which GL account an ERP account is mapped to
       tags:
-      - ERP Accounts
+      - ERP Integration
     put:
       description: |-
         The body uses the same fields and validation as core POST /glaccounts.
@@ -236,7 +236,7 @@ paths:
       summary: "Create the GL account for an ERP account, or return the one already\
         \ created"
       tags:
-      - ERP Accounts
+      - ERP Integration
 components:
   schemas:
     ErpAccount:
