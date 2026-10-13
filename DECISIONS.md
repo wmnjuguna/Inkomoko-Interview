@@ -11,7 +11,7 @@ This file explains the choices I made and why.
 - **JDK 21 and Gradle 8.14.5.** I took both from the Fineract tag itself, not from my own choice.
 - **PostgreSQL 18.3, Alpine image.** Fineract 1.15.0 uses this version in its own Docker files, so it is tested with it. One server, with one database and one user per service.
 - **Alpine images** for the build and the runtime, to keep images small.
-- **Python 3.13** for the Mock ERP, on `python:3.13.16-alpine3.24`. Packages are locked with uv (`uv.lock`). The code is checked with ruff and with mypy in strict mode.
+- **Python 3.13** for the Mock ERP and the Integration Service, on `python:3.13.16-alpine3.24`. Packages are locked with uv (`uv.lock`). The code is checked with ruff and with mypy in strict mode.
 
 ## The Fineract plugin
 
@@ -96,7 +96,7 @@ I did not add a database rule (a CHECK constraint) for this. It would change a F
 
 ### Permissions
 
-The plugin's migration creates the `SYNC_GLACCOUNT` permission. The setup script will give it to the API user. That keeps all the role setup in one place.
+The plugin's migration creates the `SYNC_GLACCOUNT` permission. The setup step gives it to the API user's role. That keeps all the role setup in one place.
 
 ### 409 for conflicts
 
@@ -165,6 +165,26 @@ The operation codes are `CLI` (new client), `APP` (loan application), `APR` (app
 
 Fineract's loan state already refuses a second disbursement on a single-disbursement loan. That is the last line of defence today. I plan a small extra guard inside Fineract, so even a broken caller can't pay a loan out twice. It is a time-boxed stretch item, built only after the required tiers pass. If it doesn't fit in the time, I will write it up here as a known gap, with the evidence.
 
+### GL sync is started by a call
+
+**Chosen:** GL sync runs when someone calls `POST /api/accounts/sync` (or the one-account route). The setup step calls the same code once, before it creates the loan product.
+
+| Option | Verdict |
+|---|---|
+| **An explicit call** (chosen) | Each run does the same steps in the same order, so the result is easy to check. Setup can sync the chart and then check every account before the loan product. |
+| A timer | Sync only creates accounts. Changes and closures are out of scope, so there is nothing to keep checking for. |
+| An event from the ERP | The Mock ERP has no events, and it would add a queue. |
+
+Rules of one run:
+
+- **Parents first.** A child is skipped while its parent is not synced.
+- **One run at a time.** A Postgres advisory lock covers the whole run. A second caller gets `202` with the current state and sends nothing. Tested with 4 calls at the same time: each account was sent once.
+- **Never resend blindly.** If a send got no clear answer (timeout, `5xx`), the account is looked up on the plugin first. It is only sent again if the lookup shows it is not there.
+- **Fineract down.** The run stops calling Fineract and leaves the rest `SYNC_PENDING`. Calling the sync again finishes the job. There is no background retry for GL sync.
+- **Keys.** `Idempotency-Key: GLS:<reference>:<attempt>:<hash8>`. `hash8` is the start of the hash of the body. The attempt number changes on each new attempt, so an old cached failure is never replayed. The hash part means different data never gets the cached answer for old data.
+- **The ERP changes an account.** A synced account stays `SYNCED`, with the warning `changed in ERP; updates are out of scope`. Fineract is not called. Its children and the loan product can still use it. An account Fineract never accepted takes the new data and is sent.
+- **What partners see.** `last_error` holds only our own words and Fineract error codes. It never holds Fineract's own text or body, which can include Fineract ids.
+
 ## Sync or async
 
 **Chosen:** the Integration Service calls Fineract directly and waits for the answer. Journal entries go to the ERP through an outbox table and a background loop. There is no message queue.
@@ -196,7 +216,7 @@ Fineract has no event for a new GL account anyway, so GL sync stays a direct cal
 
 ### What Fineract 1.15.0 already does
 
-- **The `Idempotency-Key` header.** Fineract saves each key, in its own transaction, before it does the work. If the same key comes again after the work is done, it returns the first answer with `x-served-from-cache: true`. While the work is still running, it returns 425. After an error, it returns the saved error. Seen working with my plugin.
+- **The `Idempotency-Key` header.** Fineract saves each key, in its own transaction, before it does the work. If the same key comes again after the work is done, it returns the first answer with `x-served-from-cache: true`. While the work is still running, it returns 425. After an error, it returns the saved error. Seen working with my plugin, and in `make simulate-gl-sync-4x`: 4 calls at once led to exactly one Fineract command for the new account's key.
 - **Unique `externalId`** on clients, loans and loan transactions.
 - **What Fineract does not do, so we do it:**
   - It does not compare the request data. We compare a hash and answer 409.
@@ -221,16 +241,68 @@ The ERP has its own unique rule on the reference, and its own debits-equal-credi
 - Wait 1 s, then 2 s, then 4 s and so on, up to 60 s, at most 8 times. Then mark it `NEEDS_RECONCILIATION`.
 - No separate worker. Recovery runs at start-up, then in a loop, and on demand with `POST /admin/recover`.
 
-## Fineract settings (Part B) *(planned)*
+## Fineract settings (Part B)
+
+All of these are made by the setup step (`python -m integration_service.setup`, the compose service `setup`). The settings are in `fineract/configuration/`. Each row was checked on a clean stack: see `evidence/P1/`.
 
 | Setting | Choice | Why |
 |---|---|---|
-| Office | `Kigali Main Office`, under the default Head Office *(assumption)* | Keeps Fineract's top office as it is |
-| Currency | RWF, no decimals | RWF has no cents |
-| Loan product | "SME Asset Finance": 18% a year, 12 monthly payments, declining balance, equal payments, paid out once | The values the brief suggests |
-| Accounting | Cash-based | Journal entries only on payout and repayment, which matches Part H. Reconciliation is one entry per payment. It is less realistic, because no interest is booked between payments. |
-| GL accounts | All owned by the ERP and synced. Codes follow the usual pattern: 1xxx assets, 2xxx liabilities, 4xxx income, 5xxx expenses. | The product needs an account of the right type for each role. I will read the product template to see which roles are required *(to check)*. |
-| API user | Its own role with only the permissions the Integration Service needs | Least privilege. The admin user is only used by the setup script. |
+| Office | `Kigali Main Office` (external id `OFF-KGL-MAIN`), under the default Head Office *(assumption)* | Keeps Fineract's top office as it is. Fineract only shows a user the clients and loans in its own office and below, so the API user sits in this office too. |
+| Currency | RWF, no decimals | RWF has no cents. Fineract already knows RWF with 0 decimals. Setup adds it to the organisation's list and keeps the others, because `PUT /currencies` replaces the whole list. The product sets 0 decimals too. |
+| Loan product | "SME Asset Finance" (`SMEA`, external id `PRD-SME-ASSET-FINANCE`): 18% a year, 12 monthly payments, declining balance, equal payments, paid out once, RWF. Default amount 5,000,000 RWF (100,000 to 50,000,000). Strategy `mifos-standard-strategy`. | The values the brief suggests. Checked with `GET /loanproducts/1` in `evidence/P1/product.txt`. |
+| Accounting | Cash-based (`accountingRule` 2) | Journal entries only on payout and repayment, which matches Part H. Reconciliation is one entry per payment. It is less realistic, because no interest is booked between payments. |
+| GL accounts | All owned by the ERP and synced. Codes follow the usual pattern: 1xxx assets, 2xxx liabilities, 4xxx income, 5xxx expenses. | In 1.15.0, cash-based accounting needs 9 GL roles. The ERP seed has a DETAIL account of the right type for each one (table below). The optional charge-off and goodwill roles are left out, because the brief does not use them. |
+| API user | `integration-api`, with its own role `Integration Service` (11 permissions, below) | Least privilege. The admin user is only used by the setup step. |
+
+**The 9 GL roles**, as set on the product and checked against the ERP chart and `gl_sync`:
+
+| Fineract role | GL type it must have | ERP account |
+|---|---|---|
+| `fundSourceAccountId` | ASSET or LIABILITY | GL-1100 Bank |
+| `loanPortfolioAccountId` | ASSET | GL-1200 Loan Receivable |
+| `transfersInSuspenseAccountId` | ASSET | GL-1300 Transfers in Suspense |
+| `interestOnLoanAccountId` | INCOME | GL-4100 Interest Income |
+| `incomeFromFeeAccountId` | INCOME | GL-4200 Fee Income |
+| `incomeFromPenaltyAccountId` | INCOME | GL-4300 Penalty Income |
+| `incomeFromRecoveryAccountId` | INCOME | GL-4400 Recovery Income |
+| `writeOffAccountId` | EXPENSE | GL-5100 Loan Write-off |
+| `overpaymentLiabilityAccountId` | LIABILITY | GL-2100 Overpayment Liability |
+
+Fineract checks the GL type of each role, but not DETAIL or HEADER. We only map DETAIL accounts, because nothing should post to a heading.
+
+### The API user's permissions
+
+The role `Integration Service` has exactly these 11 permissions, and setup removes any others:
+
+| Permission | Why the service needs it |
+|---|---|
+| `SYNC_GLACCOUNT` | `PUT` on the plugin (GL sync) |
+| `READ_GLACCOUNT` | `GET` on the plugin, to look up a sync that had no clear answer |
+| `CREATE_CLIENT`, `ACTIVATE_CLIENT`, `READ_CLIENT` | Part C: create a client, activate it, find it by external id |
+| `CREATE_LOAN`, `APPROVE_LOAN`, `DISBURSE_LOAN`, `REPAYMENT_LOAN` | Part D: the loan steps |
+| `READ_LOAN` | Find loans and their transactions by external id. In 1.15.0 this also covers loan transactions. There is no separate `READ_LOANTRANSACTION`. |
+| `READ_LOANPRODUCT` | Find the loan product by its external id |
+
+Checked on the clean stack (`evidence/P1/least-privilege.txt`): the user can read a GL mapping and the loan product, and gets `403` when it tries to create a GL account, create a user, change role permissions or create a loan product. The client and loan permissions are given now, but Parts C and D are not built yet.
+
+### Re-running setup
+
+Each step looks first, then creates only what is missing. A second run on the clean stack printed `exists` for every step and sent nothing to Fineract (`evidence/P1/setup-second-run.txt`). Some rules:
+
+- The office is found by name. If an office with that name sits under another parent, setup stops.
+- The role's permissions are set back to exactly the list in `role.json`. An unknown permission code stops setup before anything is written.
+- The API user's office and role are set back if they changed. Its password is never changed on a re-run. Fineract can't show it, so there is nothing to compare. Instead, setup logs in as the user once. A wrong password or a missing permission stops setup with a clear message.
+- An existing loan product is never changed, because loans may already use it. If its key settings differ from the config, setup stops and lists the differences.
+- Setup refuses to create the loan product unless all 9 GL accounts it needs are `SYNCED`.
+
+### What I learned about Fineract 1.15.0 while setting it up
+
+- **Two loan product fields have new names.** Older docs say `allowPartialPeriodInterestCalcualtion` (misspelled) and `canDefineEmiAmount`. 1.15.0 refuses both as unsupported and wants `allowPartialPeriodInterestCalculation` and `canDefineInstallmentAmount`. The first real run of setup on a clean stack failed on this, and I fixed it with a test.
+- Some fields only work with the newer `advanced-payment-allocation-strategy`: `chargeOffBehaviour`, `supportedInterestRefundTypes` and `fixedLength`. Fineract also refuses `enableAccrualActivityPosting` with cash accounting. Setup never sends them. *(Read in the source, not tried.)*
+- A new role needs a description as well as a name. *(Read in the source, not tried.)*
+- The active password policy (read from Fineract's database) needs 12 to 50 characters, upper and lower case, a digit and a symbol, and no character twice in a row. So `change-me-...` passwords fail. The default in `.env.example` is `Change-Me-Fineract-Api-1`.
+- Every body with a date or a number as text needs `"locale": "en"` (and `"dateFormat"` for dates). Setup sends them with the office and the loan product. *(Read in the source.)*
+- External ids with a colon, like `DSB:FIN-2026-000001`, work in Fineract's external-id URLs without escaping.
 
 ## Journal entries (Part H) *(planned)*
 
@@ -256,4 +328,8 @@ No message queue, no Redis, no separate worker, no OAuth. More will be added as 
 
 ## Known weaknesses
 
-To be filled in from what testing shows.
+To be filled in from what testing shows. So far:
+
+- **GL sync only creates accounts.** If the ERP renames an account after it is synced, Fineract keeps the old name. The report shows a warning, but nothing fixes it.
+- **The GL sync routes use the partner key.** Syncing the chart is an operator task. In production it should sit on an internal route.
+- **Test data stays in Fineract.** The live tests and `make simulate-gl-sync-4x` add GL accounts with 8-digit codes starting with 7, and a few test users and roles. They never delete anything, so the shared Fineract grows. `make reset` clears it.
