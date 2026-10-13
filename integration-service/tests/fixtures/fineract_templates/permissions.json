@@ -1,0 +1,98 @@
+[
+  {
+    "grouping": "accounting",
+    "code": "READ_GLACCOUNT",
+    "entityName": "GLACCOUNT",
+    "actionName": "READ",
+    "selected": true
+  },
+  {
+    "grouping": "accounting",
+    "code": "SYNC_GLACCOUNT",
+    "entityName": "GLACCOUNT",
+    "actionName": "SYNC",
+    "selected": true
+  },
+  {
+    "grouping": "organisation",
+    "code": "READ_LOANPRODUCT",
+    "entityName": "LOANPRODUCT",
+    "actionName": "READ",
+    "selected": true
+  },
+  {
+    "grouping": "organisation",
+    "code": "READ_OFFICE",
+    "entityName": "OFFICE",
+    "actionName": "READ",
+    "selected": true
+  },
+  {
+    "grouping": "portfolio",
+    "code": "ACTIVATE_CLIENT",
+    "entityName": "CLIENT",
+    "actionName": "ACTIVATE",
+    "selected": true
+  },
+  {
+    "grouping": "portfolio",
+    "code": "CREATE_CLIENT",
+    "entityName": "CLIENT",
+    "actionName": "CREATE",
+    "selected": true
+  },
+  {
+    "grouping": "portfolio",
+    "code": "READ_CLIENT",
+    "entityName": "CLIENT",
+    "actionName": "READ",
+    "selected": true
+  },
+  {
+    "grouping": "portfolio",
+    "code": "CREATE_LOAN",
+    "entityName": "LOAN",
+    "actionName": "CREATE",
+    "selected": true
+  },
+  {
+    "grouping": "portfolio",
+    "code": "DELETE_LOAN",
+    "entityName": "LOAN",
+    "actionName": "DELETE",
+    "selected": true
+  },
+  {
+    "grouping": "portfolio",
+    "code": "READ_LOAN",
+    "entityName": "LOAN",
+    "actionName": "READ",
+    "selected": true
+  },
+  {
+    "grouping": "special",
+    "code": "ALL_FUNCTIONS",
+    "selected": true
+  },
+  {
+    "grouping": "transaction_loan",
+    "code": "APPROVE_LOAN",
+    "entityName": "LOAN",
+    "actionName": "APPROVE",
+    "selected": true
+  },
+  {
+    "grouping": "transaction_loan",
+    "code": "DISBURSE_LOAN",
+    "entityName": "LOAN",
+    "actionName": "DISBURSE",
+    "selected": true
+  },
+  {
+    "grouping": "transaction_loan",
+    "code": "REPAYMENT_LOAN",
+    "entityName": "LOAN",
+    "actionName": "REPAYMENT",
+    "selected": true
+  }
+]

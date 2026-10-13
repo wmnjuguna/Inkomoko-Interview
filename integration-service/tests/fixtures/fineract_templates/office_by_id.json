@@ -1,0 +1,14 @@
+{
+  "id": 2,
+  "name": "Kigali Main Office",
+  "nameDecorated": "....Kigali Main Office",
+  "externalId": "OFF-KGL-MAIN",
+  "openingDate": [
+    2026,
+    1,
+    1
+  ],
+  "hierarchy": ".2.",
+  "parentId": 1,
+  "parentName": "Head Office"
+}

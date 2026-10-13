@@ -1,0 +1,34 @@
+{
+  "allowedOffices": [
+    {
+      "id": 1,
+      "name": "Head Office",
+      "nameDecorated": "Head Office"
+    },
+    {
+      "id": 2,
+      "name": "Kigali Main Office",
+      "nameDecorated": "....Kigali Main Office"
+    }
+  ],
+  "availableRoles": [
+    {
+      "id": 1,
+      "name": "Super user",
+      "description": "This role provides all application permissions.",
+      "disabled": false
+    },
+    {
+      "id": 3,
+      "name": "Integration Service",
+      "description": "Least-privilege role for the Inkomoko Integration Service API user",
+      "disabled": false
+    },
+    {
+      "id": 4,
+      "name": "IT Integration Service copy",
+      "description": "Least-privilege role for the Inkomoko Integration Service API user",
+      "disabled": false
+    }
+  ]
+}

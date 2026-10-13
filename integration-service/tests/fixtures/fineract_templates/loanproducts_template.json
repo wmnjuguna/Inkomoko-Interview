@@ -1,0 +1,487 @@
+{
+  "currency": {
+    "code": "",
+    "name": "",
+    "decimalPlaces": 0,
+    "inMultiplesOf": 0,
+    "displaySymbol": "",
+    "nameCode": "",
+    "displayLabel": " []"
+  },
+  "currencyOptions": [
+    {
+      "code": "RWF",
+      "name": "Rwanda Franc",
+      "decimalPlaces": 0,
+      "nameCode": "currency.RWF",
+      "displayLabel": "Rwanda Franc [RWF]"
+    },
+    {
+      "code": "USD",
+      "name": "US Dollar",
+      "decimalPlaces": 2,
+      "displaySymbol": "$",
+      "nameCode": "currency.USD",
+      "displayLabel": "US Dollar ($)"
+    }
+  ],
+  "repaymentFrequencyType": {
+    "id": 2,
+    "code": "repaymentFrequency.periodFrequencyType.months",
+    "value": "Months"
+  },
+  "repaymentFrequencyTypeOptions": [
+    {
+      "id": 0,
+      "code": "repaymentFrequency.periodFrequencyType.days",
+      "value": "Days"
+    },
+    {
+      "id": 1,
+      "code": "repaymentFrequency.periodFrequencyType.weeks",
+      "value": "Weeks"
+    },
+    {
+      "id": 2,
+      "code": "repaymentFrequency.periodFrequencyType.months",
+      "value": "Months"
+    }
+  ],
+  "interestRateFrequencyType": {
+    "id": 2,
+    "code": "interestRateFrequency.periodFrequencyType.months",
+    "value": "Per month"
+  },
+  "interestRateFrequencyTypeOptions": [
+    {
+      "id": 2,
+      "code": "interestRateFrequency.periodFrequencyType.months",
+      "value": "Per month"
+    },
+    {
+      "id": 3,
+      "code": "interestRateFrequency.periodFrequencyType.years",
+      "value": "Per year"
+    },
+    {
+      "id": 4,
+      "code": "interestRateFrequency.periodFrequencyType.whole_term",
+      "value": "Whole term"
+    }
+  ],
+  "amortizationType": {
+    "id": 1,
+    "code": "amortizationType.equal.installments",
+    "value": "Equal installments"
+  },
+  "amortizationTypeOptions": [
+    {
+      "id": 1,
+      "code": "amortizationType.equal.installments",
+      "value": "Equal installments"
+    },
+    {
+      "id": 0,
+      "code": "amortizationType.equal.principal",
+      "value": "Equal principal payments"
+    }
+  ],
+  "interestType": {
+    "id": 0,
+    "code": "interestType.declining.balance",
+    "value": "Declining Balance"
+  },
+  "interestTypeOptions": [
+    {
+      "id": 1,
+      "code": "interestType.flat",
+      "value": "Flat"
+    },
+    {
+      "id": 0,
+      "code": "interestType.declining.balance",
+      "value": "Declining Balance"
+    }
+  ],
+  "interestCalculationPeriodType": {
+    "id": 1,
+    "code": "interestCalculationPeriodType.same.as.repayment.period",
+    "value": "Same as repayment period"
+  },
+  "interestCalculationPeriodTypeOptions": [
+    {
+      "id": 0,
+      "code": "interestCalculationPeriodType.daily",
+      "value": "Daily"
+    },
+    {
+      "id": 1,
+      "code": "interestCalculationPeriodType.same.as.repayment.period",
+      "value": "Same as repayment period"
+    }
+  ],
+  "daysInYearType": {
+    "id": 1,
+    "code": "DaysInYearType.actual",
+    "value": "Actual"
+  },
+  "daysInYearTypeOptions": [
+    {
+      "id": 1,
+      "code": "DaysInYearType.actual",
+      "value": "Actual"
+    },
+    {
+      "id": 360,
+      "code": "DaysInYearType.days360",
+      "value": "360 Days"
+    },
+    {
+      "id": 364,
+      "code": "DaysInYearType.days364",
+      "value": "364 Days"
+    },
+    {
+      "id": 365,
+      "code": "DaysInYearType.days365",
+      "value": "365 Days"
+    }
+  ],
+  "daysInMonthType": {
+    "id": 1,
+    "code": "DaysInMonthType.actual",
+    "value": "Actual"
+  },
+  "daysInMonthTypeOptions": [
+    {
+      "id": 1,
+      "code": "DaysInMonthType.actual",
+      "value": "Actual"
+    },
+    {
+      "id": 30,
+      "code": "DaysInMonthType.days360",
+      "value": "30 Days"
+    }
+  ],
+  "repaymentStartDateType": {
+    "id": 1,
+    "code": "repaymentStartDateType.disbursementDate",
+    "value": "Disbursement Date"
+  },
+  "repaymentStartDateTypeOptions": [
+    {
+      "id": 1,
+      "code": "repaymentStartDateType.disbursementDate",
+      "value": "Disbursement Date"
+    },
+    {
+      "id": 2,
+      "code": "repaymentStartDateType.submittedOnDate",
+      "value": "Submitted On Date"
+    }
+  ],
+  "loanScheduleType": {
+    "id": 0,
+    "code": "CUMULATIVE",
+    "value": "Cumulative"
+  },
+  "loanScheduleTypeOptions": [
+    {
+      "id": 1,
+      "code": "CUMULATIVE",
+      "value": "Cumulative"
+    },
+    {
+      "id": 2,
+      "code": "PROGRESSIVE",
+      "value": "Progressive"
+    }
+  ],
+  "accountingRule": {
+    "id": 1,
+    "code": "accountingRuleType.none",
+    "value": "NONE"
+  },
+  "accountingRuleOptions": [
+    {
+      "id": 1,
+      "code": "accountingRuleType.none",
+      "value": "NONE"
+    },
+    {
+      "id": 2,
+      "code": "accountingRuleType.cash",
+      "value": "CASH BASED"
+    },
+    {
+      "id": 3,
+      "code": "accountingRuleType.accrual.periodic",
+      "value": "ACCRUAL PERIODIC"
+    },
+    {
+      "id": 4,
+      "code": "accountingRuleType.accrual.upfront",
+      "value": "ACCRUAL UPFRONT"
+    }
+  ],
+  "transactionProcessingStrategyOptions": [
+    {
+      "code": "creocore-strategy",
+      "name": "Creocore Unique"
+    },
+    {
+      "code": "early-repayment-strategy",
+      "name": "Early Repayment Strategy"
+    },
+    {
+      "code": "mifos-standard-strategy",
+      "name": "Penalties, Fees, Interest, Principal order"
+    },
+    {
+      "code": "heavensfamily-strategy",
+      "name": "HeavensFamily Unique"
+    },
+    {
+      "code": "interest-principal-penalties-fees-order-strategy",
+      "name": "Interest, Principal, Penalties, Fees Order"
+    },
+    {
+      "code": "principal-interest-penalties-fees-order-strategy",
+      "name": "Principal, Interest, Penalties, Fees Order"
+    },
+    {
+      "code": "rbi-india-strategy",
+      "name": "Overdue/Due Fee/Int,Principal"
+    },
+    {
+      "code": "due-penalty-fee-interest-principal-in-advance-principal-penalty-fee-interest-strategy",
+      "name": "Due penalty, fee, interest, principal, In advance principal, penalty, fee, interest"
+    },
+    {
+      "code": "due-penalty-interest-principal-fee-in-advance-penalty-interest-principal-fee-strategy",
+      "name": "Due penalty, interest, principal, fee, In advance penalty, interest, principal, fee"
+    },
+    {
+      "code": "advanced-payment-allocation-strategy",
+      "name": "Advanced payment allocation strategy"
+    }
+  ],
+  "accountingMappingOptions": {
+    "liabilityAccountOptions": [
+      {
+        "id": 6,
+        "name": "Overpayment Liability",
+        "parentId": 5,
+        "glCode": "2100",
+        "disabled": false,
+        "manualEntriesAllowed": true,
+        "type": {
+          "id": 2,
+          "code": "accountType.liability",
+          "value": "LIABILITY"
+        },
+        "usage": {
+          "id": 1,
+          "code": "accountUsage.detail",
+          "value": "DETAIL"
+        },
+        "description": "Synced from ERP account GL-2100",
+        "nameDecorated": "....Overpayment Liability",
+        "tagId": {
+          "id": 0
+        }
+      }
+    ],
+    "expenseAccountOptions": [
+      {
+        "id": 13,
+        "name": "Loan Write-off",
+        "parentId": 12,
+        "glCode": "5100",
+        "disabled": false,
+        "manualEntriesAllowed": true,
+        "type": {
+          "id": 5,
+          "code": "accountType.expense",
+          "value": "EXPENSE"
+        },
+        "usage": {
+          "id": 1,
+          "code": "accountUsage.detail",
+          "value": "DETAIL"
+        },
+        "description": "Synced from ERP account GL-5100",
+        "nameDecorated": "....Loan Write-off",
+        "tagId": {
+          "id": 0
+        }
+      }
+    ],
+    "assetAccountOptions": [
+      {
+        "id": 2,
+        "name": "Bank",
+        "parentId": 1,
+        "glCode": "1100",
+        "disabled": false,
+        "manualEntriesAllowed": true,
+        "type": {
+          "id": 1,
+          "code": "accountType.asset",
+          "value": "ASSET"
+        },
+        "usage": {
+          "id": 1,
+          "code": "accountUsage.detail",
+          "value": "DETAIL"
+        },
+        "description": "Synced from ERP account GL-1100",
+        "nameDecorated": "....Bank",
+        "tagId": {
+          "id": 0
+        }
+      },
+      {
+        "id": 3,
+        "name": "Loan Receivable",
+        "parentId": 1,
+        "glCode": "1200",
+        "disabled": false,
+        "manualEntriesAllowed": true,
+        "type": {
+          "id": 1,
+          "code": "accountType.asset",
+          "value": "ASSET"
+        },
+        "usage": {
+          "id": 1,
+          "code": "accountUsage.detail",
+          "value": "DETAIL"
+        },
+        "description": "Synced from ERP account GL-1200",
+        "nameDecorated": "....Loan Receivable",
+        "tagId": {
+          "id": 0
+        }
+      },
+      {
+        "id": 4,
+        "name": "Transfers in Suspense",
+        "parentId": 1,
+        "glCode": "1300",
+        "disabled": false,
+        "manualEntriesAllowed": true,
+        "type": {
+          "id": 1,
+          "code": "accountType.asset",
+          "value": "ASSET"
+        },
+        "usage": {
+          "id": 1,
+          "code": "accountUsage.detail",
+          "value": "DETAIL"
+        },
+        "description": "Synced from ERP account GL-1300",
+        "nameDecorated": "....Transfers in Suspense",
+        "tagId": {
+          "id": 0
+        }
+      }
+    ],
+    "incomeAccountOptions": [
+      {
+        "id": 8,
+        "name": "Interest Income",
+        "parentId": 7,
+        "glCode": "4100",
+        "disabled": false,
+        "manualEntriesAllowed": true,
+        "type": {
+          "id": 4,
+          "code": "accountType.income",
+          "value": "INCOME"
+        },
+        "usage": {
+          "id": 1,
+          "code": "accountUsage.detail",
+          "value": "DETAIL"
+        },
+        "description": "Synced from ERP account GL-4100",
+        "nameDecorated": "....Interest Income",
+        "tagId": {
+          "id": 0
+        }
+      },
+      {
+        "id": 9,
+        "name": "Fee Income",
+        "parentId": 7,
+        "glCode": "4200",
+        "disabled": false,
+        "manualEntriesAllowed": true,
+        "type": {
+          "id": 4,
+          "code": "accountType.income",
+          "value": "INCOME"
+        },
+        "usage": {
+          "id": 1,
+          "code": "accountUsage.detail",
+          "value": "DETAIL"
+        },
+        "description": "Synced from ERP account GL-4200",
+        "nameDecorated": "....Fee Income",
+        "tagId": {
+          "id": 0
+        }
+      },
+      {
+        "id": 10,
+        "name": "Penalty Income",
+        "parentId": 7,
+        "glCode": "4300",
+        "disabled": false,
+        "manualEntriesAllowed": true,
+        "type": {
+          "id": 4,
+          "code": "accountType.income",
+          "value": "INCOME"
+        },
+        "usage": {
+          "id": 1,
+          "code": "accountUsage.detail",
+          "value": "DETAIL"
+        },
+        "description": "Synced from ERP account GL-4300",
+        "nameDecorated": "....Penalty Income",
+        "tagId": {
+          "id": 0
+        }
+      },
+      {
+        "id": 11,
+        "name": "Recovery Income",
+        "parentId": 7,
+        "glCode": "4400",
+        "disabled": false,
+        "manualEntriesAllowed": true,
+        "type": {
+          "id": 4,
+          "code": "accountType.income",
+          "value": "INCOME"
+        },
+        "usage": {
+          "id": 1,
+          "code": "accountUsage.detail",
+          "value": "DETAIL"
+        },
+        "description": "Synced from ERP account GL-4400",
+        "nameDecorated": "....Recovery Income",
+        "tagId": {
+          "id": 0
+        }
+      }
+    ]
+  }
+}

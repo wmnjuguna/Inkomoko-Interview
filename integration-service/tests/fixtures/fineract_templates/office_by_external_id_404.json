@@ -1,0 +1,19 @@
+{
+  "developerMessage": "The requested resource is not available.",
+  "httpStatusCode": "404",
+  "defaultUserMessage": "The requested resource is not available.",
+  "userMessageGlobalisationCode": "error.msg.resource.not.found",
+  "errors": [
+    {
+      "developerMessage": "Office with external identifier org.apache.fineract.infrastructure.core.domain.ExternalId@860d3a9c does not exist",
+      "defaultUserMessage": "Office with external identifier org.apache.fineract.infrastructure.core.domain.ExternalId@860d3a9c does not exist",
+      "userMessageGlobalisationCode": "error.msg.office.external.id.invalid",
+      "parameterName": "id",
+      "args": [
+        {
+          "value": "NOPE-404"
+        }
+      ]
+    }
+  ]
+}

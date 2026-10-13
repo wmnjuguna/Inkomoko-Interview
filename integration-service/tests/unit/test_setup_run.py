@@ -3,13 +3,19 @@ refusal to make the loan product before its GL accounts are synced, and the exit
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 import pytest
 
-from integration_service.clients.errors import FineractRejected, FineractUnavailable
+from integration_service.clients.errors import (
+    FineractNotFound,
+    FineractRejected,
+    FineractUnavailable,
+)
 from integration_service.clients.fineract import ErpAccountMapping
 from integration_service.services.gl_sync import AccountStatus, SyncReport
 from integration_service.setup import run as setup_run
@@ -19,6 +25,7 @@ from integration_service.setup.run import SetupEnv, main, run_setup, wait_until_
 from integration_service.setup.steps import SetupError
 
 PASSWORD = "Int3gration-Svc!2026"
+FIXTURES = Path(__file__).parent.parent / "fixtures" / "fineract_templates"
 
 
 def login_ok() -> None:
@@ -45,7 +52,9 @@ class FakeFineract:
 
     def __init__(self) -> None:
         self.calls: list[str] = []
-        self.offices: list[dict[str, Any]] = [{"id": 1, "name": "Head Office"}]
+        self.offices: list[dict[str, Any]] = [
+            {"id": 1, "name": "Head Office", "externalId": "1", "openingDate": [2009, 1, 1]}
+        ]
         self.currencies = ["USD"]
         self.roles: list[dict[str, Any]] = []
         self.selected: dict[int, set[str]] = {}
@@ -62,8 +71,27 @@ class FakeFineract:
         self.calls.append(f"GET {path}")
         if path == "/offices":
             return self.offices
+        if path == "/offices/template":
+            return {"openingDate": [2026, 10, 13], "allowedParents": self.offices}
+        if path.startswith("/offices/external-id/"):
+            external_id = path.rsplit("/", 1)[1]
+            found = [o for o in self.offices if o.get("externalId") == external_id]
+            if not found:
+                raise FineractNotFound(404, {"httpStatusCode": "404"})
+            return found[0]
+        if path.startswith("/offices/"):
+            return next(o for o in self.offices if o["id"] == int(path.split("/")[2]))
         if path == "/currencies":
-            return {"selectedCurrencyOptions": [{"code": c} for c in self.currencies]}
+            return {
+                "selectedCurrencyOptions": [{"code": c} for c in self.currencies],
+                "currencyOptions": [
+                    {"code": c} for c in ("RWF", "KES") if c not in self.currencies
+                ],
+            }
+        if path == "/permissions":
+            return [{"code": c, "selected": False} for c in PERMISSIONS]
+        if path == "/users/template":
+            return {"allowedOffices": self.offices, "availableRoles": self.roles}
         if path == "/roles":
             return self.roles
         if path.startswith("/roles/"):
@@ -77,6 +105,16 @@ class FakeFineract:
             return self.users
         if path == "/loanproducts":
             return [{"id": p["id"], "name": p["name"]} for p in self.products]
+        if path == "/loanproducts/template":
+            template = json.loads((FIXTURES / "loanproducts_template.json").read_text())
+            accounts = [
+                {"id": gl_id, "glCode": ref.removeprefix("GL-")}
+                for ref, gl_id in self.gl_ids.items()
+            ]
+            template["accountingMappingOptions"] = {
+                key: accounts for key in template["accountingMappingOptions"]
+            }
+            return template
         if path.startswith("/loanproducts/"):
             body = next(p["body"] for p in self.products if p["id"] == int(path.split("/")[2]))
             return _as_fineract_shows(body)
@@ -92,7 +130,17 @@ class FakeFineract:
     ) -> Any:
         self.calls.append(f"POST {path}")
         if path == "/offices":
-            self.offices.append({"id": 2, "name": body["name"], "parentId": body["parentId"]})
+            parent = next(o for o in self.offices if o["id"] == body["parentId"])
+            self.offices.append(
+                {
+                    "id": 2,
+                    "name": body["name"],
+                    "externalId": body["externalId"],
+                    "openingDate": body["openingDate"],
+                    "parentId": parent["id"],
+                    "parentName": parent["name"],
+                }
+            )
             return {"officeId": 2}
         if path == "/roles":
             self.roles.append({"id": 3, "name": body["name"]})

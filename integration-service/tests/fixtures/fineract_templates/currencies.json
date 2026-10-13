@@ -1,0 +1,45 @@
+{
+  "selectedCurrencyOptions": [
+    {
+      "code": "RWF",
+      "name": "Rwanda Franc",
+      "decimalPlaces": 0,
+      "nameCode": "currency.RWF",
+      "displayLabel": "Rwanda Franc [RWF]"
+    },
+    {
+      "code": "USD",
+      "name": "US Dollar",
+      "decimalPlaces": 2,
+      "displaySymbol": "$",
+      "nameCode": "currency.USD",
+      "displayLabel": "US Dollar ($)"
+    }
+  ],
+  "currencyOptions": [
+    {
+      "code": "EUR",
+      "name": "Euro",
+      "decimalPlaces": 2,
+      "displaySymbol": "€",
+      "nameCode": "currency.EUR",
+      "displayLabel": "Euro (€)"
+    },
+    {
+      "code": "KES",
+      "name": "Kenyan Shilling",
+      "decimalPlaces": 2,
+      "displaySymbol": "KSh",
+      "nameCode": "currency.KES",
+      "displayLabel": "Kenyan Shilling (KSh)"
+    },
+    {
+      "code": "UGX",
+      "name": "Uganda Shilling",
+      "decimalPlaces": 2,
+      "displaySymbol": "USh",
+      "nameCode": "currency.UGX",
+      "displayLabel": "Uganda Shilling (USh)"
+    }
+  ]
+}

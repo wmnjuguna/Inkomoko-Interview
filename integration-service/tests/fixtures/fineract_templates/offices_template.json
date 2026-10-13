@@ -1,0 +1,19 @@
+{
+  "openingDate": [
+    2026,
+    10,
+    13
+  ],
+  "allowedParents": [
+    {
+      "id": 1,
+      "name": "Head Office",
+      "nameDecorated": "Head Office"
+    },
+    {
+      "id": 2,
+      "name": "Kigali Main Office",
+      "nameDecorated": "....Kigali Main Office"
+    }
+  ]
+}

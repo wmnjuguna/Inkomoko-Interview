@@ -14,12 +14,20 @@ import pytest
 
 from integration_service.clients.fineract import FineractClient
 from integration_service.setup.config_files import SetupConfig, load_setup_config
-from integration_service.setup.product import REQUIRED_CASH_ROLES, build_product_body
+from integration_service.setup.product import (
+    REQUIRED_CASH_ROLES,
+    build_product_body,
+    parse_product_template,
+)
 from integration_service.setup.steps import (
+    check_permission_codes,
     ensure_currency,
     find_office,
+    find_office_by_external_id,
     find_role,
     find_user,
+    fineract_date,
+    option_id,
     role_permissions,
 )
 
@@ -106,6 +114,30 @@ def test_finders_read_the_live_shapes(fineract: ReadOnly) -> None:
     assert find_user(fineract, "no-such-user-here") is None
 
 
+def test_office_template_offers_the_configured_parent(fineract: ReadOnly, cfg: SetupConfig) -> None:
+    template = fineract.get("/offices/template")
+    parent_id = option_id(template["allowedParents"], cfg.office.parent, "Parent office")
+    parent = fineract.get(f"/offices/{parent_id}")
+    assert fineract_date(parent["openingDate"]) <= cfg.office.opening_date
+
+
+def test_office_lookup_by_external_id_reads_the_live_shapes(fineract: ReadOnly) -> None:
+    head = find_office_by_external_id(fineract, "1")  # Head Office's externalId on 1.15
+    assert head is not None
+    assert head["name"] == "Head Office"
+    assert find_office_by_external_id(fineract, "NO-SUCH-OFFICE-HERE") is None
+
+
+def test_users_template_offers_offices_and_roles_by_name(fineract: ReadOnly) -> None:
+    template = fineract.get("/users/template")
+    assert option_id(template["allowedOffices"], "Head Office", "Office") == 1
+    assert option_id(template["availableRoles"], "Super user", "Role") == 1
+
+
+def test_configured_permission_codes_pass_the_check(fineract: ReadOnly, cfg: SetupConfig) -> None:
+    check_permission_codes(fineract, cfg.role.permissions)
+
+
 def test_currency_already_selected_needs_no_write(fineract: ReadOnly) -> None:
     selected = fineract.get("/currencies")["selectedCurrencyOptions"]
     code = selected[0]["code"]
@@ -127,9 +159,16 @@ def _ids(options: list[dict[str, Any]]) -> set[Any]:
 def test_product_body_uses_only_values_fineract_offers(
     fineract: ReadOnly, cfg: SetupConfig
 ) -> None:
-    fake_ids = {ref: n for n, ref in enumerate(cfg.loan_product.gl_accounts.values(), start=1)}
-    body = build_product_body(cfg.loan_product, fake_ids)
     template = fineract.get("/loanproducts/template")
+    by_code = {
+        account["glCode"]: account["id"]
+        for accounts in template["accountingMappingOptions"].values()
+        for account in accounts
+    }
+    gl_ids = {
+        ref: by_code[ref.removeprefix("GL-")] for ref in cfg.loan_product.gl_accounts.values()
+    }
+    body = build_product_body(cfg.loan_product, gl_ids, parse_product_template(template))
     for key in (
         "repaymentFrequencyType",
         "interestRateFrequencyType",
