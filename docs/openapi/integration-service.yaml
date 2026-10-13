@@ -1,0 +1,344 @@
+openapi: 3.1.0
+info:
+  title: Integration Service
+  description: The only API partners call. Syncs the ERP chart of accounts to Fineract, and runs clients,
+    loans and payments through Fineract and the ERP.
+  version: 0.1.0
+paths:
+  /health:
+    get:
+      tags:
+      - health
+      summary: Database reachable
+      operationId: health_health_health_get
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Health'
+        '503':
+          description: Service Unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Health'
+        '422':
+          description: Unprocessable Content
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ErrorResponse'
+  /api/accounts/sync:
+    get:
+      tags:
+      - gl-sync
+      summary: GL sync state
+      description: The state of every ERP account known to the sync. Calls nothing.
+      operationId: gl_sync_sync_report_api_accounts_sync_get
+      responses:
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Unprocessable Content
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SyncReportResponse'
+      security:
+      - api_key: []
+    post:
+      tags:
+      - gl-sync
+      summary: Sync the ERP chart of accounts to Fineract
+      description: 'Creates in Fineract every ERP account not synced yet, parents first. Safe to call
+        again: synced accounts are not sent again, and pending or failed ones are retried. If a sync is
+        already running, answers 202 with the current state and in_progress true.'
+      operationId: gl_sync_run_sync_api_accounts_sync_post
+      responses:
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Unprocessable Content
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SyncReportResponse'
+        '202':
+          description: Accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SyncReportResponse'
+        '502':
+          description: Bad Gateway
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Service Unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '504':
+          description: Gateway Timeout
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      security:
+      - api_key: []
+  /api/accounts/{erp_reference}/sync:
+    post:
+      tags:
+      - gl-sync
+      summary: Sync one ERP account to Fineract
+      description: Creates the account in Fineract if it is not synced yet. Its parent must be SYNCED
+        already. Safe to call again. If a sync is already running, answers 202 with the account's current
+        state (null if never recorded) and in_progress true.
+      operationId: gl_sync_run_sync_one_api_accounts__erp_reference__sync_post
+      parameters:
+      - name: erp_reference
+        in: path
+        description: The ERP account's external_reference, e.g. GL-1200
+        required: true
+        schema:
+          title: Erp Reference
+          type: string
+          description: The ERP account's external_reference, e.g. GL-1200
+      responses:
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Unprocessable Content
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountSyncResponse'
+        '202':
+          description: Accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountSyncResponse'
+        '404':
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: Bad Gateway
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Service Unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '504':
+          description: Gateway Timeout
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      security:
+      - api_key: []
+components:
+  schemas:
+    Health:
+      title: Health
+      required:
+      - status
+      - database
+      type: object
+      properties:
+        status:
+          title: Status
+          enum:
+          - UP
+          - DOWN
+          type: string
+        database:
+          title: Database
+          enum:
+          - ok
+          - unreachable
+          type: string
+    ErrorResponse:
+      title: ErrorResponse
+      required:
+      - error
+      type: object
+      properties:
+        error:
+          $ref: '#/components/schemas/ErrorDetail'
+      description: Every error has this shape.
+    ErrorDetail:
+      title: ErrorDetail
+      required:
+      - code
+      - message
+      - correlation_id
+      - details
+      type: object
+      properties:
+        code:
+          title: Code
+          type: string
+        message:
+          title: Message
+          type: string
+        correlation_id:
+          title: Correlation Id
+          anyOf:
+          - type: string
+          - type: 'null'
+        details:
+          title: Details
+          type: object
+          additionalProperties: true
+    SyncReportResponse:
+      title: SyncReportResponse
+      required:
+      - accounts
+      - counts
+      - writes
+      - in_progress
+      type: object
+      properties:
+        accounts:
+          title: Accounts
+          type: array
+          items:
+            $ref: '#/components/schemas/AccountSyncItem'
+        counts:
+          $ref: '#/components/schemas/SyncCounts'
+        writes:
+          title: Writes
+          type: integer
+          description: Accounts sent to Fineract by this call. 0 for GET.
+        in_progress:
+          title: In Progress
+          type: boolean
+          description: True (HTTP 202) when another sync was already running. This call changed nothing.
+    AccountSyncItem:
+      title: AccountSyncItem
+      required:
+      - erp_reference
+      - code
+      - name
+      - status
+      - attempts
+      - last_error
+      type: object
+      properties:
+        erp_reference:
+          title: Erp Reference
+          type: string
+          description: The ERP account's external_reference, e.g. GL-1200
+        code:
+          title: Code
+          type: string
+          description: The ERP account code, also the GL code in Fineract
+        name:
+          title: Name
+          type: string
+        status:
+          title: Status
+          enum:
+          - SYNC_PENDING
+          - SYNCED
+          - FAILED
+          type: string
+        attempts:
+          title: Attempts
+          type: integer
+          description: How many times it was sent to Fineract
+        last_error:
+          title: Last Error
+          anyOf:
+          - type: string
+          - type: 'null'
+          description: 'Why it is not SYNCED. On a SYNCED account: a warning, e.g. that the ERP changed
+            it after the sync (updates are out of scope).'
+    SyncCounts:
+      title: SyncCounts
+      required:
+      - SYNCED
+      - SYNC_PENDING
+      - FAILED
+      type: object
+      properties:
+        SYNCED:
+          title: Synced
+          type: integer
+        SYNC_PENDING:
+          title: Sync Pending
+          type: integer
+        FAILED:
+          title: Failed
+          type: integer
+    AccountSyncResponse:
+      title: AccountSyncResponse
+      required:
+      - account
+      - in_progress
+      type: object
+      properties:
+        account:
+          anyOf:
+          - $ref: '#/components/schemas/AccountSyncItem'
+          - type: 'null'
+          description: The account's state. null only when a sync is running (202) and this account was
+            never recorded.
+        in_progress:
+          title: In Progress
+          type: boolean
+          description: True (HTTP 202) when another sync was already running. This call changed nothing.
+  securitySchemes:
+    api_key:
+      type: apiKey
+      in: header
+      name: X-API-Key
+tags:
+- name: health
+- name: gl-sync
