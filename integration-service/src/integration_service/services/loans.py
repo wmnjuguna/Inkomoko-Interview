@@ -6,6 +6,10 @@ helpers in the first section):
 2. begin() in services.operations. Only New runs; a repeat gets its saved answer, 202,
    or 409 (answer_for_begin).
 3. Read what the write needs from Fineract. If that fails, nothing was sent: FAILED.
+   The rules and terms come from Fineract's own templates (services.templates): the
+   product's principal range and terms for an application, the approved amount and default
+   date for an approval. A value that does not fit is 422 VALIDATION_ERROR with
+   details.problems, and FAILED.
 4. The write itself, under the per-loan advisory lock, through execute_fineract_write.
    It is looked up before sending when an earlier attempt exists (check_first).
 5. settle(): not sent -> FAILED and 503; unclear (including "not found yet" right after a
@@ -70,14 +74,29 @@ from integration_service.services.operations import (
     next_loan_reference,
     set_fields,
 )
+from integration_service.services.templates import (
+    FINERACT_DATE_FORMAT as FINERACT_DATE_FORMAT,
+)
+from integration_service.services.templates import (
+    FINERACT_LOCALE as FINERACT_LOCALE,
+)
+from integration_service.services.templates import (
+    ApprovalForm,
+    FieldProblem,
+    LoanApplicationForm,
+    build_application_body,
+    check_application,
+    check_approval,
+    fetch_approval_form,
+    fetch_loan_application_form,
+    fetch_payoff_form,
+    validation_error,
+)
 from integration_service.state_machine import FAILED, FINERACT_PENDING, NEEDS_RECONCILIATION
 
-FINERACT_DATE_FORMAT = "yyyy-MM-dd"
-FINERACT_LOCALE = "en"
 # Fineract's tenant runs on Kigali time (UTC+2, no daylight saving). "Today" for every date
 # we send is the Kigali date, or Fineract refuses it as a future date.
 KIGALI = timezone(timedelta(hours=2), "Africa/Kigali")
-PRODUCT_EXTERNAL_ID = "PRD-SME-ASSET-FINANCE"
 MAX_REFERENCE_TRIES = 3
 
 SUBMITTED = "SUBMITTED_AND_PENDING_APPROVAL"
@@ -351,73 +370,6 @@ def _id_of(value: Any) -> int:
     return value
 
 
-@dataclass(frozen=True)
-class ProductTerms:
-    product_id: int
-    min_principal: int
-    max_principal: int
-    number_of_repayments: int
-    repayment_every: int
-    repayment_frequency_type: int
-    interest_rate_per_period: Decimal
-    amortization_type: int
-    interest_type: int
-    interest_calculation_period_type: int
-    transaction_processing_strategy_code: str
-
-
-def parse_product(data: Any) -> ProductTerms:
-    """The loan product as Fineract holds it. Term, rate and schedule come from here."""
-    try:
-        return ProductTerms(
-            product_id=_id_of(data["id"]),
-            min_principal=whole_rwf(data["minPrincipal"]) or 1,
-            max_principal=whole_rwf(data["maxPrincipal"]) or 0,
-            number_of_repayments=int(data["numberOfRepayments"]),
-            repayment_every=int(data["repaymentEvery"]),
-            repayment_frequency_type=_id_of(data["repaymentFrequencyType"]),
-            interest_rate_per_period=Decimal(str(data["interestRatePerPeriod"])),
-            amortization_type=_id_of(data["amortizationType"]),
-            interest_type=_id_of(data["interestType"]),
-            interest_calculation_period_type=_id_of(data["interestCalculationPeriodType"]),
-            transaction_processing_strategy_code=str(data["transactionProcessingStrategyCode"]),
-        )
-    except (KeyError, TypeError, ValueError, InvalidOperation) as exc:
-        body = data if isinstance(data, dict) else {}
-        raise FineractServerError(200, body, "Unexpected Fineract loan product") from exc
-
-
-def build_application_body(
-    terms: ProductTerms,
-    fineract_client_id: int,
-    principal: int,
-    loan_reference: str,
-    submitted_on: date,
-    expected_disbursement_on: date,
-) -> dict[str, Any]:
-    return {
-        "clientId": fineract_client_id,
-        "productId": terms.product_id,
-        "principal": principal,
-        "loanTermFrequency": terms.number_of_repayments * terms.repayment_every,
-        "loanTermFrequencyType": terms.repayment_frequency_type,
-        "numberOfRepayments": terms.number_of_repayments,
-        "repaymentEvery": terms.repayment_every,
-        "repaymentFrequencyType": terms.repayment_frequency_type,
-        "interestRatePerPeriod": float(terms.interest_rate_per_period),
-        "amortizationType": terms.amortization_type,
-        "interestType": terms.interest_type,
-        "interestCalculationPeriodType": terms.interest_calculation_period_type,
-        "transactionProcessingStrategyCode": terms.transaction_processing_strategy_code,
-        "expectedDisbursementDate": expected_disbursement_on.isoformat(),
-        "submittedOnDate": submitted_on.isoformat(),
-        "loanType": "individual",
-        "externalId": loan_reference,
-        "dateFormat": FINERACT_DATE_FORMAT,
-        "locale": FINERACT_LOCALE,
-    }
-
-
 def build_approval_body(approved_on: date, approved_amount: int) -> dict[str, Any]:
     return {
         "approvedOnDate": approved_on.isoformat(),
@@ -425,6 +377,36 @@ def build_approval_body(approved_on: date, approved_amount: int) -> dict[str, An
         "dateFormat": FINERACT_DATE_FORMAT,
         "locale": FINERACT_LOCALE,
     }
+
+
+def past_expected_date_error() -> ApiError:
+    return validation_error(
+        [FieldProblem("expected_disbursement_date", "cannot be in the past (Kigali date)")]
+    )
+
+
+def application_error(
+    form: LoanApplicationForm, principal: int, expected: date, today: date
+) -> ApiError | None:
+    """The application checked against the product's template, or None when it fits."""
+    problems = check_application(form, principal, expected, today)
+    return validation_error(problems) if problems else None
+
+
+@dataclass(frozen=True)
+class ApprovalTerms:
+    approved_on: date
+    amount: int
+
+
+def approval_terms(form: ApprovalForm, requested_on: date | None, today: date) -> ApprovalTerms:
+    """What the approval sends: the partner's date, else Fineract's proposal (else today), and
+    the amount Fineract's approval template proposes. Raises 422 when a value does not fit."""
+    approved_on = requested_on or form.approved_on or today
+    problems = check_approval(form, approved_on, today)
+    if problems:
+        raise validation_error(problems)
+    return ApprovalTerms(approved_on, form.approved_amount)
 
 
 def loan_view(
@@ -650,11 +632,7 @@ def apply_for_loan(
     today = today or kigali_today()
     reference = request.external_reference
     expected = request.expected_disbursement_date or today
-    past = ApiError(
-        ErrorCode.VALIDATION_ERROR,
-        "expected_disbursement_date cannot be in the past (Kigali date).",
-        422,
-    )
+    past = past_expected_date_error()
     # A date that has passed since the first request must not hide its saved answer (Part F):
     # refuse it here only when this reference has nothing that begin() would answer with.
     if expected < today:
@@ -684,35 +662,22 @@ def apply_for_loan(
     if expected < today:  # it FAILED meanwhile and is retried now: the date rule applies
         fail(engine, op, past, correlation_id)
 
-    product = read_or_fail(
+    form = read_or_fail(
         engine,
         op,
-        lambda: parse_product(
-            fineract.get(
-                f"/loanproducts/external-id/{PRODUCT_EXTERNAL_ID}", correlation_id=correlation_id
-            )
-        ),
-        "the loan product",
+        lambda: fetch_loan_application_form(fineract, client_id, correlation_id=correlation_id),
+        "the loan application template",
         correlation_id,
     )
-    if not product.min_principal <= request.principal <= product.max_principal:
-        fail(
-            engine,
-            op,
-            ApiError(
-                ErrorCode.VALIDATION_ERROR,
-                f"principal must be between {product.min_principal} and "
-                f"{product.max_principal} RWF for this product.",
-                422,
-            ),
-            correlation_id,
-        )
+    refusal = application_error(form, request.principal, expected, today)
+    if refusal is not None:
+        fail(engine, op, refusal, correlation_id)
 
     loan_reference = op.loan_reference or _issue_loan_reference(engine, op.id)
     attempt = op.attempts
     for _ in range(MAX_REFERENCE_TRIES):
         body = build_application_body(
-            product, client_id, request.principal, loan_reference, today, expected
+            form, client_id, request.principal, loan_reference, today, expected
         )
         ref = loan_reference
 
@@ -761,8 +726,9 @@ def apply_for_loan(
                     correlation_id,
                 )
         else:
-            refusal = application_rejection(settled.error, request.client_uid)
-            fail(engine, op, refusal, correlation_id)
+            fail(
+                engine, op, application_rejection(settled.error, request.client_uid), correlation_id
+            )
 
         # Fineract already holds another loan under this reference: issue a new one.
         attempt += 1
@@ -880,10 +846,10 @@ def approve_loan(
     today: date | None = None,
 ) -> Answer:
     today = today or kigali_today()
-    approved_on = request.approved_on or today
-    if approved_on > today:
-        raise ApiError(
-            ErrorCode.VALIDATION_ERROR, "approved_on cannot be in the future (Kigali date).", 422
+    # A future date is refused before anything is saved; the template check below repeats it.
+    if request.approved_on is not None and request.approved_on > today:
+        raise validation_error(
+            [FieldProblem("approved_on", "cannot be in the future (Kigali date)")]
         )
     loan = our_loan(engine, loan_reference)
     if loan is None:
@@ -903,7 +869,18 @@ def approve_loan(
     if not isinstance(started, New):
         return answer_for_begin(started, reference)
     op = started.operation
-    body = build_approval_body(approved_on, loan.principal)
+    form = read_or_fail(
+        engine,
+        op,
+        lambda: read_approval_form(fineract, loan_reference, correlation_id),
+        "the approval template",
+        correlation_id,
+    )
+    try:
+        terms = approval_terms(form, request.approved_on, today)
+    except ApiError as refusal:
+        fail(engine, op, refusal, correlation_id)
+    body = build_approval_body(terms.approved_on, terms.amount)
 
     def approve(key: str) -> FineractLoan:
         data = fineract.post(
@@ -918,8 +895,8 @@ def approve_loan(
             client_uid=loan.client_uid,
             principal=loan.principal,
             expected_disbursement_on=None,
-            approved_on=approved_on,
-            approved_principal=loan.principal,
+            approved_on=terms.approved_on,
+            approved_principal=terms.amount,
             status_id=200,
         )
 
@@ -936,6 +913,16 @@ def approve_loan(
     if isinstance(settled, Rejected):
         fail(engine, op, approval_rejection(settled.error, loan_reference), correlation_id)
     return _finish_approval(engine, op, loan.client_uid, settled.result, correlation_id)
+
+
+def read_approval_form(
+    fineract: FineractApi, loan_reference: str, correlation_id: str | None
+) -> ApprovalForm:
+    """Fineract's approval template. One without an amount to approve is unexpected."""
+    form = fetch_approval_form(fineract, loan_reference, correlation_id)
+    if form.approved_amount <= 0:
+        raise FineractServerError(200, {}, "Fineract's approval template has no amount")
+    return form
 
 
 def find_approval(
@@ -1012,20 +999,16 @@ def loan_details(
         raise ApiError(ErrorCode.LOAN_NOT_FOUND, f"Fineract has no loan {loan_reference}.", 404)
     payoff = None
     if loan_status_code((data.get("status") or {}).get("code")) == ACTIVE:
-        payoff = _payoff_amount(fineract, loan_reference, correlation_id)
+        payoff = payoff_amount(fineract, loan_reference, correlation_id)
     return loan_view(data, loan_reference, loan.client_uid, payoff)
 
 
-def _payoff_amount(
+def payoff_amount(
     fineract: FineractApi, loan_reference: str, correlation_id: str | None
 ) -> int | None:
-    """Fineract's own payoff figure for today (prepayLoan template). Best effort."""
+    """What clears the loan today, from Fineract's prepayLoan template. Best effort: a failed
+    read or a template we cannot read gives None."""
     try:
-        data = fineract.get(
-            f"/loans/external-id/{loan_reference}/transactions/template",
-            params={"command": "prepayLoan"},
-            correlation_id=correlation_id,
-        )
+        return fetch_payoff_form(fineract, loan_reference, correlation_id).amount
     except FineractError:
         return None
-    return whole_rwf(data.get("amount")) if isinstance(data, dict) else None

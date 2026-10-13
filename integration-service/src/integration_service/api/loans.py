@@ -88,7 +88,9 @@ def respond(answer: Answer) -> tuple[dict[str, Any], int]:
     "/api/loans",
     summary="Apply for a loan",
     description="Submits a loan application in Fineract for an existing client, on the SME "
-    "Asset Finance product (its term, rate and schedule). Returns the new loan_reference. "
+    "Asset Finance product. The principal range, term, rate and schedule come from Fineract's "
+    "loan template for the product (see GET /api/loans/template); a principal outside the "
+    "range is 422 VALIDATION_ERROR with details.problems. Returns the new loan_reference. "
     "201 the first time; the same external_reference and data again gives 200 with the same "
     "body (the same loan_reference).",
     responses={
@@ -111,8 +113,10 @@ def post_loan(body: LoanApplicationRequest) -> tuple[dict[str, Any], int]:
 @bp.post(
     "/api/loans/<loan_reference>/approve",
     summary="Approve a loan",
-    description="Approves the loan in Fineract for its full principal. A loan is approved "
-    "once: another external_reference for the same loan gives 409 LOAN_ALREADY_APPROVED.",
+    description="Approves the loan in Fineract for the amount its approval template proposes "
+    "(the applied principal). approved_on defaults to Fineract's proposed date (today). A loan "
+    "is approved once: another external_reference for the same loan gives 409 "
+    "LOAN_ALREADY_APPROVED.",
     responses={
         200: ApprovalResponse,
         202: AcceptedResponse,
