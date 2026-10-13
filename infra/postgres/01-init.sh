@@ -13,4 +13,6 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-E
 
   CREATE USER ${ERP_DB_USER} WITH PASSWORD '${ERP_DB_PASSWORD}';
   CREATE DATABASE erp_db OWNER ${ERP_DB_USER};
+  -- Empty database for the Mock ERP integration tests; they rebuild its schema on each run
+  CREATE DATABASE erp_test OWNER ${ERP_DB_USER};
 EOSQL
