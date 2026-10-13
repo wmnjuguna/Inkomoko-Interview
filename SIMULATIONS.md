@@ -1,6 +1,6 @@
 # Simulations
 
-> **Status:** A-1 and A-2 (Part A) have been run on a clean stack. The others are not run yet. Each result below is copied from a real run, never written before it.
+> **Status:** A-1 and A-2 (Part A) and C-1, D-1 and I-1 have been run on a clean stack. The others are not run yet. Each result below is copied from a real run, never written before it.
 
 ## What each result records
 
@@ -20,9 +20,9 @@
 |---|---|---|---|---|
 | A-1 | A | The plugin's four rules: one mapping, same data, different data, no permission | `make demo-gl-sync` | Run: 4 of 4 matched, twice |
 | A-2 | A | A new ERP account sent 4 times at once gives 1 ERP account, 1 GL account and 1 mapping | `make simulate-gl-sync-4x` | Run: PASS |
-| C-1 | C | Create a client, find it by `client_uid`, check it | `make demo-identity` | Not run |
-| D-1 | D | A loan from application to Closed: approve, disburse, 3 repayments, pay off | `make demo-lifecycle` | Not run |
-| I-1 | I | The same disbursement sent 4 times, one after another | `make simulate-duplicates` | Not run |
+| C-1 | C | Create a client, find it by `client_uid`, check it | `make demo-identity` | Run: 5 of 5 matched |
+| D-1 | D | A loan from application to Closed: approve, disburse, 3 repayments, pay off | `make demo-lifecycle` | Run: 8 of 8 matched, Closed (obligations met) |
+| I-1 | I | The same disbursement sent 4 times, one after another | `make simulate-duplicates` | Run: 4 / 1 / 1 / 1, PASS |
 | I-2a | I | 10 disbursements at the same time, same reference | `make simulate-concurrent-disburse` | Not run |
 | I-2b | I | 10 disbursements at the same time, different references | `make simulate-concurrent-disburse` | Not run |
 | I-3 | I | Repayments at the same time, different references, plus duplicates | `make simulate-concurrent-repay` | Not run |
@@ -110,9 +110,75 @@ Result: `PASS`, exit 0.
 
 **Why:** in the service, a Postgres advisory lock lets only one sync run at a time. The other 3 calls got `202` and sent nothing. In the plugin, a Postgres lock on the reference and on the GL code makes the requests wait in turn. The first creates the account, the others find it and answer `UNCHANGED`.
 
-### Mock ERP fault checks (direct, before the Integration Service exists)
+### C-1: a client, found and checked
 
-These are **not** the J-1 and J-4 runs in the table. Those go through the Integration Service, which is not built yet. Here I called the Mock ERP API directly, to check that its fault switch behaves the way J-1 and J-4 will need. Run on the Mock ERP container on 2026-10-13.
+Run on 2026-10-13, on a clean stack (`docker compose down -v`, new images for the Mock ERP and the Integration Service, then `docker compose up -d --no-build --wait`; `evidence/P2/setup.txt`). Command: `make demo-identity`. Full output: `evidence/P2/C-1.txt`. Run `9BB508`, `client_uid` `DEMO-238601`. It printed `5 of 5 steps matched` and exited 0.
+
+| Step | Request | What happened |
+|---|---|---|
+| 1. Create | `POST /api/clients`, Test Client One | `201`, status `ACTIVE`. Fineract has 1 client with that `externalId`, active, in Kigali Main Office. 1 operation, `RECEIVED -> FINERACT_PENDING -> FINERACT_DONE -> COMPLETED`. No ERP entry, as expected. |
+| 2. Find and check | `GET /api/clients/DEMO-238601?name=Test Client One`, then with `Someone Else` | `200`, active, `name_matches` true, then false. Nothing saved. |
+| 3. Same request again | the body of step 1 | `200` with the same body. Still 1 client in Fineract. |
+| 4. Same reference, other data | last name `Client Two` | `409 IDEMPOTENCY_CONFLICT`. The name in Fineract is still Test Client One. |
+| 5. New reference, same `client_uid` | another reference | `409 CLIENT_UID_TAKEN`. Still 1 client, and the new reference was not saved. |
+
+**Why:** the client's `externalId` in Fineract is the `client_uid`. The service saves each request under `CLI:<reference>` with a hash, and `client_uid` is unique in our database and in Fineract.
+
+### D-1: a loan from application to Closed
+
+Run on 2026-10-13, on the same clean stack, right after C-1. Command: `make demo-lifecycle`. Full output: `evidence/P2/D-1.txt`. Run `BE75C7`, client `DEMO-273604`, loan `LN-2026-000001`. It printed `8 of 8 checks matched` and exited 0.
+
+Fineract's status and balances after each stage, as Fineract reported them:
+
+| Stage | Request | Fineract status | Principal outstanding | Interest outstanding | Total outstanding |
+|---|---|---|---|---|---|
+| Application | `POST /api/loans`, 5,000,000 | 100 Submitted and pending approval | no summary yet | | |
+| Approval | `POST .../approve` | 200 Approved | no summary yet | | |
+| Payout | `POST .../disburse` | 300 Active | 5,000,000 | 500,799 | 5,500,799 |
+| Repayment 1 | 500,000 | 300 Active | 4,616,600 | 384,199 | 5,000,799 |
+| Repayment 2 | 750,000 | 300 Active | 3,957,661 | 293,138 | 4,250,799 |
+| Repayment 3 | 1,000,000 | 300 Active | 3,066,621 | 184,178 | 3,250,799 |
+| Payoff | 3,250,799 (the loan's `payoff_amount`) | 600 Closed (obligations met) | 0 | 0 | 0 |
+
+The ERP got one entry per money movement, built from Fineract's own split:
+
+| ERP entry | Lines |
+|---|---|
+| `DSB:DSB-BE75C7-74d4` | DR 1200 5,000,000 / CR 1100 5,000,000 |
+| `RPY:RPY1-BE75C7-3d94` | DR 1100 500,000 / CR 1200 383,400 / CR 4100 116,600 |
+| `RPY:RPY2-BE75C7-398e` | DR 1100 750,000 / CR 1200 658,939 / CR 4100 91,061 |
+| `RPY:RPY3-BE75C7-3b3f` | DR 1100 1,000,000 / CR 1200 891,040 / CR 4100 108,960 |
+| `RPY:RPYOFF-BE75C7-bb64` | DR 1100 3,250,799 / CR 1200 3,066,621 / CR 4100 184,178 |
+
+- After every stage, the ERP totals per account equalled Fineract's own GL entries for the loan. At the end: 1100 DR 5,500,799 CR 5,000,000; 1200 DR 5,000,000 CR 5,000,000; 4100 CR 500,799.
+- The payout and the 4 repayments each ended `COMPLETED` with `erp_status` `SENT`. The application and the approval ended `COMPLETED` with no ERP part.
+- A read-only check after the run (appendix of `D-1.txt`) found each entry balanced, its lines and date equal to the Fineract transaction with the same `externalId`, and every account synced from the ERP with the same code in Fineract.
+
+**Why:** the service reads Fineract's transaction back by its `externalId` and builds the entry only from that split. The entry is saved in the outbox in the same database transaction that marks the request done. `payoff_amount` is Fineract's own figure, so paying it closes the loan.
+
+### I-1: the same disbursement 4 times
+
+Run on 2026-10-13, on the same clean stack, right after D-1. Command: `make simulate-duplicates`. Full output: `evidence/P2/I-1.txt`. Run `B41E91`, loan `LN-2026-000002` (1,000,000 RWF, approved), reference `I1-DSB-B41E91-f798`.
+
+```
+Requests received:        4
+Fineract disbursements:   1
+ERP journal entries:      1
+Integration transactions: 1
+```
+
+- All 4 answers were `200` with identical bodies.
+- Fineract ran 1 command with the key `DSB:I1-DSB-B41E91-f798:<attempt>`.
+- The one ERP entry is DR 1200 1,000,000 / CR 1100 1,000,000, and the same check as D-1 passed.
+- "Requests received" is counted from the service's request log lines for the script's 4 correlation ids.
+
+Result: `PASS`, exit 0.
+
+**Why:** the first call saves `DSB:<reference>` and pays out once. Calls 2 to 4 find the finished request with the same hash and get its saved answer, so Fineract is not called again. The outbox has one row, so the ERP gets one entry.
+
+### Mock ERP fault checks (direct, before the Integration Service existed)
+
+These are **not** the J-1 and J-4 runs in the table. Those go through the Integration Service and are not run yet. Here I called the Mock ERP API directly, to check that its fault switch behaves the way J-1 and J-4 will need. Run on the Mock ERP container on 2026-10-13.
 
 | Check | What I did | What happened |
 |---|---|---|
