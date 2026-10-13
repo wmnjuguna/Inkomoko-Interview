@@ -35,7 +35,8 @@ build: .env
 		> docs/openapi/mock-erp.yaml
 	docker buildx build --load -t $(INTEGRATION_IMAGE) integration-service
 	@# Same for the Integration Service: dummy settings, nothing is called while building the spec.
-	docker run --rm --entrypoint python \
+	@# OUTBOX_ENABLED=false: no background loop, so no log line ends up in the JSON.
+	docker run --rm --entrypoint python -e OUTBOX_ENABLED=false \
 		-e INTEGRATION_DATABASE_URL=postgresql+psycopg://unused@localhost/unused -e PARTNER_API_KEYS=unused:unused \
 		-e FINERACT_BASE_URL=http://unused/fineract-provider/api/v1 -e FINERACT_USERNAME=unused -e FINERACT_PASSWORD=unused \
 		-e ERP_BASE_URL=http://unused -e ERP_API_KEY=unused $(INTEGRATION_IMAGE) \

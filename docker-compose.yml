@@ -156,6 +156,14 @@ services:
       FINERACT_TIMEOUT_SECONDS: ${INTEGRATION_FINERACT_TIMEOUT_SECONDS:-30}
       ERP_BASE_URL: http://mock-erp:8090
       ERP_API_KEY: ${ERP_API_KEY}
+      # Journal entries use the GL accounts the loan product maps each role to (Part H)
+      GL_ROLES_CONFIG_PATH: /app/fineract-configuration/loan-product.json
+      # The outbox sender and recovery loop, one per gunicorn worker
+      OUTBOX_ENABLED: ${INTEGRATION_OUTBOX_ENABLED:-true}
+      OUTBOX_POLL_SECONDS: ${INTEGRATION_OUTBOX_POLL_SECONDS:-5}
+      OUTBOX_MAX_ATTEMPTS: ${INTEGRATION_OUTBOX_MAX_ATTEMPTS:-8}
+    volumes:
+      - ./fineract/configuration:/app/fineract-configuration:ro
     ports:
       - "127.0.0.1:8091:8091"
     healthcheck:
