@@ -194,9 +194,121 @@ def test_principal_outside_the_product_range_is_422_and_failed(
     ref = f"IT-APP-{tag()}"
     response = apply(client, auth, client_uid, ref, principal=50000)
     assert response.status_code == 422
-    assert "between 100000 and 50000000" in response.get_json()["error"]["message"]
+    error = response.get_json()["error"]
+    assert error["code"] == "VALIDATION_ERROR"
+    assert error["details"]["problems"] == [
+        {
+            "field": "principal",
+            "problem": "must be between 100000 and 50000000 RWF (the product range)",
+        }
+    ]
+    assert error["message"] == f"principal: {error['details']['problems'][0]['problem']}"
     op = track(client.get(f"/api/transactions/{ref}", headers=auth)).get_json()["operations"][0]
     assert op["status"] == "FAILED"
+
+
+class Templates:
+    """The real Fineract, with its loan and approval templates changed on the way back, so a
+    rule or an amount the service uses can only have come from the template. Records the
+    template reads and the writes it passes on."""
+
+    def __init__(
+        self,
+        real: FineractClient,
+        product: dict[str, Any] | None = None,
+        approval_amount: int | None = None,
+    ) -> None:
+        self.real = real
+        self.product = product or {}
+        self.approval_amount = approval_amount
+        self.reads: list[tuple[str, dict[str, Any] | None]] = []
+        self.writes: list[tuple[str, Any]] = []
+
+    def get(
+        self, path: str, params: dict[str, Any] | None = None, correlation_id: str | None = None
+    ) -> Any:
+        data = self.real.get(path, params=params, correlation_id=correlation_id)
+        self.reads.append((path, params))
+        if path == "/loans/template":
+            data["product"].update(self.product)
+        approval = path.endswith("/template") and (params or {}).get("templateType") == "approval"
+        if approval and self.approval_amount is not None:
+            data["approvalAmount"] = self.approval_amount
+        return data
+
+    def post(
+        self,
+        path: str,
+        body: Any,
+        idempotency_key: str | None = None,
+        params: dict[str, Any] | None = None,
+        correlation_id: str | None = None,
+    ) -> Any:
+        self.writes.append((path, body))
+        return self.real.post(path, body, idempotency_key, params, correlation_id)
+
+
+def test_the_principal_range_is_the_templates(
+    db: Engine, fineract: FineractClient, client_uid: str
+) -> None:
+    """A narrower range in the template is the range the service applies."""
+    twisted = Templates(fineract, product={"minPrincipal": 1000000.0, "maxPrincipal": 1100000.0})
+    request = LoanApplicationRequest(
+        external_reference=f"IT-APP-{tag()}", client_uid=client_uid, principal=1200000
+    )
+    with pytest.raises(ApiError) as caught:
+        apply_for_loan(db, twisted, request, "partner-a", None)
+    assert caught.value.status == 422
+    assert caught.value.details is not None
+    problem = caught.value.details["problems"][0]
+    assert problem["field"] == "principal"
+    assert "1000000 and 1100000" in problem["problem"]
+    assert twisted.writes == []
+    op = get_operation(db, "APP", request.external_reference)
+    assert op is not None and op.status == "FAILED"
+
+    inside = request.model_copy(
+        update={"external_reference": f"IT-APP-{tag()}", "principal": 1050000}
+    )
+    assert apply_for_loan(db, twisted, inside, "partner-a", None).status == 201
+
+
+def test_the_fineract_application_carries_the_templates_terms(
+    db: Engine, fineract: FineractClient, client_uid: str
+) -> None:
+    recorder = Templates(fineract)
+    request = LoanApplicationRequest(
+        external_reference=f"IT-APP-{tag()}", client_uid=client_uid, principal=1200000
+    )
+    answer = apply_for_loan(db, recorder, request, "partner-a", None)
+    assert answer.status == 201
+
+    template_reads = [params for path, params in recorder.reads if path == "/loans/template"]
+    assert len(template_reads) == 1
+    params = template_reads[0]
+    assert params is not None
+    assert params["templateType"] == "individual"
+    template = fineract.get("/loans/template", params=params)
+    assert template["clientExternalId"] == client_uid  # read for this client
+
+    [(path, body)] = recorder.writes
+    assert path == "/loans"
+    assert body["productId"] == template["product"]["id"]
+    assert body["clientId"] == template["clientId"]
+    assert body["loanTermFrequency"] == template["termFrequency"]
+    assert body["loanTermFrequencyType"] == template["termPeriodFrequencyType"]["id"]
+    assert body["numberOfRepayments"] == template["numberOfRepayments"]
+    assert body["repaymentEvery"] == template["repaymentEvery"]
+    assert body["repaymentFrequencyType"] == template["repaymentFrequencyType"]["id"]
+    assert body["interestRatePerPeriod"] == template["interestRatePerPeriod"]
+    assert body["amortizationType"] == template["amortizationType"]["id"]
+    assert body["interestType"] == template["interestType"]["id"]
+    assert body["interestCalculationPeriodType"] == template["interestCalculationPeriodType"]["id"]
+    assert (
+        body["transactionProcessingStrategyCode"] == template["transactionProcessingStrategyCode"]
+    )
+    assert body["principal"] == 1200000
+    assert body["externalId"] == answer.body["loan_reference"]
 
 
 def test_past_expected_disbursement_date_is_422(
@@ -216,6 +328,8 @@ def test_past_expected_disbursement_date_is_422(
         )
     )
     assert response.status_code == 422
+    problems = response.get_json()["error"]["details"]["problems"]
+    assert problems[0]["field"] == "expected_disbursement_date"
 
 
 def test_a_replay_after_the_expected_date_has_passed_gets_the_saved_answer(
@@ -299,6 +413,24 @@ def test_approve_once_replay_and_a_second_reference_is_409(
     assert body["approved_on"] == kigali_today().isoformat()
 
 
+def test_the_approved_amount_is_the_approval_templates(
+    db: Engine, fineract: FineractClient, client: FlaskClient, auth: dict[str, str], client_uid: str
+) -> None:
+    """Fineract's approval template proposes the amount; the service approves for it."""
+    loan = apply(client, auth, client_uid, f"IT-APP-{tag()}").get_json()["loan_reference"]
+    twisted = Templates(fineract, approval_amount=1000000)
+    ref = f"IT-APR-{tag()}"
+
+    answer = approve_loan(db, twisted, loan, ApprovalRequest(external_reference=ref), "p", None)
+
+    assert answer.status == 200
+    assert answer.body["approved_principal"] == 1000000
+    assert answer.body["approved_on"] == kigali_today().isoformat()
+    [(_, body)] = twisted.writes
+    assert body["approvedLoanAmount"] == 1000000
+    assert get_loan(client, auth, loan).get_json()["approved_principal"] == 1000000
+
+
 def test_approved_outside_the_service_is_409_and_failed(
     client: FlaskClient, auth: dict[str, str], client_uid: str, admin: FineractClient
 ) -> None:
@@ -344,6 +476,10 @@ def test_future_approval_date_is_422(
         )
     )
     assert response.status_code == 422
+    problems = response.get_json()["error"]["details"]["problems"]
+    assert problems == [
+        {"field": "approved_on", "problem": "cannot be in the future (Kigali date)"}
+    ]
 
 
 # --- unclear outcomes ----------------------------------------------------------------------------
@@ -351,7 +487,8 @@ def test_future_approval_date_is_422(
 
 class LostAnswer:
     """The real Fineract, but the answer to every write is lost after it lands.
-    With blind_lookups, loan lookups fail too."""
+    With blind_lookups, loan lookups fail too (the templates still answer: the write needs
+    them before it is sent)."""
 
     def __init__(self, real: FineractClient, blind_lookups: bool = False) -> None:
         self.real = real
@@ -361,7 +498,8 @@ class LostAnswer:
     def get(
         self, path: str, params: dict[str, Any] | None = None, correlation_id: str | None = None
     ) -> Any:
-        if self.blind and path.startswith("/loans/external-id/"):
+        lookup = path.startswith("/loans/external-id/") and not path.endswith("/template")
+        if self.blind and lookup:
             raise FineractTimeout("no answer")
         return self.real.get(path, params=params, correlation_id=correlation_id)
 

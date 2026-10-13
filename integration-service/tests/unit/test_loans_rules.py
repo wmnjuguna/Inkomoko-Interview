@@ -1,37 +1,49 @@
-"""Pure rules for loans: request validation, Fineract bodies built from the product, reading
-Fineract's loan into our names (never an id), money and dates, Fineract refusals, and the
-answers for a repeated request."""
+"""Pure rules for loans: request validation, the checks and terms taken from Fineract's
+templates (fixtures in tests/fixtures/fineract_templates, changed here so a range or an amount
+can only come from the template), reading Fineract's loan into our names (never an id), money
+and dates, Fineract refusals, and the answers for a repeated request."""
 
 from __future__ import annotations
 
+import copy
+import json
 import re
 from datetime import UTC, date, datetime
-from decimal import Decimal
+from pathlib import Path
 from typing import Any
 
 import pytest
 from pydantic import ValidationError
 
-from integration_service.clients.errors import FineractRejected
+from integration_service.clients.errors import (
+    FineractRejected,
+    FineractServerError,
+    FineractTimeout,
+)
 from integration_service.errors import ApiError, ErrorCode
 from integration_service.schemas.loans import (
     ApprovalRequest,
     LoanApplicationRequest,
     LoanPath,
 )
+from integration_service.services import loans as loans_service
+from integration_service.services import templates
 from integration_service.services.loans import (
     Answer,
-    ProductTerms,
+    ApprovalTerms,
     answer_for_begin,
+    application_error,
     application_rejection,
     approval_rejection,
-    build_application_body,
+    approval_terms,
     build_approval_body,
     fineract_date,
     kigali_today,
     loan_status_code,
     loan_view,
-    parse_product,
+    past_expected_date_error,
+    payoff_amount,
+    read_approval_form,
     whole_rwf,
 )
 from integration_service.services.operations import (
@@ -58,20 +70,40 @@ def id_keys(value: Any) -> list[str]:
     return found
 
 
-PRODUCT = {
-    "id": 1,
-    "externalId": "PRD-SME-ASSET-FINANCE",
-    "minPrincipal": 100000.0,
-    "maxPrincipal": 50000000.0,
-    "numberOfRepayments": 12,
-    "repaymentEvery": 1,
-    "repaymentFrequencyType": {"id": 2, "code": "repaymentFrequency.periodFrequencyType.months"},
-    "interestRatePerPeriod": 18.0,
-    "amortizationType": {"id": 1},
-    "interestType": {"id": 0},
-    "interestCalculationPeriodType": {"id": 1},
-    "transactionProcessingStrategyCode": "mifos-standard-strategy",
-}
+FIXTURES = Path(__file__).parent.parent / "fixtures" / "fineract_templates"
+TODAY = date(2026, 10, 13)
+
+
+def fixture(name: str) -> Any:
+    return json.loads((FIXTURES / name).read_text(encoding="utf-8"))
+
+
+def application_template(**product: Any) -> dict[str, Any]:
+    """The real loan template, with the product part changed."""
+    data = copy.deepcopy(fixture("loan_template_individual_product.json"))
+    data["product"].update(product)
+    return data
+
+
+class FakeFineract:
+    """Answers GETs from a dict of path -> body (or exception). Records each call."""
+
+    def __init__(self, answers: dict[str, Any]) -> None:
+        self.answers = answers
+        self.calls: list[tuple[str, dict[str, Any] | None]] = []
+
+    def get(
+        self,
+        path: str,
+        params: dict[str, Any] | None = None,
+        correlation_id: str | None = None,
+    ) -> Any:
+        self.calls.append((path, params))
+        answer = self.answers[path]
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+
 
 ACTIVE_LOAN = {
     "id": 7,
@@ -184,56 +216,126 @@ def test_loan_path_refuses_other_values(ref: str) -> None:
         LoanPath(loan_reference=ref)
 
 
-# --- product and Fineract bodies -----------------------------------------------------------
+# --- rules from Fineract's templates -------------------------------------------------------
 
 
-def test_product_terms_come_from_fineract() -> None:
-    terms = parse_product(PRODUCT)
-    assert terms == ProductTerms(
-        product_id=1,
-        min_principal=100000,
-        max_principal=50000000,
-        number_of_repayments=12,
-        repayment_every=1,
-        repayment_frequency_type=2,
-        interest_rate_per_period=Decimal("18.0"),
-        amortization_type=1,
-        interest_type=0,
-        interest_calculation_period_type=1,
-        transaction_processing_strategy_code="mifos-standard-strategy",
+def test_the_shared_constants_are_the_template_ones_and_no_product_copy_is_left() -> None:
+    assert loans_service.FINERACT_DATE_FORMAT is templates.FINERACT_DATE_FORMAT
+    assert loans_service.FINERACT_LOCALE is templates.FINERACT_LOCALE
+    assert loans_service.build_application_body is templates.build_application_body
+    for gone in ("parse_product", "ProductTerms", "PRODUCT_EXTERNAL_ID"):
+        assert not hasattr(loans_service, gone), gone
+
+
+def test_the_principal_range_comes_from_the_template() -> None:
+    form = templates.parse_loan_application_form(
+        application_template(minPrincipal=300000.0, maxPrincipal=900000.0)
     )
+    assert application_error(form, 300000, TODAY, TODAY) is None
+    assert application_error(form, 900000, TODAY, TODAY) is None
+
+    error = application_error(form, 1200000, TODAY, TODAY)
+    assert error is not None
+    assert (error.code, error.status) == (ErrorCode.VALIDATION_ERROR, 422)
+    assert error.details is not None
+    problems = error.details["problems"]
+    assert problems[0]["field"] == "principal"
+    assert "300000 and 900000" in problems[0]["problem"]
+    assert error.message.startswith("principal: ")
+
+    below = application_error(form, 299999, TODAY, TODAY)
+    assert below is not None and below.details is not None
+    assert below.details["problems"][0]["field"] == "principal"
 
 
-def test_application_body_uses_the_product_terms_and_our_loan_reference() -> None:
-    body = build_application_body(
-        parse_product(PRODUCT),
-        fineract_client_id=41,
-        principal=1200000,
-        loan_reference="LN-2026-000001",
-        submitted_on=date(2026, 10, 13),
-        expected_disbursement_on=date(2026, 10, 20),
+def test_a_template_with_one_limit_only_checks_that_limit() -> None:
+    form = templates.parse_loan_application_form(
+        application_template(minPrincipal=2000000.0, maxPrincipal=None)
     )
-    assert body == {
-        "clientId": 41,
-        "productId": 1,
-        "principal": 1200000,
-        "loanTermFrequency": 12,
-        "loanTermFrequencyType": 2,
-        "numberOfRepayments": 12,
-        "repaymentEvery": 1,
-        "repaymentFrequencyType": 2,
-        "interestRatePerPeriod": 18.0,
-        "amortizationType": 1,
-        "interestType": 0,
-        "interestCalculationPeriodType": 1,
-        "transactionProcessingStrategyCode": "mifos-standard-strategy",
-        "expectedDisbursementDate": "2026-10-20",
-        "submittedOnDate": "2026-10-13",
-        "loanType": "individual",
-        "externalId": "LN-2026-000001",
-        "dateFormat": "yyyy-MM-dd",
-        "locale": "en",
+    assert application_error(form, 90000000, TODAY, TODAY) is None
+    error = application_error(form, 1999999, TODAY, TODAY)
+    assert error is not None and error.details is not None
+    assert error.details["problems"] == [
+        {"field": "principal", "problem": "must be at least 2000000 RWF (the product range)"}
+    ]
+
+
+def test_a_past_expected_date_is_a_field_problem() -> None:
+    error = past_expected_date_error()
+    assert (error.code, error.status) == (ErrorCode.VALIDATION_ERROR, 422)
+    assert error.details == {
+        "problems": [
+            {
+                "field": "expected_disbursement_date",
+                "problem": "cannot be in the past (Kigali date)",
+            }
+        ]
     }
+
+
+def test_the_approval_takes_the_template_amount_and_default_date() -> None:
+    data = fixture("loan_approval_template.json")
+    data["approvalAmount"] = 1750000.0
+    data["approvalDate"] = [2026, 10, 12]
+    form = templates.parse_approval_form(data)
+
+    assert approval_terms(form, None, TODAY) == ApprovalTerms(date(2026, 10, 12), 1750000)
+    assert approval_terms(form, date(2026, 10, 13), TODAY) == ApprovalTerms(TODAY, 1750000)
+
+
+def test_the_approval_date_without_a_template_default_is_today() -> None:
+    data = fixture("loan_approval_template.json")
+    data["approvalDate"] = None
+    form = templates.parse_approval_form(data)
+    assert approval_terms(form, None, TODAY) == ApprovalTerms(TODAY, 2500000)
+
+
+def test_a_future_approval_date_is_a_field_problem() -> None:
+    form = templates.parse_approval_form(fixture("loan_approval_template.json"))
+    with pytest.raises(ApiError) as caught:
+        approval_terms(form, date(2026, 10, 14), TODAY)
+    assert caught.value.status == 422
+    assert caught.value.details == {
+        "problems": [{"field": "approved_on", "problem": "cannot be in the future (Kigali date)"}]
+    }
+
+
+def test_the_approval_form_is_read_by_external_id() -> None:
+    path = "/loans/external-id/LN-2026-000001/template"
+    fake = FakeFineract({path: fixture("loan_approval_template.json")})
+    form = read_approval_form(fake, "LN-2026-000001", None)
+    assert form.approved_amount == 2500000
+    assert fake.calls == [(path, {"templateType": "approval"})]
+
+
+def test_an_approval_template_without_an_amount_is_an_unexpected_answer() -> None:
+    data = fixture("loan_approval_template.json")
+    del data["approvalAmount"]
+    fake = FakeFineract({"/loans/external-id/LN-2026-000001/template": data})
+    with pytest.raises(FineractServerError):
+        read_approval_form(fake, "LN-2026-000001", None)
+
+
+PAYOFF_PATH = "/loans/external-id/LN-2026-000123/transactions/template"
+
+
+def test_payoff_amount_is_the_prepay_template_amount() -> None:
+    fake = FakeFineract({PAYOFF_PATH: fixture("loan_prepay_template.json")})
+    assert payoff_amount(fake, "LN-2026-000123", None) == 1270195
+    assert fake.calls == [(PAYOFF_PATH, {"command": "prepayLoan"})]
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        FineractTimeout("no answer"),
+        {**fixture("loan_prepay_template.json"), "amount": 1270195.5},
+        {k: v for k, v in fixture("loan_prepay_template.json").items() if k != "currency"},
+    ],
+)
+def test_payoff_amount_is_best_effort(answer: Any) -> None:
+    """A failed read or a template we cannot read leaves payoff_amount out (null)."""
+    assert payoff_amount(FakeFineract({PAYOFF_PATH: answer}), "LN-2026-000123", None) is None
 
 
 def test_approval_body() -> None:
