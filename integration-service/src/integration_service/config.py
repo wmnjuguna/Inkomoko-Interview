@@ -5,7 +5,8 @@ from __future__ import annotations
 import math
 import os
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from pathlib import Path
 
 from flask import current_app
 
@@ -23,6 +24,13 @@ class Settings:
     fineract_timeout_seconds: float = 30.0
     erp_timeout_seconds: float = 10.0
     log_level: str = "INFO"
+    # The outbox sender and recovery loop. Off unless asked for, so a Settings built in a
+    # test starts no thread; from_env() turns it on unless OUTBOX_ENABLED=false.
+    outbox_enabled: bool = False
+    outbox_poll_seconds: float = 5.0
+    outbox_max_attempts: int = 8
+    # The loan product file whose glAccounts give the journal entry account codes.
+    gl_roles_config_path: str = field(default_factory=lambda: str(default_gl_roles_path()))
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -38,6 +46,11 @@ class Settings:
             fineract_timeout_seconds=env_seconds(os.environ, "FINERACT_TIMEOUT_SECONDS", 30.0),
             erp_timeout_seconds=env_seconds(os.environ, "ERP_TIMEOUT_SECONDS", 10.0),
             log_level=os.environ.get("LOG_LEVEL", "INFO").strip().upper() or "INFO",
+            outbox_enabled=env_flag(os.environ, "OUTBOX_ENABLED", True),
+            outbox_poll_seconds=env_seconds(os.environ, "OUTBOX_POLL_SECONDS", 5.0),
+            outbox_max_attempts=env_count(os.environ, "OUTBOX_MAX_ATTEMPTS", 8),
+            gl_roles_config_path=os.environ.get("GL_ROLES_CONFIG_PATH", "").strip()
+            or str(default_gl_roles_path()),
         )
 
 
@@ -71,6 +84,36 @@ def env_seconds(environ: Mapping[str, str], name: str, default: float) -> float:
     if not math.isfinite(value) or value <= 0:
         raise RuntimeError(f"{name} must be a number of seconds above 0, not {raw!r}")
     return value
+
+
+def env_flag(environ: Mapping[str, str], name: str, default: bool) -> bool:
+    """true/false, 1/0, yes/no, on/off. Blank or unset gives the default."""
+    raw = environ.get(name, "").strip().lower()
+    if not raw:
+        return default
+    if raw in ("1", "true", "yes", "on"):
+        return True
+    if raw in ("0", "false", "no", "off"):
+        return False
+    raise RuntimeError(f"{name} must be true or false, not {raw!r}")
+
+
+def env_count(environ: Mapping[str, str], name: str, default: int) -> int:
+    """A whole number above 0. Blank or unset gives the default."""
+    raw = environ.get(name, "").strip()
+    if not raw:
+        return default
+    if not raw.isdigit() or int(raw) < 1:
+        raise RuntimeError(f"{name} must be a whole number above 0, not {raw!r}")
+    return int(raw)
+
+
+def default_gl_roles_path() -> Path:
+    """loan-product.json in FINERACT_SETUP_CONFIG_DIR when set, else in the repo's
+    fineract/configuration (the same folder setup reads)."""
+    folder = os.environ.get("FINERACT_SETUP_CONFIG_DIR", "").strip()
+    base = Path(folder) if folder else Path(__file__).resolve().parents[3] / "fineract"
+    return base / "loan-product.json" if folder else base / "configuration" / "loan-product.json"
 
 
 def get_settings() -> Settings:
