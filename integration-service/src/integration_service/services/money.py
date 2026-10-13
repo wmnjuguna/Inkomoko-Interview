@@ -17,9 +17,11 @@ A refusal is not always a refusal: on a retry (or when Fineract says our transac
 externalId is taken), our own earlier attempt may have landed late. The transaction under
 our op key is ours, so it is looked up before the operation is called FAILED.
 
-Fineract's templates decide the terms, read once before the write (never inside it):
-- the disbursement template gives the amount (the approved principal) and the default date
-  (the expected disbursement date, but never later than today);
+Fineract's templates decide the terms. They are read under the per-loan lock, right before
+the write, and only after a retry has looked up its earlier attempt (one that landed late is
+ours and is finished without any template read):
+- the disbursement template gives the amount (the approved principal). The default date is
+  today, the day the money moves (not the template's expected date, which would backdate it);
 - the repayment template gives the currency step and the payment types. Only partner payment
   types are taken; Fineract's system-defined ones (its own adjustments) are refused.
 A failed template read means nothing was sent: FAILED and 503.
@@ -59,14 +61,14 @@ from integration_service.mapping.journal import (
 from integration_service.schemas.money import DisbursementRequest, RepaymentRequest
 from integration_service.services.fineract_calls import (
     Done,
+    Outcome,
     Rejected,
     Unknown,
     execute_fineract_write,
+    look_up_earlier,
 )
 from integration_service.services.loan_locks import LoanLockTimeoutError, loan_lock
 from integration_service.services.loans import (
-    FINERACT_DATE_FORMAT,
-    FINERACT_LOCALE,
     Answer,
     FineractApi,
     OurLoan,
@@ -93,6 +95,8 @@ from integration_service.services.operations import (
 )
 from integration_service.services.outbox import record_money_done
 from integration_service.services.templates import (
+    FINERACT_DATE_FORMAT,
+    FINERACT_LOCALE,
     DisbursementForm,
     FieldProblem,
     RepaymentForm,
@@ -140,12 +144,12 @@ def check_transaction_date(requested: date | None, today: date) -> date:
 def disbursement_terms(
     form: DisbursementForm, requested: date | None, today: date
 ) -> tuple[date, int]:
-    """The date and amount to pay out, from Fineract's disbursement template: the partner's
-    date or the template's default, and the approved amount. Raises a 422 ApiError."""
-    problems = check_disbursement(form, requested, today)
+    """The date and amount to pay out: the partner's date or today, and the approved amount
+    from Fineract's disbursement template. Raises a 422 ApiError."""
+    problems = check_disbursement(requested, today)
     if problems:
         raise validation_error(problems)
-    return requested or form.default_date(today), form.amount
+    return requested or today, form.amount
 
 
 def repayment_payment_type(
@@ -414,31 +418,33 @@ def disburse_loan(
     if not isinstance(started, New):
         return answer_for_begin(started, request.external_reference)
     op = started.operation
-    form = _template_or_fail(
-        engine,
-        op,
-        lambda: fetch_disbursement_form(fineract, loan_reference, correlation_id),
-        "disbursement",
-        correlation_id,
-    )
-    try:
-        on, amount = disbursement_terms(form, request.transaction_date, today)
-    except ApiError as exc:
-        fail(engine, op, exc, correlation_id)
-    call = write_call(
-        fineract,
-        loan_path(loan_reference),
-        {"command": "disburse"},
-        build_disbursement_body(on, amount, op.op_key),
-        correlation_id,
-    )
+
+    def prepare() -> Callable[[str], dict[str, Any]]:
+        form = _template_or_fail(
+            engine,
+            op,
+            lambda: fetch_disbursement_form(fineract, loan_reference, correlation_id),
+            "disbursement",
+            correlation_id,
+        )
+        try:
+            on, amount = disbursement_terms(form, request.transaction_date, today)
+        except ApiError as exc:
+            fail(engine, op, exc, correlation_id)
+        return write_call(
+            fineract,
+            loan_path(loan_reference),
+            {"command": "disburse"},
+            build_disbursement_body(on, amount, op.op_key),
+            correlation_id,
+        )
 
     def refuse(error: FineractRejected) -> ApiError:
         return disbursement_rejection(
             error, loan_reference, _loan_status_id(fineract, loan_reference, correlation_id)
         )
 
-    return _write_and_finish(engine, fineract, op, call, refuse, accounts, correlation_id)
+    return _write_and_finish(engine, fineract, op, prepare, refuse, accounts, correlation_id)
 
 
 def record_repayment(
@@ -468,19 +474,6 @@ def record_repayment(
     if not isinstance(started, New):
         return answer_for_begin(started, request.external_reference)
     op = started.operation
-    form = _template_or_fail(
-        engine,
-        op,
-        lambda: fetch_repayment_form(fineract, loan_reference, correlation_id),
-        "repayment",
-        correlation_id,
-    )
-    try:
-        payment_type = repayment_payment_type(
-            form, request.amount, request.transaction_date, request.payment_type, today
-        )
-    except ApiError as exc:
-        fail(engine, op, exc, correlation_id)
 
     def still_active() -> None:
         try:
@@ -490,19 +483,34 @@ def record_repayment(
             raise FineractUnavailable("could not read the loan before the write") from exc
         check_repayable(data if isinstance(data, dict) else {}, loan_reference)
 
-    call = write_call(
-        fineract,
-        f"{loan_path(loan_reference)}/transactions",
-        {"command": "repayment"},
-        build_repayment_body(on, request.amount, op.op_key, payment_type),
-        correlation_id,
-        before=still_active,
-    )
+    def prepare() -> Callable[[str], dict[str, Any]]:
+        form = _template_or_fail(
+            engine,
+            op,
+            lambda: fetch_repayment_form(fineract, loan_reference, correlation_id),
+            "repayment",
+            correlation_id,
+        )
+        try:
+            payment_type = repayment_payment_type(
+                form, request.amount, request.transaction_date, request.payment_type, today
+            )
+        except ApiError as exc:
+            fail(engine, op, exc, correlation_id)
+        return write_call(
+            fineract,
+            f"{loan_path(loan_reference)}/transactions",
+            {"command": "repayment"},
+            build_repayment_body(on, request.amount, op.op_key, payment_type),
+            correlation_id,
+            before=still_active,
+        )
+
     return _write_and_finish(
         engine,
         fineract,
         op,
-        call,
+        prepare,
         lambda error: repayment_rejection(error, loan_reference),
         accounts,
         correlation_id,
@@ -581,26 +589,32 @@ def _write_and_finish(
     engine: Engine,
     fineract: FineractApi,
     op: Operation,
-    call: Callable[[str], dict[str, Any]],
+    prepare: Callable[[], Callable[[str], dict[str, Any]]],
     refuse: Callable[[FineractRejected], ApiError],
     accounts: Accounts,
     correlation_id: str | None,
 ) -> Answer:
-    """The write under the per-loan lock (L3), then Fineract's own transaction, then
-    FINERACT_DONE + saved answer + outbox row in one transaction. All of it inside the lock,
-    so the loan status in the answer is the one right after this transaction."""
+    """Under the per-loan lock (L3): a retry first looks up its earlier attempt; if there is
+    none, prepare() reads the template and builds the write, and the write is sent. Then
+    Fineract's own transaction, then FINERACT_DONE + saved answer + outbox row in one
+    transaction. All of it inside the lock, so the template's amount is the one the write
+    uses and the loan status in the answer is the one right after this transaction."""
     assert op.loan_reference is not None  # DSB and RPY rows always carry one (CHECK)
     lookup = transaction_lookup(fineract, op.loan_reference, op.op_key, correlation_id)
     try:
         with loan_lock(engine, op.loan_reference):
-            try:
-                outcome = execute_fineract_write(
-                    call, lookup, op.op_key, op.attempts, check_first=op.attempts > 1
-                )
-            except LoanNotRepayable as exc:
-                outcome = _ours_after_all(lookup, op, ()) or fail(
-                    engine, op, exc.error, correlation_id
-                )
+            earlier = look_up_earlier(lookup, op.attempts)
+            if earlier is not None:
+                outcome: Outcome[dict[str, Any]] = earlier
+            else:
+                call = prepare()
+                try:
+                    # Looked up just above: no second lookup before sending.
+                    outcome = execute_fineract_write(call, lookup, op.op_key, op.attempts)
+                except LoanNotRepayable as exc:
+                    outcome = _ours_after_all(lookup, op, ()) or fail(
+                        engine, op, exc.error, correlation_id
+                    )
             settled = settle(engine, op, outcome, correlation_id)
             if isinstance(settled, Rejected):
                 rechecked = _ours_after_all(lookup, op, settled.error.error_codes)

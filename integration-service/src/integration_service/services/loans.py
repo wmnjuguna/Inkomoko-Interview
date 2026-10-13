@@ -5,7 +5,10 @@ helpers in the first section):
 1. Check what we can without Fineract (dates, our own records). A 4xx here saves nothing.
 2. begin() in services.operations. Only New runs; a repeat gets its saved answer, 202,
    or 409 (answer_for_begin).
-3. Read what the write needs from Fineract. If that fails, nothing was sent: FAILED.
+3. A retry (attempt 2 or later) first looks up its earlier attempt by our key: one that
+   landed late is ours and is finished, and a failed lookup leaves it unknown (504,
+   FINERACT_PENDING). Only then:
+   Read what the write needs from Fineract. If that fails, nothing was sent: FAILED.
    The rules and terms come from Fineract's own templates (services.templates): the
    product's principal range and terms for an application, the approved amount and default
    date for an approval. A value that does not fit is 422 VALIDATION_ERROR with
@@ -57,6 +60,7 @@ from integration_service.services.fineract_calls import (
     Rejected,
     Unknown,
     execute_fineract_write,
+    look_up_earlier,
 )
 from integration_service.services.loan_locks import LoanLockTimeoutError, loan_lock
 from integration_service.services.operations import (
@@ -75,12 +79,8 @@ from integration_service.services.operations import (
     set_fields,
 )
 from integration_service.services.templates import (
-    FINERACT_DATE_FORMAT as FINERACT_DATE_FORMAT,
-)
-from integration_service.services.templates import (
-    FINERACT_LOCALE as FINERACT_LOCALE,
-)
-from integration_service.services.templates import (
+    FINERACT_DATE_FORMAT,
+    FINERACT_LOCALE,
     ApprovalForm,
     FieldProblem,
     LoanApplicationForm,
@@ -261,6 +261,20 @@ def read_or_fail[T](
             engine, op.id, f"could not read {what} from Fineract; nothing was sent", correlation_id
         )
         raise error from exc
+
+
+def earlier_attempt[T](
+    engine: Engine, op: Operation, lookup: Callable[[], T | None], correlation_id: str | None
+) -> T | None:
+    """A retry looks for its earlier attempt before anything else is read or checked: one
+    that landed late is ours (the result). None: the first attempt, or nothing found. A
+    failed lookup leaves the outcome unknown: 504 and FINERACT_PENDING (settle)."""
+    found = look_up_earlier(lookup, op.attempts)
+    if found is None:
+        return None
+    settled = settle(engine, op, found, correlation_id)
+    assert isinstance(settled, Done)
+    return settled.result
 
 
 def write_to_loan[T](
@@ -659,6 +673,22 @@ def apply_for_loan(
     if not isinstance(started, New):
         return answer_for_begin(started, reference)
     op = started.operation
+    if op.loan_reference is not None:
+        earlier_ref = op.loan_reference
+        held = earlier_attempt(
+            engine, op, lambda: find_loan(fineract, earlier_ref, correlation_id), correlation_id
+        )
+        if held is not None and _is_ours(held, request.client_uid, request.principal):
+            return _finish_application(
+                engine,
+                op,
+                earlier_ref,
+                request.client_uid,
+                request.principal,
+                held.expected_disbursement_on or expected,
+                held.fineract_id,
+                correlation_id,
+            )
     if expected < today:  # it FAILED meanwhile and is retried now: the date rule applies
         fail(engine, op, past, correlation_id)
 
@@ -869,6 +899,11 @@ def approve_loan(
     if not isinstance(started, New):
         return answer_for_begin(started, reference)
     op = started.operation
+    earlier = earlier_attempt(
+        engine, op, lambda: find_approval(fineract, loan_reference, correlation_id), correlation_id
+    )
+    if earlier is not None:
+        return _finish_approval(engine, op, loan.client_uid, earlier, correlation_id)
     form = read_or_fail(
         engine,
         op,

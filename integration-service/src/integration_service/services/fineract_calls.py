@@ -23,6 +23,9 @@ Special cases:
 - 409 can mean an earlier attempt already wrote the same externalId, so it is looked up too.
 - check_first=True looks it up before sending (for an attempt after an unclear outcome, and
   for recovery). Found means no call at all.
+- look_up_earlier() is the same lookup on its own, for a flow that must read Fineract
+  (a template) before it can build the write: a retry looks for its earlier attempt before
+  that read, so a failed read never hides a write of ours that landed late.
 
 Reasons are our own words. They never quote Fineract's text, which can hold Fineract ids."""
 
@@ -106,6 +109,15 @@ def execute_fineract_write[T](
     except FineractError as exc:
         return _after_unclear(lookup, f"Fineract did not answer clearly ({_what(exc)})")
     return Done(result, found_by_lookup=False)
+
+
+def look_up_earlier[T](lookup: Callable[[], T | None], attempt: int) -> Done[T] | Unknown | None:
+    """For an attempt after the first: the earlier attempt may have landed late, so look
+    for it before anything else. None: the first attempt, or nothing found."""
+    if attempt <= 1:
+        return None
+    found = _look_up(lookup)
+    return None if isinstance(found, _NotThere) else found
 
 
 @dataclass(frozen=True)

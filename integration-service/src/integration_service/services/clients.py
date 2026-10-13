@@ -28,10 +28,13 @@ from integration_service.clients.errors import FineractError, FineractNotFound, 
 from integration_service.errors import ApiError, ErrorCode
 from integration_service.models import clients
 from integration_service.schemas.clients import CreateClientRequest
-from integration_service.services.fineract_calls import Done, execute_fineract_write
+from integration_service.services.fineract_calls import (
+    Done,
+    Outcome,
+    execute_fineract_write,
+    look_up_earlier,
+)
 from integration_service.services.loans import (
-    FINERACT_DATE_FORMAT,
-    FINERACT_LOCALE,
     Answer,
     FineractApi,
     answer_for_begin,
@@ -50,6 +53,11 @@ from integration_service.services.operations import (
     mark_failed,
     mark_fineract_done,
     move,
+)
+from integration_service.services.templates import (
+    FINERACT_DATE_FORMAT,
+    FINERACT_LOCALE,
+    fetch_client_form,
 )
 from integration_service.state_machine import FINERACT_PENDING, NEEDS_RECONCILIATION
 
@@ -109,17 +117,6 @@ def build_client_body(request: CreateClientRequest, office_id: int, today: date)
         "dateFormat": FINERACT_DATE_FORMAT,
         "locale": FINERACT_LOCALE,
     }
-
-
-def find_office_id(template: Any, office_name: str) -> int:
-    """The office id from GET /clients/template (the API user may not read /offices)."""
-    options = template.get("officeOptions") if isinstance(template, dict) else None
-    for option in options or []:
-        if isinstance(option, dict) and option.get("name") == office_name:
-            office_id = option.get("id")
-            if isinstance(office_id, int):
-                return office_id
-    raise LookupError(f"Fineract has no office named {office_name}")
 
 
 def parse_client(data: Any) -> FineractClientRecord:
@@ -241,38 +238,42 @@ def create_client(
         return answer_for_begin(started, reference)
     op = started.operation
 
-    office_id = read_or_fail(
-        engine,
-        op,
-        lambda: _office_id(fineract, correlation_id),
-        "the office",
-        correlation_id,
-    )
-    body = build_client_body(request, office_id, today or kigali_today())
-
-    def create(key: str) -> FineractClientRecord:
-        data = fineract.post("/clients", body, idempotency_key=key, correlation_id=correlation_id)
-        client_id = data.get("clientId") if isinstance(data, dict) else None
-        if not isinstance(client_id, int):
-            client_id = data.get("resourceId") if isinstance(data, dict) else None
-        if not isinstance(client_id, int):
-            raise FineractError("Unexpected Fineract answer (no client id)")
-        return FineractClientRecord(
-            fineract_id=client_id,
-            client_uid=uid,
-            first_name=request.first_name,
-            last_name=request.last_name,
-            display_name=request.name,
-            active=True,
-            status=ACTIVE,
-        )
-
     def lookup() -> FineractClientRecord | None:
         return find_client(fineract, uid, correlation_id)
 
-    outcome = execute_fineract_write(
-        create, lookup, op.op_key, op.attempts, check_first=op.attempts > 1
-    )
+    # A retry looks for its earlier attempt before reading the office: one that landed late
+    # is ours, whatever that read would do.
+    outcome: Outcome[FineractClientRecord] | None = look_up_earlier(lookup, op.attempts)
+    if outcome is None:
+        office_id = read_or_fail(
+            engine,
+            op,
+            lambda: _office_id(fineract, correlation_id),
+            "the office",
+            correlation_id,
+        )
+        body = build_client_body(request, office_id, today or kigali_today())
+
+        def create(key: str) -> FineractClientRecord:
+            data = fineract.post(
+                "/clients", body, idempotency_key=key, correlation_id=correlation_id
+            )
+            client_id = data.get("clientId") if isinstance(data, dict) else None
+            if not isinstance(client_id, int):
+                client_id = data.get("resourceId") if isinstance(data, dict) else None
+            if not isinstance(client_id, int):
+                raise FineractError("Unexpected Fineract answer (no client id)")
+            return FineractClientRecord(
+                fineract_id=client_id,
+                client_uid=uid,
+                first_name=request.first_name,
+                last_name=request.last_name,
+                display_name=request.name,
+                active=True,
+                status=ACTIVE,
+            )
+
+        outcome = execute_fineract_write(create, lookup, op.op_key, op.attempts)
     settled = settle(engine, op, outcome, correlation_id)
     if isinstance(settled, Done):
         record = settled.result
@@ -310,11 +311,11 @@ def _taken(client_uid: str) -> ApiError:
 
 
 def _office_id(fineract: FineractApi, correlation_id: str | None) -> int:
-    template = fineract.get("/clients/template", correlation_id=correlation_id)
-    try:
-        return find_office_id(template, OFFICE_NAME)
-    except LookupError as exc:
-        raise FineractError(str(exc)) from exc
+    """The office id from Fineract's client template (the API user may not read /offices)."""
+    office_id = fetch_client_form(fineract, correlation_id).office_id(OFFICE_NAME)
+    if office_id is None:
+        raise FineractError(f"Fineract has no office named {OFFICE_NAME}")
+    return office_id
 
 
 def _finish_creation(
