@@ -56,3 +56,24 @@ Integration transactions: 1
 ## Results
 
 *(Added after each run, using the list above.)*
+
+### Mock ERP fault checks (direct, before the Integration Service exists)
+
+These are **not** the J-1 and J-4 runs in the table. Those go through the Integration Service, which is not built yet. Here I called the Mock ERP API directly, to check that its fault switch behaves the way J-1 and J-4 will need. Run on the Mock ERP container on 2026-10-13.
+
+| Check | What I did | What happened |
+|---|---|---|
+| Like J-1: ERP down | Set the fault to `down`, posted a journal entry, then posted it again | First call `503`. The retry got `201`. |
+| Like J-4: ERP slow after saving | Set `timeout_after_write` with a 2 s wait. The client gave up after 1 s. Then I sent the same entry again. | The retry got `200` (`ALREADY_EXISTS`). Only one entry was saved. |
+| Same reference, different amounts | Posted the J-4 reference again with other amounts | `409 reference_conflict`. Nothing changed. |
+| Rate limited | Set `rate_limited` with `retry_after` 7, then listed the accounts | `429` with the header `Retry-After: 7` |
+
+The ERP wrote one JSON log line per request, with the correlation id and the fault. For example, the call hit by `timeout_after_write` (shortened):
+
+```json
+{"method": "POST", "path": "/api/journal-entries", "status": 201, "duration_ms": 2017.4,
+ "fault": "timeout_after_write", "external_reference": "E2E-0002",
+ "correlation_id": "c-4a5431ecb75e49489e8234023ded5fde"}
+```
+
+The server still answered `201` after 2 s, but the client had already left. Its retry got `200` with the same `erp_transaction_id` (`6bd5ec9b-…`).
