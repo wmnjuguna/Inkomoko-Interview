@@ -1,6 +1,6 @@
 # Simulations
 
-> **Status:** none have been run yet. Each result below will be copied from a real run, never written before it.
+> **Status:** A-1 and A-2 (Part A) have been run on a clean stack. The others are not run yet. Each result below is copied from a real run, never written before it.
 
 ## What each result records
 
@@ -18,8 +18,8 @@
 
 | ID | Part | What it tests | Command | Status |
 |---|---|---|---|---|
-| A-1 | A | The plugin's four rules: new, same data, different data, no permission | `make demo-gl-sync` | Not run |
-| A-2 | A | The same ERP account sent 4 times gives 1 ERP account, 1 GL account and 1 mapping | `make simulate-gl-sync-4x` | Not run |
+| A-1 | A | The plugin's four rules: one mapping, same data, different data, no permission | `make demo-gl-sync` | Run: 4 of 4 matched, twice |
+| A-2 | A | A new ERP account sent 4 times at once gives 1 ERP account, 1 GL account and 1 mapping | `make simulate-gl-sync-4x` | Run: PASS |
 | C-1 | C | Create a client, find it by `client_uid`, check it | `make demo-identity` | Not run |
 | D-1 | D | A loan from application to Closed: approve, disburse, 3 repayments, pay off | `make demo-lifecycle` | Not run |
 | I-1 | I | The same disbursement sent 4 times, one after another | `make simulate-duplicates` | Not run |
@@ -56,6 +56,59 @@ Integration transactions: 1
 ## Results
 
 *(Added after each run, using the list above.)*
+
+### A-1: the plugin's four rules
+
+Run on 2026-10-13, on a clean stack (`docker compose down -v`, then `make up`). Setup had synced the ERP chart. Full output of both runs: `evidence/P1/A-1.txt`.
+
+The demo works on `GL-1200` (Loan Receivable). For rule 4 it uses a user `demo-no-sync` whose role only has `READ_GLACCOUNT`. The first run created that user. The second run found it and reused it. Both runs printed `4 of 4 behaviours matched` and exited 0.
+
+| Rule | Request | What happened |
+|---|---|---|
+| 1. The ERP reference is stored and unique | `GET /erp-integration/accounts/GL-1200` | `200`, glCode 1200, parent GL-1000. Fineract has 1 `glsync_external_ref` row and 1 GL account with code 1200. The table has unique rules on the reference and on the GL account. |
+| 2. Same reference, same data | `PUT` with the exact body the service sends | `200 UNCHANGED`, same GL account. The counts stayed at 1. |
+| 3. Same reference, different data | `PUT` with the name `Loan Receivable (changed)` | `409 error.msg.glaccount.sync.payload.conflict`. The name in Fineract is still `Loan Receivable`. |
+| 4. No `SYNC_GLACCOUNT` permission | `PUT` as `demo-no-sync` | `403 error.msg.not.authorized`. The same user can still read the mapping. |
+
+The Integration Service showed `GL-1200` as `SYNCED`, 1 attempt, during all four.
+
+**Why:** the plugin keeps the reference in its own table with a unique rule. It compares a hash of the data, returns the existing account when it is equal, and refuses different data. Its `PUT` needs `SYNC_GLACCOUNT`.
+
+### A-2: a new ERP account sent 4 times at once
+
+Run on 2026-10-13, on the same clean stack, right after A-1. Full output: `evidence/P1/A-2.txt`.
+
+Each run adds two new accounts to the Mock ERP (EXPENSE, DETAIL, under 5000), with new 8-digit codes starting with 7. So the first create really races. This run used `GL-71114743` and `GL-77402790`.
+
+**Round 1, through the Integration Service:** 4 calls at once to `POST /api/accounts/GL-71114743/sync`.
+
+```
+call 1: 200 in_progress False, SYNCED attempts 1
+call 2: 202 in_progress True, no row yet
+call 3: 202 in_progress True, no row yet
+call 4: 202 in_progress True, no row yet
+commands Fineract ran for GL-71114743 from the service (should be 1): 1
+```
+
+**Round 2, straight to the plugin:** 4 `PUT /erp-integration/accounts/GL-77402790` at once, same body.
+
+```
+outcomes: {'UNCHANGED': 3, 'CREATED': 1}; distinct glAccountIds: 1
+```
+
+**Counts after both rounds**, the same for each account:
+
+| | Expected | GL-71114743 | GL-77402790 |
+|---|---|---|---|
+| ERP accounts with this reference | 1 | 1 | 1 |
+| Fineract GL accounts with this code | 1 | 1 | 1 |
+| `glsync_external_ref` rows | 1 | 1 | 1 |
+| `gl_sync` rows | 1 | 1 | 1 |
+| `gl_sync` status | SYNCED | SYNCED, 1 attempt | SYNCED, 1 attempt |
+
+Result: `PASS`, exit 0.
+
+**Why:** in the service, a Postgres advisory lock lets only one sync run at a time. The other 3 calls got `202` and sent nothing. In the plugin, a Postgres lock on the reference and on the GL code makes the requests wait in turn. The first creates the account, the others find it and answer `UNCHANGED`.
 
 ### Mock ERP fault checks (direct, before the Integration Service exists)
 
