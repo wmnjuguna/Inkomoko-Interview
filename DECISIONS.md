@@ -11,6 +11,7 @@ This file explains the choices I made and why.
 - **JDK 21 and Gradle 8.14.5.** I took both from the Fineract tag itself, not from my own choice.
 - **PostgreSQL 18.3, Alpine image.** Fineract 1.15.0 uses this version in its own Docker files, so it is tested with it. One server, with one database and one user per service.
 - **Alpine images** for the build and the runtime, to keep images small.
+- **Python 3.13** for the Mock ERP, on `python:3.13.16-alpine3.24`. Packages are locked with uv (`uv.lock`). The code is checked with ruff and with mypy in strict mode.
 
 ## The Fineract plugin
 
@@ -101,6 +102,43 @@ The plugin's migration creates the `SYNC_GLACCOUNT` permission. The setup script
 
 Fineract normally answers rule errors with 403, and it has no 409 handler. So the plugin adds its own 409 handler.
 
+## The Mock ERP
+
+### Flask, not FastAPI
+
+My first plan said FastAPI for both Python services. For the Mock ERP I chose Flask instead. The Integration Service plan stays as it is.
+
+| Option | Good | Bad |
+|---|---|---|
+| **Flask 3 + flask-openapi3 + Pydantic** (chosen) | Jinja2 comes with Flask, so the web UI needs nothing extra. flask-openapi3 checks each request against a Pydantic model, answers `422` when it does not match, and builds the OpenAPI spec from the same models. | One more library (flask-openapi3) to get what FastAPI has built in |
+| FastAPI | Typed checks and the spec come built in. Async. | Server-rendered pages need Jinja2 added and set up. Async brings nothing here. |
+
+Why Flask is enough here:
+
+- **The usual gap is closed.** Plain Flask has no typed input checks and no generated spec. flask-openapi3 and Pydantic add both. Bad input gets `422` in the same error format as every other error.
+- **The service is small and synchronous.** Each call is one short database transaction. Nothing waits on another service.
+- **The slow faults are on purpose.** The `timeout` modes hold a request open for up to 120 seconds. Gunicorn runs 2 workers with 4 threads each, so a held request blocks one thread, not the whole ERP.
+
+### Debits equal credits, checked in Python and in the database
+
+Python checks the balance first. That gives a clear `422` with the totals. A Postgres trigger checks it again when the transaction commits. It also refuses lines on HEADER accounts. The trigger is "deferred", which means it runs at commit, after all the lines of the entry are in. So a write that skips the Python code, such as raw SQL, still can't save an unbalanced entry. The ERP does not trust its caller, and this is the last guard.
+
+### One row for the fault switch
+
+The fault setting is one row in the database, not a value in memory. Gunicorn runs 2 separate processes. A value in memory would only change in one of them, so half the calls would ignore the fault. With one row, every process sees the same setting.
+
+A fault can be limited to a number of calls. Each call takes one from the count in a single `UPDATE … RETURNING old.*` statement. The row lock makes calls at the same time wait for each other, so the count is exact. `RETURNING old.*` is new in Postgres 18. That is fine, because this project always uses Postgres 18.
+
+### The API key is checked before the fault switch
+
+A call without a valid key gets `401` and stops. It never reaches the fault switch. So a stray call without a key can't use up a fault that a test set for "the next 2 calls".
+
+### A light CSRF guard on the web UI
+
+The UI under `/ui` has no login. Every `POST` there must carry the `HX-Request` header, which HTMX sends. Without it the answer is `400`. A plain form on another website can't set that header, so it can't change faults or add accounts through someone's browser.
+
+This is only safe because the ERP is only open on `localhost`. If the UI were ever reachable from other machines, it would need a real login and real CSRF tokens.
+
 ## Sync or async
 
 **Chosen:** the Integration Service calls Fineract directly and waits for the answer. Journal entries go to the ERP through an outbox table and a background loop. There is no message queue.
@@ -147,7 +185,7 @@ Fineract has no event for a new GL account anyway, so GL sync stays a direct cal
 
 `Idempotency-Key = <operation>:<external_reference>:<attempt>`. It is saved before the call. The attempt number only goes up after a lookup proves nothing happened. A key is never made from the request data alone, because two real repayments can have identical data.
 
-The ERP has its own unique rule on the reference, and its own debits-equal-credits rule. It does not trust the caller.
+The ERP has its own unique rule on the reference, and its own debits-equal-credits rule. It does not trust the caller. (Built and tested.)
 
 ## Retries and partial failure *(planned)*
 
