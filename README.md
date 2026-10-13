@@ -90,7 +90,7 @@ In Swagger, click **Authorize** and enter the API key from `.env` (`ERP_API_KEY`
 | Language | Command | What it runs |
 |---|---|---|
 | Java | `make test-java` | Builds Fineract (51 unit tests run during the build), starts it, then runs 10 integration tests against it. Details: [fineract-customization/BUILD.md](fineract-customization/BUILD.md) |
-| Python | `make test-python` | Mock ERP: ruff (lint and format), mypy in strict mode, then pytest. Last run: 195 tests passed. |
+| Python | `make test-python` | Mock ERP: ruff (lint and format), mypy in strict mode, then pytest. Last run: 216 tests passed. |
 
 The Python tests need the `db` container running and an empty `erp_test` database. They rebuild its tables on every run. A new data volume creates `erp_test` by itself. On an older volume, create it once:
 
