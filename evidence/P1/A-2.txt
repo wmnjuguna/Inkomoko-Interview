@@ -1,0 +1,36 @@
+# make simulate-gl-sync-4x on the clean stack, 2026-10-13T15:15:20+03:00
+uv run --project integration-service python scripts/simulate_gl_sync_4x.py
+New ERP accounts: GL-71114743 (round 1), GL-77402790 (round 2), parent code 5000
+
+Round 1: POST http://localhost:8091/api/accounts/GL-71114743/sync x4 at once
+  call 1: 200 in_progress False, SYNCED attempts 1
+  call 2: 202 in_progress True, no row yet
+  call 3: 202 in_progress True, no row yet
+  call 4: 202 in_progress True, no row yet
+  commands Fineract ran for GL-71114743 from the service (should be 1): 1
+
+Round 2: PUT /erp-integration/accounts/GL-77402790 x4 at once (same body)
+  call 1: 200 UNCHANGED glAccountId 15
+  call 2: 200 CREATED glAccountId 15
+  call 3: 200 UNCHANGED glAccountId 15
+  call 4: 200 UNCHANGED glAccountId 15
+  outcomes: {'UNCHANGED': 3, 'CREATED': 1}; distinct glAccountIds: 1
+  then one service sync for GL-77402790: call 1: 200 in_progress False, SYNCED attempts 1
+
+Counts for GL-71114743 (each should be 1):
+  ERP accounts with this reference: 1
+  Fineract GL accounts with code 71114743: 1
+  glsync_external_ref rows (fineract_default): 1
+  gl_sync rows (integration_db): 1
+  gl_sync row: SYNCED attempts 1
+
+Counts for GL-77402790 (each should be 1):
+  ERP accounts with this reference: 1
+  Fineract GL accounts with code 77402790: 1
+  glsync_external_ref rows (fineract_default): 1
+  gl_sync rows (integration_db): 1
+  gl_sync row: SYNCED attempts 1
+
+round 1: PASS, round 2: PASS
+result: PASS
+# exit code: 0

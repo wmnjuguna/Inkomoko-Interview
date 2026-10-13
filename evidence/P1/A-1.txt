@@ -1,0 +1,99 @@
+# Run 1 of make demo-gl-sync, 2026-10-13T15:15:06+03:00
+uv run --project integration-service python scripts/demo_gl_sync.py
+
+=== 1. The ERP reference is stored and unique [PASS] ===
+1. What things looked like before: GL-1200 was synced earlier by setup
+2. The request: GET /erp-integration/accounts/GL-1200 (lookup, admin)
+3. The response: 200 glAccountId 3, glCode 1200, name 'Loan Receivable', parent GL-1000
+4. What Fineract shows: {'glsync_external_ref rows': '1', 'acc_gl_account rows with gl_code 1200': '1'}; unique constraints on glsync_external_ref: uq_glsync_external_ref_gl_account, uq_glsync_external_ref_reference
+5. What the ERP shows: GL-1200 code 1200 'Loan Receivable' ASSET DETAIL, parent 1000
+6. What the Integration Service shows: status SYNCED, attempts 1
+7. What should happen: exactly one mapping row and one GL account; the reference column is UNIQUE
+8. What did happen: counts ['1', '1'], constraints uq_glsync_external_ref_gl_account, uq_glsync_external_ref_reference
+9. Why: the plugin keeps the reference in its own table with a UNIQUE constraint, so a second GL account for the same reference cannot be saved
+
+=== 2. Same reference + identical payload -> same GL account [PASS] ===
+1. What things looked like before: {'glsync_external_ref rows': '1', 'acc_gl_account rows with gl_code 1200': '1'}
+2. The request: PUT /erp-integration/accounts/GL-1200 with the body the service sends: {'name': 'Loan Receivable', 'glCode': '1200', 'type': 1, 'usage': 1, 'manualEntriesAllowed': True, 'description': 'Synced from ERP account GL-1200', 'parentAccount': 'GL-1000'}
+3. The response: 200 outcome UNCHANGED, glAccountId 3
+4. What Fineract shows: after: {'glsync_external_ref rows': '1', 'acc_gl_account rows with gl_code 1200': '1'}
+5. What the ERP shows: GL-1200 code 1200 'Loan Receivable' ASSET DETAIL, parent 1000
+6. What the Integration Service shows: status SYNCED, attempts 1
+7. What should happen: 200 UNCHANGED with glAccountId 3; counts do not change
+8. What did happen: UNCHANGED, glAccountId 3, counts {'glsync_external_ref rows': '1', 'acc_gl_account rows with gl_code 1200': '1'}
+9. Why: the plugin compares the payload hash for this reference and finds it equal, so it returns the GL account it already has and writes nothing
+
+=== 3. Same reference + different payload -> 409 [PASS] ===
+1. What things looked like before: name 'Loan Receivable'; {'glsync_external_ref rows': '1', 'acc_gl_account rows with gl_code 1200': '1'}
+2. The request: PUT /erp-integration/accounts/GL-1200 with name 'Loan Receivable (changed)'
+3. The response: HTTP 409 error.msg.glaccount.sync.payload.conflict
+4. What Fineract shows: name still 'Loan Receivable'; {'glsync_external_ref rows': '1', 'acc_gl_account rows with gl_code 1200': '1'}
+5. What the ERP shows: GL-1200 code 1200 'Loan Receivable' ASSET DETAIL, parent 1000 (the ERP never changed; only this request did)
+6. What the Integration Service shows: status SYNCED, attempts 1
+7. What should happen: 409 error.msg.glaccount.sync.payload.conflict, nothing written
+8. What did happen: HTTP 409 error.msg.glaccount.sync.payload.conflict
+9. Why: a reference stands for one account; updates are out of scope, so different data for a known reference is refused instead of overwriting
+
+=== 4. A user without SYNC_GLACCOUNT -> 403 [PASS] ===
+1. What things looked like before: user demo-no-sync was created now with role 'Demo No Sync' = ['READ_GLACCOUNT']; {'glsync_external_ref rows': '1', 'acc_gl_account rows with gl_code 1200': '1'}
+2. The request: PUT /erp-integration/accounts/GL-1200 as demo-no-sync, same body
+3. The response: HTTP 403 error.msg.not.authorized
+4. What Fineract shows: {'glsync_external_ref rows': '1', 'acc_gl_account rows with gl_code 1200': '1'}; the same user can still GET the mapping: True
+5. What the ERP shows: GL-1200 code 1200 'Loan Receivable' ASSET DETAIL, parent 1000
+6. What the Integration Service shows: status SYNCED, attempts 1
+7. What should happen: 403 error.msg.not.authorized; reading with READ_GLACCOUNT still works
+8. What did happen: HTTP 403 error.msg.not.authorized
+9. Why: the plugin's PUT needs the SYNC_GLACCOUNT permission; this role only has READ_GLACCOUNT
+
+4 of 4 behaviours matched
+# exit code: 0
+
+# Run 2 of make demo-gl-sync, 2026-10-13T15:15:09+03:00
+uv run --project integration-service python scripts/demo_gl_sync.py
+
+=== 1. The ERP reference is stored and unique [PASS] ===
+1. What things looked like before: GL-1200 was synced earlier by setup
+2. The request: GET /erp-integration/accounts/GL-1200 (lookup, admin)
+3. The response: 200 glAccountId 3, glCode 1200, name 'Loan Receivable', parent GL-1000
+4. What Fineract shows: {'glsync_external_ref rows': '1', 'acc_gl_account rows with gl_code 1200': '1'}; unique constraints on glsync_external_ref: uq_glsync_external_ref_gl_account, uq_glsync_external_ref_reference
+5. What the ERP shows: GL-1200 code 1200 'Loan Receivable' ASSET DETAIL, parent 1000
+6. What the Integration Service shows: status SYNCED, attempts 1
+7. What should happen: exactly one mapping row and one GL account; the reference column is UNIQUE
+8. What did happen: counts ['1', '1'], constraints uq_glsync_external_ref_gl_account, uq_glsync_external_ref_reference
+9. Why: the plugin keeps the reference in its own table with a UNIQUE constraint, so a second GL account for the same reference cannot be saved
+
+=== 2. Same reference + identical payload -> same GL account [PASS] ===
+1. What things looked like before: {'glsync_external_ref rows': '1', 'acc_gl_account rows with gl_code 1200': '1'}
+2. The request: PUT /erp-integration/accounts/GL-1200 with the body the service sends: {'name': 'Loan Receivable', 'glCode': '1200', 'type': 1, 'usage': 1, 'manualEntriesAllowed': True, 'description': 'Synced from ERP account GL-1200', 'parentAccount': 'GL-1000'}
+3. The response: 200 outcome UNCHANGED, glAccountId 3
+4. What Fineract shows: after: {'glsync_external_ref rows': '1', 'acc_gl_account rows with gl_code 1200': '1'}
+5. What the ERP shows: GL-1200 code 1200 'Loan Receivable' ASSET DETAIL, parent 1000
+6. What the Integration Service shows: status SYNCED, attempts 1
+7. What should happen: 200 UNCHANGED with glAccountId 3; counts do not change
+8. What did happen: UNCHANGED, glAccountId 3, counts {'glsync_external_ref rows': '1', 'acc_gl_account rows with gl_code 1200': '1'}
+9. Why: the plugin compares the payload hash for this reference and finds it equal, so it returns the GL account it already has and writes nothing
+
+=== 3. Same reference + different payload -> 409 [PASS] ===
+1. What things looked like before: name 'Loan Receivable'; {'glsync_external_ref rows': '1', 'acc_gl_account rows with gl_code 1200': '1'}
+2. The request: PUT /erp-integration/accounts/GL-1200 with name 'Loan Receivable (changed)'
+3. The response: HTTP 409 error.msg.glaccount.sync.payload.conflict
+4. What Fineract shows: name still 'Loan Receivable'; {'glsync_external_ref rows': '1', 'acc_gl_account rows with gl_code 1200': '1'}
+5. What the ERP shows: GL-1200 code 1200 'Loan Receivable' ASSET DETAIL, parent 1000 (the ERP never changed; only this request did)
+6. What the Integration Service shows: status SYNCED, attempts 1
+7. What should happen: 409 error.msg.glaccount.sync.payload.conflict, nothing written
+8. What did happen: HTTP 409 error.msg.glaccount.sync.payload.conflict
+9. Why: a reference stands for one account; updates are out of scope, so different data for a known reference is refused instead of overwriting
+
+=== 4. A user without SYNC_GLACCOUNT -> 403 [PASS] ===
+1. What things looked like before: user demo-no-sync existed with role 'Demo No Sync' = ['READ_GLACCOUNT']; {'glsync_external_ref rows': '1', 'acc_gl_account rows with gl_code 1200': '1'}
+2. The request: PUT /erp-integration/accounts/GL-1200 as demo-no-sync, same body
+3. The response: HTTP 403 error.msg.not.authorized
+4. What Fineract shows: {'glsync_external_ref rows': '1', 'acc_gl_account rows with gl_code 1200': '1'}; the same user can still GET the mapping: True
+5. What the ERP shows: GL-1200 code 1200 'Loan Receivable' ASSET DETAIL, parent 1000
+6. What the Integration Service shows: status SYNCED, attempts 1
+7. What should happen: 403 error.msg.not.authorized; reading with READ_GLACCOUNT still works
+8. What did happen: HTTP 403 error.msg.not.authorized
+9. Why: the plugin's PUT needs the SYNC_GLACCOUNT permission; this role only has READ_GLACCOUNT
+
+4 of 4 behaviours matched
+# exit code: 0

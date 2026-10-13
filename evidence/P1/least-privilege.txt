@@ -1,0 +1,24 @@
+# Made with a local check script (admin reads the user and role; every other call is made as the API user), 2026-10-13T15:15:06+03:00
+$ GET /users (admin): integration-api office='Kigali Main Office' roles=['Integration Service']
+$ GET /roles/<id>/permissions (admin): role 'Integration Service' holds 11 permissions:
+    ACTIVATE_CLIENT
+    APPROVE_LOAN
+    CREATE_CLIENT
+    CREATE_LOAN
+    DISBURSE_LOAN
+    READ_CLIENT
+    READ_GLACCOUNT
+    READ_LOAN
+    READ_LOANPRODUCT
+    REPAYMENT_LOAN
+    SYNC_GLACCOUNT
+  [PASS] exactly the 11 codes in fineract/configuration/role.json
+
+Calls as the API user integration-api:
+  [PASS] GET /erp-integration/accounts/GL-1200 -> 200  (expected 200)
+  [PASS] GET /loanproducts/external-id/PRD-SME-ASSET-FINANCE -> 200  (expected 200)
+  [PASS] POST /glaccounts -> 403 error.msg.not.authorized (expected 403)
+  [PASS] POST /users -> 403 error.msg.not.authorized (expected 403)
+  [PASS] PUT /roles/1/permissions -> 403 error.msg.not.authorized (expected 403)
+  [PASS] POST /loanproducts -> 403 error.msg.not.authorized (expected 403)
+RESULT: PASS

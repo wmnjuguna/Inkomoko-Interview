@@ -1,0 +1,179 @@
+# Integration Service on the clean stack, 2026-10-13T15:15:45+03:00
+
+$ curl -i http://localhost:8091/health
+HTTP/1.1 200 OK
+Server: gunicorn
+Date: Tue, 13 Oct 2026 12:15:45 GMT
+Connection: keep-alive
+Content-Type: application/json
+Content-Length: 32
+X-Correlation-ID: c-1e444b2de3c24235955fe722d88f5710
+
+{"database":"ok","status":"UP"}
+
+
+$ curl -i -X POST http://localhost:8091/api/accounts/sync   (no key)
+HTTP/1.1 401 UNAUTHORIZED
+Content-Type: application/json
+Content-Length: 120
+X-Correlation-ID: c-demo-401
+
+{"error":{"code":"UNAUTHENTICATED","correlation_id":"c-demo-401","details":{},"message":"Missing or wrong X-API-Key."}}
+
+
+$ curl -X POST http://localhost:8091/api/accounts/sync -H "X-API-Key: <demo-partner key>"
+{
+  "accounts": [
+    {
+      "attempts": 1,
+      "code": "1000",
+      "erp_reference": "GL-1000",
+      "last_error": null,
+      "name": "Assets",
+      "status": "SYNCED"
+    },
+    {
+      "attempts": 1,
+      "code": "1100",
+      "erp_reference": "GL-1100",
+      "last_error": null,
+      "name": "Bank",
+      "status": "SYNCED"
+    },
+    {
+      "attempts": 1,
+      "code": "1200",
+      "erp_reference": "GL-1200",
+      "last_error": null,
+      "name": "Loan Receivable",
+      "status": "SYNCED"
+    },
+    {
+      "attempts": 1,
+      "code": "1300",
+      "erp_reference": "GL-1300",
+      "last_error": null,
+      "name": "Transfers in Suspense",
+      "status": "SYNCED"
+    },
+    {
+      "attempts": 1,
+      "code": "2000",
+      "erp_reference": "GL-2000",
+      "last_error": null,
+      "name": "Liabilities",
+      "status": "SYNCED"
+    },
+    {
+      "attempts": 1,
+      "code": "2100",
+      "erp_reference": "GL-2100",
+      "last_error": null,
+      "name": "Overpayment Liability",
+      "status": "SYNCED"
+    },
+    {
+      "attempts": 1,
+      "code": "4000",
+      "erp_reference": "GL-4000",
+      "last_error": null,
+      "name": "Income",
+      "status": "SYNCED"
+    },
+    {
+      "attempts": 1,
+      "code": "4100",
+      "erp_reference": "GL-4100",
+      "last_error": null,
+      "name": "Interest Income",
+      "status": "SYNCED"
+    },
+    {
+      "attempts": 1,
+      "code": "4200",
+      "erp_reference": "GL-4200",
+      "last_error": null,
+      "name": "Fee Income",
+      "status": "SYNCED"
+    },
+    {
+      "attempts": 1,
+      "code": "4300",
+      "erp_reference": "GL-4300",
+      "last_error": null,
+      "name": "Penalty Income",
+      "status": "SYNCED"
+    },
+    {
+      "attempts": 1,
+      "code": "4400",
+      "erp_reference": "GL-4400",
+      "last_error": null,
+      "name": "Recovery Income",
+      "status": "SYNCED"
+    },
+    {
+      "attempts": 1,
+      "code": "5000",
+      "erp_reference": "GL-5000",
+      "last_error": null,
+      "name": "Expenses",
+      "status": "SYNCED"
+    },
+    {
+      "attempts": 1,
+      "code": "5100",
+      "erp_reference": "GL-5100",
+      "last_error": null,
+      "name": "Loan Write-off",
+      "status": "SYNCED"
+    },
+    {
+      "attempts": 1,
+      "code": "71114743",
+      "erp_reference": "GL-71114743",
+      "last_error": null,
+      "name": "Simulation service race 71114743",
+      "status": "SYNCED"
+    },
+    {
+      "attempts": 1,
+      "code": "77402790",
+      "erp_reference": "GL-77402790",
+      "last_error": null,
+      "name": "Simulation plugin race 77402790",
+      "status": "SYNCED"
+    }
+  ],
+  "counts": {
+    "FAILED": 0,
+    "SYNCED": 15,
+    "SYNC_PENDING": 0
+  },
+  "in_progress": false,
+  "writes": 0
+}
+HTTP 200
+
+$ curl http://localhost:8091/api/accounts/sync -H "X-API-Key: <demo-partner key>"   (counts only)
+{'counts': {'FAILED': 0, 'SYNCED': 15, 'SYNC_PENDING': 0}, 'writes': 0, 'in_progress': False} 15 accounts
+HTTP 200
+
+$ curl -X POST http://localhost:8091/api/accounts/GL-1200/sync -H "X-API-Key: <demo-partner key>"
+{"account":{"attempts":1,"code":"1200","erp_reference":"GL-1200","last_error":null,"name":"Loan Receivable","status":"SYNCED"},"in_progress":false}
+
+HTTP 200
+
+$ curl -X POST http://localhost:8091/api/accounts/GL-9999/sync -H "X-API-Key: <demo-partner key>"
+{"error":{"code":"NOT_FOUND","correlation_id":"c-19c7bbfd28b74bb8befd3a0482d56fd8","details":{},"message":"The ERP has no account GL-9999."}}
+
+HTTP 404
+
+$ GET http://localhost:8091/openapi/openapi.json: paths and every property name in components
+title: Integration Service 0.1.0 openapi 3.1.0
+  /api/accounts/sync {'get': ['200', '401', '422'], 'post': ['200', '202', '401', '422', '502', '503', '504']}
+  /api/accounts/{erp_reference}/sync {'post': ['200', '202', '401', '404', '422', '502', '503', '504']}
+  /health {'get': ['200', '422', '503']}
+property names: ['FAILED', 'SYNCED', 'SYNC_PENDING', 'account', 'accounts', 'attempts', 'code', 'correlation_id', 'counts', 'database', 'details', 'erp_reference', 'error', 'in_progress', 'last_error', 'message', 'name', 'status', 'writes']
+[PASS] no Fineract id field in any schema (id-like names found: [])
+FINERACT_USERNAME inside the integration-service container: integration-api

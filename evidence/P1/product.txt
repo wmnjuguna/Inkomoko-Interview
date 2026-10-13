@@ -1,0 +1,62 @@
+# Made with a local check script (admin GETs to Fineract, GET /api/accounts on the Mock ERP, a read-only psql query on integration_db), 2026-10-13T15:14:58+03:00
+$ GET /loanproducts (admin) -> [(1, 'SME Asset Finance')]
+$ GET /loanproducts/1 (admin), selected fields:
+{
+  "name": "SME Asset Finance",
+  "shortName": "SMEA",
+  "externalId": "PRD-SME-ASSET-FINANCE",
+  "currency": {
+    "code": "RWF",
+    "decimalPlaces": 0,
+    "inMultiplesOf": 1
+  },
+  "principal": 5000000.0,
+  "minPrincipal": 100000.0,
+  "maxPrincipal": 50000000.0,
+  "numberOfRepayments": 12,
+  "repaymentEvery": 1,
+  "repaymentFrequencyType": "Months",
+  "interestRatePerPeriod": 18.0,
+  "interestRateFrequencyType": "Per year",
+  "annualInterestRate": 18.0,
+  "interestType": "Declining Balance",
+  "amortizationType": "Equal installments",
+  "transactionProcessingStrategyCode": "mifos-standard-strategy",
+  "multiDisburseLoan": false,
+  "isInterestRecalculationEnabled": false,
+  "accountingRule": {
+    "id": 2,
+    "code": "accountingRuleType.cash",
+    "value": "CASH BASED"
+  }
+}
+
+GL mappings: product role -> Fineract GL account -> ERP account -> gl_sync row
+role                             fineract gl id  gl code fineract name            erp ref  erp name                 gl_sync status gl_sync id
+fundSourceAccount                             2     1100 Bank                     GL-1100  Bank                     SYNCED         2  OK
+loanPortfolioAccount                          3     1200 Loan Receivable          GL-1200  Loan Receivable          SYNCED         3  OK
+transfersInSuspenseAccount                    4     1300 Transfers in Suspense    GL-1300  Transfers in Suspense    SYNCED         4  OK
+interestOnLoanAccount                         8     4100 Interest Income          GL-4100  Interest Income          SYNCED         8  OK
+incomeFromFeeAccount                          9     4200 Fee Income               GL-4200  Fee Income               SYNCED         9  OK
+incomeFromPenaltyAccount                     10     4300 Penalty Income           GL-4300  Penalty Income           SYNCED         10  OK
+incomeFromRecoveryAccount                    11     4400 Recovery Income          GL-4400  Recovery Income          SYNCED         11  OK
+writeOffAccount                              13     5100 Loan Write-off           GL-5100  Loan Write-off           SYNCED         13  OK
+overpaymentLiabilityAccount                   6     2100 Overpayment Liability    GL-2100  Overpayment Liability    SYNCED         6  OK
+
+Checks:
+  [PASS] currency RWF, 0 digits
+  [PASS] 18% per year
+  [PASS] 12 monthly repayments
+  [PASS] declining balance
+  [PASS] single payout (multiDisburseLoan false)
+  [PASS] cash-based accounting
+  [PASS] fundSourceAccount maps to ERP GL-1100
+  [PASS] loanPortfolioAccount maps to ERP GL-1200
+  [PASS] transfersInSuspenseAccount maps to ERP GL-1300
+  [PASS] interestOnLoanAccount maps to ERP GL-4100
+  [PASS] incomeFromFeeAccount maps to ERP GL-4200
+  [PASS] incomeFromPenaltyAccount maps to ERP GL-4300
+  [PASS] incomeFromRecoveryAccount maps to ERP GL-4400
+  [PASS] writeOffAccount maps to ERP GL-5100
+  [PASS] overpaymentLiabilityAccount maps to ERP GL-2100
+RESULT: PASS
