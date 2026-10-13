@@ -7,7 +7,7 @@ MOCK_ERP_IMAGE := mock-erp-inkomoko:0.1.0
 INTEGRATION_IMAGE := integration-service-inkomoko:0.1.0
 COMPOSE_NETWORK := inkomoko-fineract_default
 
-.PHONY: help build up down reset test-java test-python demo-gl-sync simulate-gl-sync-4x
+.PHONY: help build up down reset test-java test-python demo-gl-sync simulate-gl-sync-4x demo-identity demo-lifecycle simulate-duplicates
 
 help:
 	@echo "build        build the Fineract image from source (runs the Java unit tests), the integration test image, the Mock ERP and Integration Service images, and refresh the OpenAPI specs"
@@ -18,6 +18,9 @@ help:
 	@echo "test-python  Mock ERP and Integration Service: ruff, mypy and pytest (needs the running stack and the test databases)"
 	@echo "demo-gl-sync         Part A behaviours 1-4 on the running stack, in the evidence format"
 	@echo "simulate-gl-sync-4x  a new ERP account sent 4 times at once (service and plugin); every count must be 1"
+	@echo "demo-identity        C-1: create a client, find it by client_uid, check it, replay, conflict"
+	@echo "demo-lifecycle       D-1: a 5,000,000 RWF loan from application to Closed, with Fineract and ERP state after each stage"
+	@echo "simulate-duplicates  I-1: the same disbursement sent 4 times; requests 4, Fineract 1, ERP 1, operations 1"
 
 .env:
 	cp .env.example .env
@@ -66,3 +69,13 @@ demo-gl-sync: .env
 
 simulate-gl-sync-4x: .env
 	uv run --project integration-service python scripts/simulate_gl_sync_4x.py
+
+# Parts C, D and I through the Integration Service, like a partner (run setup first: make up).
+demo-identity: .env
+	uv run --project integration-service python scripts/demo_identity.py
+
+demo-lifecycle: .env
+	uv run --project integration-service python scripts/demo_lifecycle.py
+
+simulate-duplicates: .env
+	uv run --project integration-service python scripts/simulate_duplicates.py
