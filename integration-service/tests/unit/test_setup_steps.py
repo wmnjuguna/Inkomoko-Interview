@@ -339,6 +339,16 @@ def test_office_with_our_external_id_and_another_name_stops_setup() -> None:
     assert fake.writes == []
 
 
+def test_office_with_our_external_id_and_another_opening_date_stops_setup() -> None:
+    # The config says 2026-01-01; Fineract has another date. A re-run must not call that "exists".
+    fake = FakeFineract()
+    fake.add_office(7, "Kigali Main Office", parent_id=1)
+    fake.offices[-1]["openingDate"] = date(2026, 3, 1)
+    with pytest.raises(SetupError, match="2026-03-01"):
+        ensure_office(fake, OFFICE, today=TODAY)
+    assert fake.writes == []
+
+
 def test_office_with_our_name_but_another_external_id_stops_setup() -> None:
     fake = FakeFineract()
     fake.add_office(7, "Kigali Main Office", parent_id=1, external_id="OFF-OTHER")

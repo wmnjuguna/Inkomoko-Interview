@@ -208,6 +208,9 @@ def _as_fineract_shows(body: dict[str, Any]) -> dict[str, Any]:
         "interestType",
         "interestCalculationPeriodType",
         "accountingRule",
+        "daysInYearType",
+        "daysInMonthType",
+        "repaymentStartDateType",
     )
     plain = (
         "shortName",
@@ -223,6 +226,7 @@ def _as_fineract_shows(body: dict[str, Any]) -> dict[str, Any]:
     return {
         **{key: body[key] for key in plain},
         **{key: {"id": body[key]} for key in options},
+        "loanScheduleType": {"code": body["loanScheduleType"]},
         "currency": {
             "code": body["currencyCode"],
             "decimalPlaces": body["digitsAfterDecimal"],

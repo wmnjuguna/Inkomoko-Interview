@@ -465,6 +465,10 @@ def existing_product(body: dict[str, Any], product_id: int = 5) -> dict[str, Any
         "interestType": {"id": body["interestType"]},
         "interestCalculationPeriodType": {"id": body["interestCalculationPeriodType"]},
         "transactionProcessingStrategyCode": body["transactionProcessingStrategyCode"],
+        "daysInYearType": {"id": body["daysInYearType"]},
+        "daysInMonthType": {"id": body["daysInMonthType"]},
+        "repaymentStartDateType": {"id": body["repaymentStartDateType"]},
+        "loanScheduleType": {"id": 0, "code": body["loanScheduleType"], "value": "Cumulative"},
         "multiDisburseLoan": False,
         "accountingRule": {"id": 2, "code": "accountingRuleType.cash", "value": "CASH BASED"},
         "accountingMappings": mappings,
@@ -526,4 +530,23 @@ def test_missing_mapping_in_fineract_is_a_mismatch(
     del product["accountingMappings"]["writeOffAccount"]
     assert product_mismatches(body, product) == [
         "writeOffAccountId: wanted 13, Fineract has None",
+    ]
+
+
+def test_template_defaults_and_schedule_type_are_compared_on_a_rerun(
+    cfg: LoanProductConfig, template: ProductTemplate
+) -> None:
+    # These four are not in the config: the defaults come from the template and the schedule
+    # type is fixed in code. A product that differs on them must stop setup, not pass as "exists".
+    body = build_product_body(cfg, GL_IDS, template)
+    product = existing_product(body)
+    product["daysInYearType"] = {"id": 360}
+    product["daysInMonthType"] = {"id": 30}
+    product["repaymentStartDateType"] = {"id": 2}
+    product["loanScheduleType"] = {"id": 1, "code": "PROGRESSIVE", "value": "Progressive"}
+    assert product_mismatches(body, product) == [
+        "daysInYearType: wanted 1, Fineract has 360",
+        "daysInMonthType: wanted 1, Fineract has 30",
+        "repaymentStartDateType: wanted 1, Fineract has 2",
+        "loanScheduleType: wanted 'CUMULATIVE', Fineract has 'PROGRESSIVE'",
     ]

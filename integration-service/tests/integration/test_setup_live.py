@@ -6,8 +6,10 @@ done once on a clean stack, outside the tests."""
 
 from __future__ import annotations
 
+import json
 import os
 from collections.abc import Iterator
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -15,6 +17,7 @@ import pytest
 from integration_service.clients.fineract import FineractClient
 from integration_service.setup.config_files import SetupConfig, load_setup_config
 from integration_service.setup.product import (
+    OPTIONAL_CASH_ROLES,
     REQUIRED_CASH_ROLES,
     build_product_body,
     parse_product_template,
@@ -156,9 +159,15 @@ def _ids(options: list[dict[str, Any]]) -> set[Any]:
     return {o["id"] for o in options}
 
 
-def test_product_body_uses_only_values_fineract_offers(
-    fineract: ReadOnly, cfg: SetupConfig
-) -> None:
+PINNED_BODY = (
+    Path(__file__).parents[1]
+    / "fixtures"
+    / "fineract_templates"
+    / "loan_product_body_before_p26.json"
+)
+
+
+def _live_body(fineract: ReadOnly, cfg: SetupConfig) -> dict[str, Any]:
     template = fineract.get("/loanproducts/template")
     by_code = {
         account["glCode"]: account["id"]
@@ -168,7 +177,14 @@ def test_product_body_uses_only_values_fineract_offers(
     gl_ids = {
         ref: by_code[ref.removeprefix("GL-")] for ref in cfg.loan_product.gl_accounts.values()
     }
-    body = build_product_body(cfg.loan_product, gl_ids, parse_product_template(template))
+    return build_product_body(cfg.loan_product, gl_ids, parse_product_template(template))
+
+
+def test_product_body_uses_only_values_fineract_offers(
+    fineract: ReadOnly, cfg: SetupConfig
+) -> None:
+    template = fineract.get("/loanproducts/template")
+    body = _live_body(fineract, cfg)
     for key in (
         "repaymentFrequencyType",
         "interestRateFrequencyType",
@@ -188,3 +204,17 @@ def test_product_body_uses_only_values_fineract_offers(
     cash = next(o for o in template["accountingRuleOptions"] if o["id"] == body["accountingRule"])
     assert cash["code"] == "accountingRuleType.cash"
     assert all(role in body for role in REQUIRED_CASH_ROLES)
+
+
+def test_live_template_still_builds_the_pinned_product(
+    fineract: ReadOnly, cfg: SetupConfig
+) -> None:
+    # The unit pin uses a saved template. This one uses the running Fineract, so a new
+    # version with other defaults or other enum ids fails here instead of quietly building
+    # another product. GL ids depend on the sync order, so they are left out.
+    gl_roles = {*REQUIRED_CASH_ROLES, *OPTIONAL_CASH_ROLES}
+    pinned = json.loads(PINNED_BODY.read_text(encoding="utf-8"))
+    live = _live_body(fineract, cfg)
+    assert {k: v for k, v in live.items() if k not in gl_roles} == {
+        k: v for k, v in pinned.items() if k not in gl_roles
+    }
