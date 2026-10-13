@@ -154,8 +154,20 @@ We never send a request to Fineract a second time before we check, by its `exter
 | Fineract said yes, but its transaction could not be read back | `FINERACT_PENDING` | `202` | Wait. The next recovery pass finishes it from Fineract's data. |
 | Fineract refused (a clear `4xx`) | `FAILED` | `409` or `422` in our words | Fix the request, or use the answer |
 | Fineract refused our own login or permissions | `FAILED` | `502 FINERACT_UNAVAILABLE` | Nothing. It is our problem. |
+| A Fineract template we need before the write could not be read. Nothing was sent. | `FAILED` | `503 FINERACT_UNAVAILABLE` (for an application or an approval: `504` if the read timed out, `502` for another read error) | Send the same request again |
+| A retry, and the lookup of the earlier attempt fails | `FINERACT_PENDING` | `504 FINERACT_TIMEOUT` | Wait. Recovery looks again. |
 
 On a retry, a refusal is checked once more: if Fineract already holds a transaction under our key, it was our own earlier attempt, so it is finished, not refused.
+
+**A retry looks first, then reads the templates.** When a `FAILED` request is sent again (attempt 2 or later), the service first looks up the earlier attempt in Fineract by our key. Only when it is not there does the service read the templates and check the request. So an earlier attempt that landed late is found and finished. It is not checked again against a template, which may no longer fit a loan that has moved on. If that lookup fails, we can't tell what happened: the request stays `FINERACT_PENDING` and gets `504`.
+
+For a template read failure, the message says so in our own words:
+
+```
+503 {"error": {"code": "FINERACT_UNAVAILABLE", "message": "Could not read Fineract's disbursement template. Nothing was sent. Send the same request again.", ...}}
+```
+
+This text is from the code and its tests. It was not run on the live stack.
 
 We never pass Fineract's error text on, because it can hold Fineract's internal ids. When Fineract refuses with a code we have not mapped, the answer is `422 VALIDATION_ERROR` with Fineract's error codes in `details.fineract_codes`.
 
@@ -168,6 +180,14 @@ Every error has this shape. A real answer (`evidence/P2/C-1.txt`):
              "message": "external_reference C1-CLI-9BB508-c9b1 was already used with different data." } }
 ```
 
+A `422 VALIDATION_ERROR` for a field names the field and the problem in `message`, as `field: problem`. `details.problems` lists every problem found. The same shape is used for a bad body (Pydantic) and for a rule taken from a Fineract template. A real answer (`evidence/P2.5/templates.txt`):
+
+```json
+{ "error": { "code": "VALIDATION_ERROR", "correlation_id": "c-docs-p25-005",
+             "details": {"problems": [{"field": "principal", "problem": "must be between 100000 and 50000000 RWF (the product range)"}]},
+             "message": "principal: must be between 100000 and 50000000 RWF (the product range)" } }
+```
+
 These are all the codes in `errors.py`:
 
 | HTTP | Code | When |
@@ -176,7 +196,7 @@ These are all the codes in `errors.py`:
 | 404 | `NOT_FOUND` | Unknown path, unknown `external_reference` in `GET /api/transactions`, or an ERP account unknown to the ERP (GL sync) |
 | 404 | `CLIENT_NOT_FOUND` | No such client in Fineract, or a loan application for a `client_uid` we did not create |
 | 404 | `LOAN_NOT_FOUND` | No loan with that `loan_reference` |
-| 405, 422 | `VALIDATION_ERROR` | The body, path or query does not match (`details.problems` lists each field), a date rule, a loan that is not `ACTIVE` for a repayment (`details.loan_status`), or a Fineract refusal (`details.fineract_codes` when we have no mapping) |
+| 405, 422 | `VALIDATION_ERROR` | The body, path or query does not match (`details.problems` lists each field), a rule from a Fineract template (principal range, payment type), a date rule, a loan that is not `ACTIVE` for a repayment (`details.loan_status`), or a Fineract refusal (`details.fineract_codes` when we have no mapping) |
 | 409 | `IDEMPOTENCY_CONFLICT` | The reference was used with different data, or by another partner, or Fineract already holds another transaction under it |
 | 409 | `CLIENT_UID_TAKEN` | The `client_uid` belongs to another reference, or Fineract already has a client with it |
 | 409 | `LOAN_ALREADY_APPROVED` | Another reference approved, or is approving, this loan, or Fineract shows it approved |
@@ -200,10 +220,13 @@ A disbursement or repayment never fails because of the ERP. The ERP part runs la
 | `POST /api/accounts/{erp_reference}/sync` | Syncs one ERP account | Built |
 | `POST /api/clients` | Creates an active client | Built |
 | `GET /api/clients/{client_uid}` | Checks that a client exists, is active and has the right name | Built |
+| `GET /api/clients/template` | The client form: fields, rules, office and activation date | Built |
+| `GET /api/loans/template` | The loan application form: the product's range and terms. `?client_uid=` adds that client. | Built |
+| `GET /api/loans/{loan_reference}/template?step=` | The form for the next step of one loan: `approval`, `disbursement`, `repayment` or `payoff` | Built |
 | `POST /api/loans` | Applies for a loan. Returns the new `loan_reference`. | Built |
-| `POST /api/loans/{loan_reference}/approve` | Approves the loan for its full principal, once | Built |
+| `POST /api/loans/{loan_reference}/approve` | Approves the loan for the amount Fineract proposes, once | Built |
 | `GET /api/loans/{loan_reference}` | Loan status and balances, as Fineract reports them | Built |
-| `POST /api/loans/{loan_reference}/disburse` | Pays out the loan's full principal, once | Built |
+| `POST /api/loans/{loan_reference}/disburse` | Pays out the approved amount, once | Built |
 | `POST /api/loans/{loan_reference}/repayments` | Records a repayment | Built |
 | `GET /api/transactions/{external_reference}` | Every request with that reference: type, status, history and `erp_status`. This answers "what happened to X?". | Built |
 | `POST /admin/recover` | Runs one recovery pass now. Not for partners. | Built |
@@ -328,14 +351,21 @@ GET /api/clients/DEMO-238601?name=Test Client One
 
 #### `POST /api/loans`
 
-Applies for a loan on the SME Asset Finance product. The term, rate and schedule come from the product. We issue the `loan_reference` (`LN-<year>-<6 digits>`, from a Postgres sequence). It is the loan's `externalId` in Fineract.
+Applies for a loan on the SME Asset Finance product. The principal range, term, rate and schedule come from Fineract's loan template for the product (`GET /api/loans/template` shows them). We issue the `loan_reference` (`LN-<year>-<6 digits>`, from a Postgres sequence). It is the loan's `externalId` in Fineract.
 
 | Field | Rule |
 |---|---|
 | `external_reference` | Required |
 | `client_uid` | Required. A client created through `POST /api/clients`, else `404 CLIENT_NOT_FOUND`. |
-| `principal` | Required. Whole RWF, inside the product's range (100,000 to 50,000,000), else `422`. |
+| `principal` | Required. Whole RWF, inside the range in Fineract's loan template (100,000 to 50,000,000 today), else `422`. |
 | `expected_disbursement_date` | Optional, `YYYY-MM-DD`, today or later in Kigali. Default today. |
+
+A principal outside the range is refused after the template is read. The request is saved as `FAILED`, and no loan is sent to Fineract (`evidence/P2.5/templates.txt`):
+
+```
+POST /api/loans {"client_uid": "TPL-000001", "external_reference": "P25-APP-TPL-BIG", "principal": 60000000}
+-> 422 {"error": {"code": "VALIDATION_ERROR", "details": {"problems": [{"field": "principal", "problem": "must be between 100000 and 50000000 RWF (the product range)"}]}, "message": "principal: must be between 100000 and 50000000 RWF (the product range)", ...}}
+```
 
 Real run (`evidence/P2/D-1.txt`):
 
@@ -346,7 +376,21 @@ POST /api/loans {"client_uid": "DEMO-273604", "external_reference": "APP-BE75C7-
 
 #### `POST /api/loans/{loan_reference}/approve`
 
-Approves the loan for its full principal. There is no partial approval. Body: `external_reference`, and `approved_on` (optional, not in the future, default today).
+Approves the loan for the amount in Fineract's approval template. That is the applied principal. There is no partial approval, and the partner does not send an amount.
+
+| Field | Rule |
+|---|---|
+| `external_reference` | Required |
+| `approved_on` | Optional, `YYYY-MM-DD`. Default today (Kigali), which is also what the template proposes. It cannot be in the future. It cannot be after the loan's expected disbursement date, because Fineract refuses that. |
+
+```
+POST /api/loans/LN-2026-000003/approve {"approved_on": "2026-10-14", "external_reference": "P25-APR-TPL-FUT"}
+-> 422 {"error": {"code": "VALIDATION_ERROR", "details": {"problems": [{"field": "approved_on", "problem": "cannot be in the future (Kigali date)"}]}, "message": "approved_on: cannot be in the future (Kigali date)", ...}}
+```
+
+A date after the expected disbursement date gets `422` with the problem `must be on or before the expected disbursement date <date>`. Through the partner API, that case can only happen once a loan's expected date is in the past, so it was not run on the one-day stack. A unit test covers our check. Fineract's own refusal was run straight on Fineract (part 12 of `evidence/P2.5/templates.txt`).
+
+From the P2 runs (`evidence/P2/D-1.txt` and `evidence/P2/api-examples.txt`):
 
 ```
 POST /api/loans/LN-2026-000001/approve {"external_reference": "APR-BE75C7-cda6"}
@@ -379,12 +423,19 @@ After the payoff, the D-1 loan showed `"status": {"code": "CLOSED_OBLIGATIONS_ME
 
 #### `POST /api/loans/{loan_reference}/disburse`
 
-Pays out the loan's full principal, once. Fineract's transaction gets `externalId` `DSB:<external_reference>`.
+Pays out the loan once, for the amount in Fineract's disbursement template. That is the approved amount. The partner does not send an amount. Fineract's transaction gets `externalId` `DSB:<external_reference>`.
 
 | Field | Rule |
 |---|---|
 | `external_reference` | Required |
-| `transaction_date` | Optional, `YYYY-MM-DD`, not in the future (Kigali). Default today. |
+| `transaction_date` | Optional, `YYYY-MM-DD`, not in the future (Kigali). Default **today**, the day the money moves. It is not the loan's expected disbursement date. |
+
+A payout before the expected disbursement date is allowed. A loan applied for with `expected_disbursement_date` 2026-10-20 was paid out on 2026-10-13 (`evidence/P2.5/templates.txt`, part 10):
+
+```
+POST /api/loans/LN-2026-000004/disburse {"external_reference": "P25-DSB-TPL-0002"}
+-> 200 {"amount": 1000000, ..., "loan_status": "ACTIVE", "status": "ERP_PENDING", "transaction_date": "2026-10-13", "type": "DISBURSEMENT"}
+```
 
 Real run (`evidence/P2/D-1.txt`):
 
@@ -417,7 +468,14 @@ Records one repayment. Fineract decides how it is split between principal and in
 | `external_reference` | Required. One per real repayment. |
 | `amount` | Required. Whole RWF above 0. `1000.5` gets `422`. |
 | `transaction_date` | Optional, not in the future (Kigali). Default today. |
-| `payment_type` | Optional. A Fineract payment type name, like `Money Transfer`. An unknown one gets `422`. |
+| `payment_type` | Optional. The name of a partner payment type from Fineract's repayment template, like `Money Transfer`, in any case. Fineract's system-defined types (its own adjustments, like `Repayment Adjustment Refund`) and unknown names get `422`. |
+
+The amount and date rules and the payment types come from Fineract's repayment template, read under the loan's lock right before the write. `GET /api/loans/{loan_reference}/template?step=repayment` shows the same rules, with the next installment as the default amount.
+
+```
+POST /api/loans/LN-2026-000003/repayments {"amount": 100000, "external_reference": "P25-RPY-TPL-SYS", "payment_type": "Repayment Adjustment Refund"}
+-> 422 {"error": {"code": "VALIDATION_ERROR", "details": {"problems": [{"field": "payment_type", "problem": "must be one of: Money Transfer"}]}, "message": "payment_type: must be one of: Money Transfer", ...}}
+```
 
 Real run (`evidence/P2/D-1.txt`):
 
@@ -436,6 +494,78 @@ POST /api/loans/LN-2026-000001/repayments {"amount": 5000, "external_reference":
 ```
 
 - Paying more than is owed on an `ACTIVE` loan is allowed. Fineract books the extra as `overpayment_portion` and the loan becomes `OVERPAID`. The tests check this. It was not part of the D-1 run.
+
+### Forms: what to send at each step
+
+These three reads tell a partner what to send, before it sends it. They read Fineract's own templates live and save nothing. The same templates are read again by the write itself, so the form and the write follow the same rules.
+
+Every form has `fields`. Each field has `name`, `type`, `required`, `read_only`, `default`, `minimum`, `maximum`, `multiple_of`, `pattern`, `max_length`, `options` and `description`. A `read_only` field is shown for information: Fineract or the product sets it, so do not send it. An option's `value` is a name or a code, never a Fineract id. All examples below are real answers from `evidence/P2.5/templates.txt`, shortened.
+
+#### `GET /api/clients/template`
+
+The fields of `POST /api/clients` with their rules, plus the office and the activation date Fineract uses for a new client.
+
+```json
+{ "form": "client", "submit_to": "POST /api/clients", "office": "Kigali Main Office", "activation_date": "2026-10-13",
+  "fields": [ {"name": "external_reference", "required": true, "pattern": "^[A-Za-z0-9._:\\-]{1,40}$", "max_length": 40, ...},
+              {"name": "client_uid", "required": true, "pattern": "^[A-Z]{2,10}-[0-9]{6}$", ...},
+              {"name": "first_name", "required": true, "max_length": 50, ...},
+              {"name": "last_name", "required": true, "max_length": 50, ...} ] }
+```
+
+#### `GET /api/loans/template`
+
+The fields of `POST /api/loans`, with the product's defaults, range and terms from Fineract's loan template. Add `?client_uid=` for a client created through `POST /api/clients`. An unknown one gets `404 CLIENT_NOT_FOUND`.
+
+```json
+{ "form": "loan_application", "submit_to": "POST /api/loans", "client_uid": "TPL-000001",
+  "product": { "name": "SME Asset Finance", "short_name": "SMEA",
+               "description": "SME asset finance: 18% a year, declining balance, 12 monthly equal installments, paid out once, RWF.",
+               "currency": {"code": "RWF", "name": "Rwanda Franc", "decimal_places": 0, "in_multiples_of": 1} },
+  "fields": [ {"name": "client_uid", "required": true, "default": "TPL-000001", ...},
+              {"name": "principal", "type": "integer", "required": true, "default": 5000000, "minimum": 100000, "maximum": 50000000, "multiple_of": 1, ...},
+              {"name": "expected_disbursement_date", "type": "date", "required": false, "minimum": "2026-10-13", ...},
+              {"name": "number_of_repayments", "read_only": true, "default": 12, "minimum": 12, "maximum": 12, ...},
+              {"name": "interest_rate_per_period", "read_only": true, "default": 18.0, ...},
+              {"name": "interest_type", "read_only": true, "default": "DECLINING_BALANCE", "options": [{"value": "DECLINING_BALANCE", ...}], ...},
+              ... ] }
+```
+
+The other read-only fields are `repayment_every`, `repayment_frequency`, `loan_term`, `loan_term_frequency`, `interest_rate_frequency`, `amortization` and `interest_calculation_period`.
+
+#### `GET /api/loans/{loan_reference}/template?step=`
+
+The form for one step of one loan: `approval`, `disbursement`, `repayment` or `payoff` (a payoff is sent as a repayment). It has the fields of that call, Fineract's defaults for this loan now, and `values`: what Fineract reports for the step.
+
+Fineract answers a template whatever the loan's status. So we check the status ourselves: `available` is `true` only when the loan's status allows the step now, and `message` says why not. Before approval, only the approval step is available:
+
+```json
+{ "form": "disbursement", "loan_reference": "LN-2026-000003", "loan_status": "SUBMITTED_AND_PENDING_APPROVAL",
+  "available": false,
+  "message": "The disbursement step needs the loan to be APPROVED; Fineract shows it SUBMITTED_AND_PENDING_APPROVAL.",
+  "submit_to": "POST /api/loans/LN-2026-000003/disburse",
+  "values": {"amount": 2000000, "expected_disbursement_date": "2026-10-13"}, "fields": [...] }
+```
+
+| Step | Needs status | `values` | Main fields |
+|---|---|---|---|
+| `approval` | `SUBMITTED_AND_PENDING_APPROVAL` | `approved_principal`, `expected_disbursement_date` | `approved_on` (default today, at most today), `approved_principal` (read only) |
+| `disbursement` | `APPROVED` | `amount` (the approved amount), `expected_disbursement_date` | `transaction_date` (default today, at most today), `amount` (read only) |
+| `repayment` | `ACTIVE` | the next installment: `next_due_date`, `next_due_amount` and its split | `amount` (default the next installment), `transaction_date`, `payment_type` (options: the partner payment types) |
+| `payoff` | `ACTIVE` | `payoff_amount`, `payoff_date` and its split, from Fineract's `prepayLoan` template | `amount` (default the payoff amount), `transaction_date`, `payment_type` |
+
+A payoff form for an active loan, then paying exactly `payoff_amount` closed that loan (`CLOSED_OBLIGATIONS_MET`):
+
+```json
+{ "form": "payoff", "loan_reference": "LN-2026-000003", "loan_status": "ACTIVE", "available": true, "message": null,
+  "submit_to": "POST /api/loans/LN-2026-000003/repayments",
+  "values": {"payoff_amount": 2000321, "payoff_date": "2026-10-13", "principal_portion": 1846640, "interest_portion": 153681,
+             "fee_portion": 0, "penalty_portion": 0, "outstanding_principal": 1846640},
+  "fields": [ {"name": "amount", "required": true, "default": 2000321, "minimum": 1, ...},
+              {"name": "payment_type", "options": [{"label": "Money Transfer", "value": "Money Transfer"}], ...}, ... ] }
+```
+
+An unknown loan gets `404 LOAN_NOT_FOUND`. An unknown step gets `422` with the problem `Input should be 'approval', 'disbursement', 'repayment' or 'payoff'`. A Fineract read that fails gets `503`, `504` or `502`, as for any read.
 
 ### `GET /api/transactions/{external_reference}`
 
