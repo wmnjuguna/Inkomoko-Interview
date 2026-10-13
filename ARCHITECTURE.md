@@ -1,13 +1,14 @@
 # Architecture
 
-> **Status:** the Fineract plugin and the Mock ERP are built and tested. The Integration Service is still a design. Sections marked *planned* describe what I will build.
+> **Status:** the Fineract plugin, the Mock ERP, the Fineract setup step and the Integration Service's GL sync are built and tested. The rest of the Integration Service (clients, loans, payments, journal entries, reconciliation) is still a design. Sections marked *planned* describe what I will build.
 
 ## The parts
 
 | Part | Language | What it does |
 |---|---|---|
 | **Fineract** (with my plugin) | Java 21, Fineract 1.15.0 | The bank's record of clients, loans, payments and balances. My plugin adds GL accounts from the ERP safely. |
-| **Integration Service** | Python, Flask | The only API that partners call. It keeps track of every request, stops duplicates, calls Fineract and sends journal entries to the ERP. |
+| **Integration Service** | Python 3.13, Flask | The only API that partners call. Today it syncs the ERP chart of accounts to Fineract. *(planned)* It will keep track of every request, stop duplicates, call Fineract and send journal entries to the ERP. |
+| **Setup** | Python (same image as the Integration Service) | A one-shot job that prepares Fineract: office, currency, role, API user, GL accounts and the loan product. |
 | **Mock ERP** | Python 3.13, Flask | The accounting system. It owns the chart of accounts and stores journal entries. It can pretend to be down or slow, for testing. It has a small web UI. |
 | **PostgreSQL 18.3** | — | One server. Each part has its own database and its own user: `fineract_tenants` and `fineract_default` for Fineract, `integration_db`, `erp_db`. |
 
@@ -35,7 +36,7 @@ Every request carries an `X-Correlation-ID`, so one request can be followed thro
 
 ## How data moves
 
-1. **GL accounts (Part A).** The Integration Service reads the ERP's chart of accounts. For each account it calls my Fineract plugin. The plugin creates the matching GL account in Fineract, once. This happens before the loan product is set up.
+1. **GL accounts (Part A).** The Integration Service reads the ERP's chart of accounts. For each account it calls my Fineract plugin. The plugin creates the matching GL account in Fineract, once. The setup step runs this before it creates the loan product. Details are in "GL sync" below.
 2. **Partner requests (Parts C–F).** *(planned)* The Integration Service first saves the request in its own database. Then it calls Fineract and sends our reference as Fineract's `externalId`. Then it saves the result.
 3. **Journal entries (Part H).** *(planned)* After a disbursement or a repayment, the Integration Service reads how Fineract split the money (principal and interest). It builds the journal entry from that. It saves the entry in an outbox table, in the same database transaction as the Fineract result. A background loop sends it to the ERP and retries if the ERP is down.
 4. **Reconciliation (Part K).** *(planned)* It reads transactions from Fineract and journal entries from the ERP. It matches them by `external_reference`. It reports each one as `MATCHED`, `MISSING_IN_ERP`, `MISSING_IN_FINERACT` or `AMOUNT_MISMATCH`. It never changes anything.
@@ -76,6 +77,54 @@ Every error has the same shape: `{"error": {"code", "message", "details", "corre
 **Debits must equal credits, checked twice.** Python checks it first and gives a clear `422`. A Postgres trigger checks it again when the transaction commits, after all the lines are in. The trigger also refuses lines on a HEADER account. So even a write that skips the Python code can't save an unbalanced entry.
 
 **Requests at the same time.** A new account or journal entry is saved with `INSERT … ON CONFLICT DO NOTHING` on the unique `external_reference`. If two requests with the same reference race, one row is saved. The other request then reads that row and answers as a repeat. The tests send 10 at the same time and check this.
+
+## The Integration Service
+
+It is built the same way as the Mock ERP: Flask 3 and flask-openapi3 with Pydantic, SQLAlchemy 2 Core with psycopg 3, Alembic, and Gunicorn (2 workers, 4 threads each). It calls Fineract and the ERP with httpx. It listens on port 8091, only on `localhost`, and runs as a non-root user.
+
+**How a request goes through it.** Every `/api` call:
+
+1. The correlation id is read from `X-Correlation-ID`, or a new one is made. It is sent back on the response.
+2. The partner's `X-API-Key` is checked. A wrong or missing key gets `401` and stops here.
+3. Pydantic checks the input. A bad one gets `422`.
+4. The work is done. Every error, even a crash, comes back as `{"error": {"code", "message", "correlation_id", "details"}}`.
+5. One JSON log line is written, with the correlation id, the partner, the status and the time taken.
+
+The service logs in to Fineract as `integration-api`, a user with only the permissions it needs. It never uses the admin user.
+
+### GL sync
+
+`POST /api/accounts/sync` runs one sync of the whole ERP chart. `POST /api/accounts/{erp_reference}/sync` does the same for one account. One run:
+
+1. Read the ERP chart (`GET /api/accounts`). Put parents before children.
+2. Save each account in the `gl_sync` table with a hash of the body we will send. A new account is `SYNC_PENDING`.
+3. For each account that is not `SYNCED`, parents first:
+   - If its parent is not synced, skip it.
+   - If an earlier send got no clear answer, look it up first (`GET` on the plugin). Never send it again blindly.
+   - Otherwise `PUT` it to the plugin with `Idempotency-Key: GLS:<reference>:<attempt>:<first 8 characters of the hash>`.
+   - `200` makes it `SYNCED`. `409` or another `4xx` makes it `FAILED`, with the reason. If Fineract can't be reached, it stays `SYNC_PENDING` and the run stops calling Fineract. A timeout or `5xx` leads to a lookup at once.
+4. Answer with the state of every account.
+
+Only one run happens at a time. A Postgres advisory lock covers the whole run. A second caller does not wait. It gets `202` with the current state, and nothing is sent. To finish a sync after Fineract was down, call it again. There is no background loop for GL sync.
+
+Sync only creates accounts. If the ERP later changes a synced account, it stays `SYNCED` and `last_error` holds the warning `changed in ERP; updates are out of scope`. An account that was never accepted by Fineract takes the new ERP data.
+
+The ERP type and usage are turned into Fineract's numbers in one place (`mapping/account_types.py`): ASSET 1, LIABILITY 2, EQUITY 3, INCOME 4, EXPENSE 5, DETAIL 1, HEADER 2. DETAIL accounts allow manual entries. HEADER accounts don't.
+
+### The setup step
+
+`python -m integration_service.setup` runs as the compose service `setup`, once, before the Integration Service starts. It uses Fineract's admin user. The order matters:
+
+1. Wait until Fineract and the ERP are healthy.
+2. Office `Kigali Main Office`, under Head Office.
+3. Add RWF to the organisation currencies. The other currencies are kept, because Fineract replaces the whole list.
+4. Role `Integration Service`, with exactly the permissions in `role.json`. Missing ones are added and extra ones are removed.
+5. API user `integration-api`, in the new office, with only that role. Then one call logged in as it, to prove the password and permissions work.
+6. GL sync of the whole ERP chart.
+7. Stop unless every GL account the loan product needs is `SYNCED`.
+8. Loan product `SME Asset Finance`, with each GL role pointing at a synced account.
+
+Each step first looks for what it would create. If it is there, it is left alone, so a second run creates nothing. Two things are never changed on a re-run: the API user's password, and an existing loan product. If the product has other settings, setup stops and lists the differences, because loans may already use it.
 
 ## A disbursement, step by step *(planned)*
 
@@ -137,7 +186,7 @@ The Fineract database starts empty. Fineract creates its own tables when it star
 
 | Data | Where it comes from |
 |---|---|
-| Office, currency, loan product, API user | A setup script, through Fineract's API *(planned)* |
+| Office, currency, loan product, API user | The setup step, through Fineract's API. Settings in `fineract/configuration/`. |
 | Chart of accounts | Seeded in the Mock ERP by its second migration: 4 HEADER groups (1000, 2000, 4000, 5000) and 9 DETAIL accounts under them |
 | GL accounts in Fineract | Only from the ERP, through the Integration Service and my plugin |
 | Clients, loans, payments | Only from partners, through the Integration Service |
@@ -153,7 +202,7 @@ The Fineract database starts empty. Fineract creates its own tables when it star
 
 The `:1` at the end only becomes `:2` after we check Fineract and see the transaction does not exist. Fineract keeps `externalId` unique, so a second try can never create a second transaction.
 
-## Database tables *(planned, except the plugin table and erp_db)*
+## Database tables *(planned, except `gl_sync`, the plugin table and erp_db)*
 
 **integration_db**
 
@@ -163,7 +212,7 @@ The `:1` at the end only becomes `:2` after we check Fineract and see the transa
 | `operation_events` | operation, from status, to status, time | History of every status change |
 | `clients` | `client_uid`, Fineract client id (internal only), name, status | `client_uid` is unique |
 | `loans` | `loan_reference`, `client_uid`, Fineract loan id (internal only), status | `loan_reference` is unique |
-| `gl_sync` | ERP code, ERP reference, Fineract GL id (internal only), sync status, attempts | Code and reference are unique |
+| `gl_sync` (built) | `erp_reference`, `erp_code`, name, type, usage, parent reference, payload hash, status, Fineract GL id (internal only), attempts, `last_error`, times | `erp_reference` is the key. `erp_code` is unique. Status is `SYNC_PENDING`, `SYNCED` or `FAILED` (a CHECK rule). |
 | `outbox` | operation, journal entry, status, attempts, next attempt time | |
 
 **erp_db** (built)
@@ -196,7 +245,7 @@ stateDiagram-v2
   NEEDS_RECONCILIATION --> COMPLETED: fixed by an explicit repair call
 ```
 
-GL sync has its own simple status: `SYNC_PENDING`, then `SYNCED` or `FAILED`. A failed one goes back to `SYNC_PENDING` on the next sync.
+GL sync has its own simple status: `SYNC_PENDING`, then `SYNCED` or `FAILED`. A `FAILED` account is tried again on the next sync, with a new attempt number.
 
 **Retries:** wait 1 s, 2 s, 4 s and so on, up to 60 s, with some randomness. Stop after 8 attempts. The attempt count and the next attempt time are saved, so they survive a restart. We never call Fineract twice without first checking if the first call worked.
 
