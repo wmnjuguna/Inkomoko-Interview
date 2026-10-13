@@ -65,7 +65,7 @@ The Mock ERP and the Integration Service update their own database tables when t
 `setup` is a one-shot service in `docker-compose.yml`. It uses the Integration Service image and Fineract's admin user. It does these steps, in order:
 
 1. Waits until Fineract and the ERP are healthy.
-2. Creates the office `Kigali Main Office` under Head Office.
+2. Creates the office `Kigali Main Office` under Head Office. It finds the office by its external id, `OFF-KGL-MAIN`.
 3. Adds RWF to the organisation's currencies.
 4. Creates the role `Integration Service` with exactly 11 permissions.
 5. Creates the API user `integration-api` in that office with that role, then logs in as it once to check it works.
@@ -73,7 +73,7 @@ The Mock ERP and the Integration Service update their own database tables when t
 7. Stops unless all 9 GL accounts the loan product needs are synced.
 8. Creates the loan product `SME Asset Finance`.
 
-The settings are JSON files in `fineract/configuration/`. The Integration Service starts only after setup has finished without error, and it logs in to Fineract as `integration-api`, never as the admin.
+The settings are JSON files in `fineract/configuration/`. They hold only our choices, by name or code (`"parent": "Head Office"`, `"repaymentFrequency": "MONTHS"`), never a Fineract id. Setup reads Fineract's templates (`/offices/template`, `/users/template`, `/currencies`, `/permissions`, `/loanproducts/template`) to turn them into ids, and stops with the allowed values if a name or code is not offered. [DECISIONS.md](DECISIONS.md) has the details. The Integration Service starts only after setup has finished without error, and it logs in to Fineract as `integration-api`, never as the admin.
 
 It is safe to run again. A second run creates nothing:
 
@@ -81,7 +81,7 @@ It is safe to run again. A second run creates nothing:
 docker compose run --rm setup
 ```
 
-On a clean stack, the first run printed `created` for every step and `13 SYNCED (13 sent to Fineract)`. The second run printed `exists` for every step and `0 sent to Fineract`. See `evidence/P1/setup-first-run.txt` and `setup-second-run.txt`.
+On a clean stack, the first run printed `created` for every step and `13 SYNCED (13 sent to Fineract)`. The second run printed `exists` for every step and `0 sent to Fineract`. See `evidence/P1/setup-first-run.txt` and `setup-second-run.txt`. The same happened after setup moved to the templates, on a new clean stack: `evidence/P2.6/setup-first-run.txt` and `setup-second-run.txt`.
 
 ## Try the APIs in the browser
 
