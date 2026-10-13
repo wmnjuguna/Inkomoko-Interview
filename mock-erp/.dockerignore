@@ -1,0 +1,12 @@
+# Send only what the image needs: project metadata, lock file, source and migrations.
+.venv/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+**/__pycache__/
+**/*.pyc
+tests/
+*.log
+.env
+Dockerfile
+.dockerignore

@@ -75,5 +75,28 @@ services:
       retries: 60
       start_period: 120s
 
+  mock-erp:
+    build:
+      context: ./mock-erp
+    image: mock-erp-inkomoko:0.1.0
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      # The entrypoint runs alembic upgrade head against this database before gunicorn starts
+      ERP_DATABASE_URL: postgresql+psycopg://${ERP_DB_USER}:${ERP_DB_PASSWORD}@db:5432/erp_db
+      ERP_API_KEY: ${ERP_API_KEY}
+      ERP_LOG_LEVEL: ${ERP_LOG_LEVEL}
+      # Seconds the "timeout" fault waits before answering
+      ERP_TIMEOUT_DELAY: ${ERP_TIMEOUT_DELAY}
+    ports:
+      - "127.0.0.1:8090:8090"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8090/health > /dev/null"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
 volumes:
   pgdata:
