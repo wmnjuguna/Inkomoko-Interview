@@ -1,6 +1,6 @@
 # API
 
-> **Status:** the Fineract plugin API and the Mock ERP API are built and tested. The Integration Service API is *planned*.
+> **Status:** the Fineract plugin API and the Mock ERP API are built and tested. In the Integration Service API, the GL sync routes are built and tested. The other Integration Service endpoints are *planned*.
 
 ## OpenAPI specs
 
@@ -9,12 +9,12 @@ Each API has an OpenAPI 3 spec. The spec is generated from the code, not written
 | API | Served at | Copy in this repo |
 |---|---|---|
 | Fineract ERP integration (my plugin) | `/fineract-provider/glsync.json` and `.yaml` | `docs/openapi/fineract-erp-integration.yaml` |
-| Integration Service *(planned)* | `/openapi.json`, `/docs` | `docs/openapi/integration-service.yaml` |
+| Integration Service | `/openapi/openapi.json`, Swagger UI at `/openapi/swagger` | `docs/openapi/integration-service.yaml` |
 | Mock ERP | `/openapi/openapi.json`, Swagger UI at `/openapi/swagger` | `docs/openapi/mock-erp.yaml` |
 
 For the plugin, the build reads the annotations on the Java classes and writes the spec. Fineract's own spec (`fineract.json`) only covers Fineract's built-in code, so the plugin makes its own.
 
-For the Mock ERP, flask-openapi3 builds the spec from the Pydantic models in the code. `make build` writes the repo copy from the built image.
+For the Mock ERP and the Integration Service, flask-openapi3 builds the spec from the Pydantic models in the code. `make build` writes the repo copies from the built images.
 
 ## Fineract plugin: ERP integration
 
@@ -79,7 +79,7 @@ Shows which GL account an ERP account belongs to. Use it when a sync timed out a
 
 `hierarchy` is Fineract's own path field. A top-level account has `.`. A child adds its own GL id to its parent's path.
 
-## Integration Service *(planned)*
+## Integration Service
 
 ### General rules
 
@@ -130,14 +130,17 @@ Shows which GL account an ERP account belongs to. Use it when a sync timed out a
 | 401 | `UNAUTHENTICATED` |
 | 404 | `NOT_FOUND` |
 | 409 | `IDEMPOTENCY_CONFLICT`, `CLIENT_UID_TAKEN`, `LOAN_ALREADY_DISBURSED`, `GL_CODE_TAKEN` |
-| 502, 503, 504 | `FINERACT_UNAVAILABLE`, `FINERACT_TIMEOUT` (we are still finding out what happened) |
+| 502, 503, 504 | `FINERACT_UNAVAILABLE`, `FINERACT_TIMEOUT` (we are still finding out what happened), `ERP_UNAVAILABLE`, `ERP_TIMEOUT` |
+| 500 | `INTERNAL_ERROR`. The message does not show the cause. The full error is in the log, under the same correlation id. |
 
 ### Endpoints
 
 | Call | What it does |
 |---|---|
-| `POST /api/accounts/sync` | Reads the ERP chart of accounts and syncs each account to Fineract. Safe to run again. |
-| `POST /api/clients` | Creates a client |
+| `POST /api/accounts/sync` | Reads the ERP chart of accounts and syncs each account to Fineract. Safe to run again. Built, see below. |
+| `GET /api/accounts/sync` | The sync state of every account. Calls nothing. Built. |
+| `POST /api/accounts/{erp_reference}/sync` | Syncs one ERP account. Built. |
+| `POST /api/clients` *(planned, like every row below)* | Creates a client |
 | `GET /api/clients/{client_uid}` | Finds a client and checks it exists, is active and has the right name |
 | `POST /api/loans` | Applies for a loan. Returns the new `loan_reference`. |
 | `POST /api/loans/{loan_reference}/approve` | Approves the loan, once |
@@ -148,6 +151,75 @@ Shows which GL account an ERP account belongs to. Use it when a sync timed out a
 | `POST /api/reconciliation` | Compares Fineract and the ERP. Read only. |
 | `POST /admin/faults` | Turns on fake failures, for testing. Not for partners. |
 | `POST /admin/recover` | Re-checks unfinished requests now. Not for partners. |
+
+### GL sync
+
+These are the only Integration Service endpoints built so far. They need a partner `X-API-Key` like every `/api` route. In production they would sit on an internal route, because syncing the chart is an operator task.
+
+They take no request body. The data comes from the ERP, not from the caller. So "same reference, different data" can't happen here. Each account is keyed by its own ERP `external_reference`: one `gl_sync` row, one plugin mapping, and its own `Idempotency-Key`.
+
+#### `POST /api/accounts/sync`
+
+Syncs the whole ERP chart, parents first, and answers with the state of every account.
+
+| Situation | Response |
+|---|---|
+| The sync ran | `200` with the report |
+| Another sync is running | `202` with the current report and `"in_progress": true`. Nothing is sent. |
+| The ERP can't be reached, or answers `503` | `503 ERP_UNAVAILABLE` |
+| The ERP times out | `504 ERP_TIMEOUT` |
+| Any other ERP failure | `502 ERP_UNAVAILABLE` |
+
+A Fineract failure never fails the call. It shows on the account: `SYNC_PENDING` when Fineract could not be reached or the answer was unclear, `FAILED` with a reason when Fineract refused.
+
+Real answer on the clean stack, after setup had synced the chart (`evidence/P1/service.txt`, shortened to 2 of 15 accounts):
+
+```json
+{
+  "accounts": [
+    {"attempts": 1, "code": "1000", "erp_reference": "GL-1000", "last_error": null, "name": "Assets", "status": "SYNCED"},
+    {"attempts": 1, "code": "1200", "erp_reference": "GL-1200", "last_error": null, "name": "Loan Receivable", "status": "SYNCED"}
+  ],
+  "counts": {"FAILED": 0, "SYNCED": 15, "SYNC_PENDING": 0},
+  "in_progress": false,
+  "writes": 0
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `status` | `SYNC_PENDING`, `SYNCED` or `FAILED` |
+| `attempts` | How many times this account was sent to Fineract |
+| `last_error` | Why it is not synced, in our own words (with a Fineract error code when there is no text for it), for example `GL_CODE_TAKEN: GL code X is already used by another GL account in Fineract`. On a `SYNCED` account it is a warning: `changed in ERP; updates are out of scope`. Never Fineract's own text, which can hold its ids. |
+| `writes` | How many accounts this call sent to Fineract. `0` means everything was already synced. |
+| `in_progress` | `true` when another sync was running, so this call did nothing |
+
+No Fineract id appears in the answer.
+
+#### `GET /api/accounts/sync`
+
+The same report, read from our database. It calls neither the ERP nor Fineract. `writes` is `0`.
+
+#### `POST /api/accounts/{erp_reference}/sync`
+
+Syncs one ERP account, for example `GL-1200`.
+
+| Situation | Response |
+|---|---|
+| Done | `200 {"account": {...one account, as above...}, "in_progress": false}` |
+| Another sync is running | `202`, `account` is its current state, or `null` if it was never recorded |
+| The ERP has no account with that reference | `404 NOT_FOUND` |
+| ERP failures | Same as above (`502`, `503`, `504`) |
+
+Real answers on the clean stack:
+
+```
+POST /api/accounts/GL-1200/sync -> 200
+{"account":{"attempts":1,"code":"1200","erp_reference":"GL-1200","last_error":null,"name":"Loan Receivable","status":"SYNCED"},"in_progress":false}
+
+POST /api/accounts/GL-9999/sync -> 404
+{"error":{"code":"NOT_FOUND","correlation_id":"c-19c7…","details":{},"message":"The ERP has no account GL-9999."}}
+```
 
 ## Mock ERP
 
