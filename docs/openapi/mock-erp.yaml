@@ -1,0 +1,1158 @@
+openapi: 3.1.0
+info:
+  title: Mock ERP
+  description: Chart of accounts and journal for the Inkomoko take-home. Refuses unbalanced entries and
+    duplicates on its own, and can fail on purpose.
+  version: 0.1.0
+paths:
+  /health:
+    get:
+      tags:
+      - health
+      summary: Database reachable
+      operationId: health_health_health_get
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Health'
+        '503':
+          description: Service Unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Health'
+        '422':
+          description: Unprocessable Content
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ErrorResponse'
+  /api/accounts:
+    get:
+      tags:
+      - accounts
+      summary: List accounts, parents first
+      operationId: accounts_list_accounts_api_accounts_get
+      parameters:
+      - name: usage
+        in: query
+        required: false
+        schema:
+          title: Usage
+          anyOf:
+          - enum:
+            - HEADER
+            - DETAIL
+            type: string
+          - type: 'null'
+          default: null
+      responses:
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Unprocessable Content
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          description: Too Many Requests
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Service Unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '504':
+          description: Gateway Timeout
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountList'
+      security:
+      - api_key: []
+    post:
+      tags:
+      - accounts
+      summary: Create an account (safe to repeat)
+      description: 201 when created, 200 when the same request was already stored.
+      operationId: accounts_create_account_api_accounts_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateAccountRequest'
+        required: true
+      responses:
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Unprocessable Content
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          description: Too Many Requests
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Service Unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '504':
+          description: Gateway Timeout
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountCreated'
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountCreated'
+        '409':
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      security:
+      - api_key: []
+  /api/accounts/{code}/balance:
+    get:
+      tags:
+      - accounts
+      summary: Account balance (a HEADER adds up its children)
+      operationId: accounts_account_balance_api_accounts__code__balance_get
+      parameters:
+      - name: code
+        in: path
+        required: true
+        schema:
+          title: Code
+          type: string
+      responses:
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Unprocessable Content
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          description: Too Many Requests
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Service Unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '504':
+          description: Gateway Timeout
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountBalance'
+        '404':
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      security:
+      - api_key: []
+  /api/journal-entries:
+    get:
+      tags:
+      - journal
+      summary: Search journal entries
+      description: Newest first. Repeat reference to fetch many entries at once.
+      operationId: journal_search_entries_api_journal_entries_get
+      parameters:
+      - name: from
+        in: query
+        description: First entry_date.
+        required: false
+        schema:
+          title: From
+          anyOf:
+          - type: string
+            format: date
+          - type: 'null'
+          description: First entry_date.
+          default: null
+      - name: to
+        in: query
+        description: Last entry_date.
+        required: false
+        schema:
+          title: To
+          anyOf:
+          - type: string
+            format: date
+          - type: 'null'
+          description: Last entry_date.
+          default: null
+      - name: reference
+        in: query
+        required: false
+        schema:
+          title: Reference
+          anyOf:
+          - maxItems: 1000
+            type: array
+            items:
+              type: string
+          - type: 'null'
+          default: null
+      - name: source
+        in: query
+        required: false
+        schema:
+          title: Source
+          anyOf:
+          - enum:
+            - DISBURSEMENT
+            - REPAYMENT
+            - REVERSAL
+            - MANUAL
+            type: string
+          - type: 'null'
+          default: null
+      - name: q
+        in: query
+        description: Text in the reference or description.
+        required: false
+        schema:
+          title: Q
+          anyOf:
+          - maxLength: 200
+            type: string
+          - type: 'null'
+          description: Text in the reference or description.
+          default: null
+      - name: limit
+        in: query
+        required: false
+        schema:
+          title: Limit
+          maximum: 1000
+          minimum: 1.0
+          type: integer
+          default: 500
+      responses:
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Unprocessable Content
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          description: Too Many Requests
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Service Unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '504':
+          description: Gateway Timeout
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JournalEntryList'
+      security:
+      - api_key: []
+    post:
+      tags:
+      - journal
+      summary: Post a journal entry
+      description: 201 for a new entry, 200 for a retry with the same content, 409 when the reference
+        is stored with different content.
+      operationId: journal_post_entry_api_journal_entries_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/JournalEntryIn'
+        required: true
+      responses:
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Unprocessable Content
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          description: Too Many Requests
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Service Unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '504':
+          description: Gateway Timeout
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JournalPostOut'
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JournalPostOut'
+        '409':
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      security:
+      - api_key: []
+  /api/journal-entries/{external_reference}:
+    get:
+      tags:
+      - journal
+      summary: Read one journal entry
+      operationId: journal_get_entry_api_journal_entries__external_reference__get
+      parameters:
+      - name: external_reference
+        in: path
+        required: true
+        schema:
+          title: External Reference
+          maxLength: 64
+          minLength: 1
+          type: string
+      responses:
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Unprocessable Content
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          description: Too Many Requests
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Service Unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '504':
+          description: Gateway Timeout
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JournalEntryOut'
+        '404':
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      security:
+      - api_key: []
+  /admin/faults:
+    get:
+      tags:
+      - admin
+      summary: Current fault setting
+      operationId: admin_get_faults_admin_faults_get
+      responses:
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Unprocessable Content
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FaultSettingOut'
+      security:
+      - api_key: []
+    put:
+      tags:
+      - admin
+      summary: Turn a fault on
+      description: Paths under path_prefix fail on purpose until cleared or until remaining calls have
+        failed. /health, /admin, /ui and /openapi never fail.
+      operationId: admin_put_faults_admin_faults_put
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FaultSettingIn'
+        required: true
+      responses:
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Unprocessable Content
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FaultSettingOut'
+      security:
+      - api_key: []
+    delete:
+      tags:
+      - admin
+      summary: Turn the fault off
+      operationId: admin_delete_faults_admin_faults_delete
+      responses:
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Unprocessable Content
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FaultSettingOut'
+      security:
+      - api_key: []
+components:
+  schemas:
+    Health:
+      title: Health
+      required:
+      - status
+      - database
+      type: object
+      properties:
+        status:
+          title: Status
+          enum:
+          - UP
+          - DOWN
+          type: string
+        database:
+          title: Database
+          enum:
+          - ok
+          - unreachable
+          type: string
+    ErrorResponse:
+      title: ErrorResponse
+      required:
+      - error
+      type: object
+      properties:
+        error:
+          $ref: '#/components/schemas/ErrorDetail'
+      description: Every error has this shape.
+    ErrorDetail:
+      title: ErrorDetail
+      required:
+      - code
+      - message
+      - details
+      - correlation_id
+      type: object
+      properties:
+        code:
+          title: Code
+          type: string
+        message:
+          title: Message
+          type: string
+        details:
+          title: Details
+          type: object
+          additionalProperties: true
+        correlation_id:
+          title: Correlation Id
+          anyOf:
+          - type: string
+          - type: 'null'
+    AccountCreated:
+      title: AccountCreated
+      required:
+      - code
+      - external_reference
+      - name
+      - type
+      - usage
+      - parent_code
+      - currency
+      - created_at
+      - status
+      type: object
+      properties:
+        code:
+          title: Code
+          type: string
+        external_reference:
+          title: External Reference
+          type: string
+        name:
+          title: Name
+          type: string
+        type:
+          title: Type
+          enum:
+          - ASSET
+          - LIABILITY
+          - EQUITY
+          - INCOME
+          - EXPENSE
+          type: string
+        usage:
+          title: Usage
+          enum:
+          - HEADER
+          - DETAIL
+          type: string
+        parent_code:
+          title: Parent Code
+          anyOf:
+          - type: string
+          - type: 'null'
+        currency:
+          title: Currency
+          type: string
+        created_at:
+          title: Created At
+          type: string
+          format: date-time
+        status:
+          title: Status
+          enum:
+          - CREATED
+          - ALREADY_EXISTS
+          type: string
+      description: The stored account, and whether this call created it.
+    CreateAccountRequest:
+      title: CreateAccountRequest
+      required:
+      - code
+      - external_reference
+      - name
+      - type
+      - usage
+      type: object
+      properties:
+        code:
+          title: Code
+          pattern: ^[0-9]{4,10}$
+          type: string
+          description: Digits only, 4 to 10 long, e.g. 1400.
+        external_reference:
+          title: External Reference
+          maxLength: 64
+          minLength: 1
+          pattern: ^[A-Za-z0-9][A-Za-z0-9:_.\-]*$
+          type: string
+          description: Caller's id, e.g. GL-1400.
+        name:
+          title: Name
+          maxLength: 200
+          minLength: 1
+          type: string
+        type:
+          title: Type
+          enum:
+          - ASSET
+          - LIABILITY
+          - EQUITY
+          - INCOME
+          - EXPENSE
+          type: string
+        usage:
+          title: Usage
+          enum:
+          - HEADER
+          - DETAIL
+          type: string
+          description: HEADER groups accounts; only DETAIL takes lines.
+        parent_code:
+          title: Parent Code
+          anyOf:
+          - pattern: ^[0-9]{4,10}$
+            type: string
+          - type: 'null'
+          description: A HEADER of the same type. Required for DETAIL accounts.
+          default: null
+        currency:
+          title: Currency
+          type: string
+          default: RWF
+          const: RWF
+      additionalProperties: false
+      description: A new account. Posting the same body again is safe.
+    AccountList:
+      title: AccountList
+      required:
+      - items
+      type: object
+      properties:
+        items:
+          title: Items
+          type: array
+          items:
+            $ref: '#/components/schemas/Account'
+    Account:
+      title: Account
+      required:
+      - code
+      - external_reference
+      - name
+      - type
+      - usage
+      - parent_code
+      - currency
+      - created_at
+      type: object
+      properties:
+        code:
+          title: Code
+          type: string
+        external_reference:
+          title: External Reference
+          type: string
+        name:
+          title: Name
+          type: string
+        type:
+          title: Type
+          enum:
+          - ASSET
+          - LIABILITY
+          - EQUITY
+          - INCOME
+          - EXPENSE
+          type: string
+        usage:
+          title: Usage
+          enum:
+          - HEADER
+          - DETAIL
+          type: string
+        parent_code:
+          title: Parent Code
+          anyOf:
+          - type: string
+          - type: 'null'
+        currency:
+          title: Currency
+          type: string
+        created_at:
+          title: Created At
+          type: string
+          format: date-time
+      description: An account as stored.
+    AccountBalance:
+      title: AccountBalance
+      required:
+      - code
+      - name
+      - type
+      - usage
+      - debit_total
+      - credit_total
+      - balance
+      - normal_side
+      type: object
+      properties:
+        code:
+          title: Code
+          type: string
+        name:
+          title: Name
+          type: string
+        type:
+          title: Type
+          enum:
+          - ASSET
+          - LIABILITY
+          - EQUITY
+          - INCOME
+          - EXPENSE
+          type: string
+        usage:
+          title: Usage
+          enum:
+          - HEADER
+          - DETAIL
+          type: string
+        debit_total:
+          title: Debit Total
+          type: integer
+        credit_total:
+          title: Credit Total
+          type: integer
+        balance:
+          title: Balance
+          type: integer
+        normal_side:
+          title: Normal Side
+          enum:
+          - DEBIT
+          - CREDIT
+          type: string
+      description: Totals in whole RWF. A HEADER adds up every account under it.
+    JournalPostOut:
+      title: JournalPostOut
+      required:
+      - erp_transaction_id
+      - external_reference
+      - entry_date
+      - source
+      - description
+      - reverses
+      - total
+      - lines
+      - created_at
+      - correlation_id
+      - status
+      type: object
+      properties:
+        erp_transaction_id:
+          title: Erp Transaction Id
+          type: string
+          format: uuid
+        external_reference:
+          title: External Reference
+          type: string
+        entry_date:
+          title: Entry Date
+          type: string
+          format: date
+        source:
+          title: Source
+          enum:
+          - DISBURSEMENT
+          - REPAYMENT
+          - REVERSAL
+          - MANUAL
+          type: string
+        description:
+          title: Description
+          anyOf:
+          - type: string
+          - type: 'null'
+        reverses:
+          title: Reverses
+          anyOf:
+          - type: string
+          - type: 'null'
+        total:
+          title: Total
+          type: integer
+          description: Sum of the debits, which equals the sum of the credits.
+        lines:
+          title: Lines
+          type: array
+          items:
+            $ref: '#/components/schemas/JournalLineOut'
+        created_at:
+          title: Created At
+          type: string
+          format: date-time
+        correlation_id:
+          title: Correlation Id
+          anyOf:
+          - type: string
+          - type: 'null'
+        status:
+          title: Status
+          enum:
+          - CREATED
+          - ALREADY_EXISTS
+          type: string
+      description: Answer to a post. CREATED is a new entry; ALREADY_EXISTS is a safe retry.
+    JournalLineOut:
+      title: JournalLineOut
+      required:
+      - account_code
+      - account_name
+      - debit
+      - credit
+      type: object
+      properties:
+        account_code:
+          title: Account Code
+          type: string
+        account_name:
+          title: Account Name
+          type: string
+        debit:
+          title: Debit
+          type: integer
+        credit:
+          title: Credit
+          type: integer
+    JournalEntryIn:
+      title: JournalEntryIn
+      required:
+      - external_reference
+      - entry_date
+      - source
+      - lines
+      type: object
+      properties:
+        external_reference:
+          title: External Reference
+          maxLength: 64
+          minLength: 1
+          pattern: ^[A-Za-z0-9][A-Za-z0-9:_.\-]*$
+          type: string
+        entry_date:
+          title: Entry Date
+          type: string
+          format: date
+        source:
+          title: Source
+          enum:
+          - DISBURSEMENT
+          - REPAYMENT
+          - REVERSAL
+          - MANUAL
+          type: string
+        description:
+          title: Description
+          anyOf:
+          - maxLength: 500
+            type: string
+          - type: 'null'
+          default: null
+        reverses:
+          title: Reverses
+          anyOf:
+          - maxLength: 64
+            minLength: 1
+            pattern: ^[A-Za-z0-9][A-Za-z0-9:_.\-]*$
+            type: string
+          - type: 'null'
+          default: null
+        lines:
+          title: Lines
+          maxItems: 50
+          minItems: 2
+          type: array
+          items:
+            $ref: '#/components/schemas/JournalLineIn'
+      additionalProperties: false
+      description: A balanced entry. Only a REVERSAL names the entry it reverses.
+    JournalLineIn:
+      title: JournalLineIn
+      required:
+      - account_code
+      type: object
+      properties:
+        account_code:
+          title: Account Code
+          maxLength: 20
+          minLength: 1
+          type: string
+        debit:
+          title: Debit
+          maximum: 1000000000000000
+          minimum: 0.0
+          type: integer
+          default: 0
+        credit:
+          title: Credit
+          maximum: 1000000000000000
+          minimum: 0.0
+          type: integer
+          default: 0
+      additionalProperties: false
+      description: One line. Whole RWF; exactly one of debit or credit is above zero.
+    JournalEntryOut:
+      title: JournalEntryOut
+      required:
+      - erp_transaction_id
+      - external_reference
+      - entry_date
+      - source
+      - description
+      - reverses
+      - total
+      - lines
+      - created_at
+      - correlation_id
+      type: object
+      properties:
+        erp_transaction_id:
+          title: Erp Transaction Id
+          type: string
+          format: uuid
+        external_reference:
+          title: External Reference
+          type: string
+        entry_date:
+          title: Entry Date
+          type: string
+          format: date
+        source:
+          title: Source
+          enum:
+          - DISBURSEMENT
+          - REPAYMENT
+          - REVERSAL
+          - MANUAL
+          type: string
+        description:
+          title: Description
+          anyOf:
+          - type: string
+          - type: 'null'
+        reverses:
+          title: Reverses
+          anyOf:
+          - type: string
+          - type: 'null'
+        total:
+          title: Total
+          type: integer
+          description: Sum of the debits, which equals the sum of the credits.
+        lines:
+          title: Lines
+          type: array
+          items:
+            $ref: '#/components/schemas/JournalLineOut'
+        created_at:
+          title: Created At
+          type: string
+          format: date-time
+        correlation_id:
+          title: Correlation Id
+          anyOf:
+          - type: string
+          - type: 'null'
+      description: A stored entry. erp_transaction_id is the ERP's own id for it.
+    JournalEntryList:
+      title: JournalEntryList
+      required:
+      - items
+      type: object
+      properties:
+        items:
+          title: Items
+          type: array
+          items:
+            $ref: '#/components/schemas/JournalEntryOut'
+    FaultSettingOut:
+      title: FaultSettingOut
+      required:
+      - mode
+      - path_prefix
+      - delay_seconds
+      - remaining
+      - retry_after
+      - active
+      type: object
+      properties:
+        mode:
+          title: Mode
+          anyOf:
+          - enum:
+            - down
+            - timeout
+            - timeout_after_write
+            - rate_limited
+            type: string
+          - type: 'null'
+        path_prefix:
+          title: Path Prefix
+          type: string
+        delay_seconds:
+          title: Delay Seconds
+          type: integer
+        remaining:
+          title: Remaining
+          anyOf:
+          - type: integer
+          - type: 'null'
+        retry_after:
+          title: Retry After
+          type: integer
+        active:
+          title: Active
+          type: boolean
+      description: The current fault setting. mode is null when no fault is on.
+    FaultSettingIn:
+      title: FaultSettingIn
+      required:
+      - mode
+      type: object
+      properties:
+        mode:
+          title: Mode
+          enum:
+          - down
+          - timeout
+          - timeout_after_write
+          - rate_limited
+          type: string
+        path_prefix:
+          title: Path Prefix
+          type: string
+          description: Must start with /api.
+          default: /api
+        delay_seconds:
+          title: Delay Seconds
+          anyOf:
+          - maximum: 120
+            minimum: 1.0
+            type: integer
+          - type: 'null'
+          description: 'Wait for the timeout modes. Default: the ERP_TIMEOUT_DELAY setting.'
+          default: null
+        remaining:
+          title: Remaining
+          anyOf:
+          - minimum: 1.0
+            type: integer
+          - type: 'null'
+          description: How many calls fail. Null means until cleared.
+          default: null
+        retry_after:
+          title: Retry After
+          maximum: 3600
+          minimum: 1.0
+          type: integer
+          description: Retry-After seconds for rate_limited.
+          default: 5
+      additionalProperties: false
+      description: Turn a fault on. Only paths starting with path_prefix fail.
+  securitySchemes:
+    api_key:
+      type: apiKey
+      in: header
+      name: X-API-Key
+tags:
+- name: health
+- name: accounts
+- name: journal
+- name: admin
