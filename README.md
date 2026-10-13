@@ -9,6 +9,8 @@ This is my take-home assessment. It connects three things:
 The goal is to show that money moves exactly once, even with duplicate requests, timeouts, crashes and requests that arrive at the same time.
 
 > **Status:** Parts A to H are built and tested. Parts A to D and F to H have been run on a clean stack (`evidence/P1/`, `evidence/P2/`). Part E, the Integration API, is built except `POST /api/reconciliation`. Part I is run for I-1 only. Parts J and K are not run, and reconciliation (K) is not built. Anything marked *planned* does not exist yet.
+>
+> **Template-driven loan flow (P2.5):** the loan steps now take their rules and amounts from Fineract's own templates (principal range, approved and payout amounts, payment types, payoff), and three read-only form endpoints show them to partners. C-1, D-1 and I-1 were run again on a clean stack with this code and passed (`evidence/P2.5/`).
 
 ## What is done
 
@@ -117,7 +119,7 @@ It listens on http://localhost:8091. Only this computer can reach it.
 | OpenAPI spec | http://localhost:8091/openapi/openapi.json |
 | Health check | http://localhost:8091/health |
 
-In Swagger, click **Authorize** and enter a partner key. Keys are set in `.env` as `PARTNER_API_KEYS`, in the form `name:key`. The default is `demo-partner:change-me-partner-key`. The routes are GL sync (`/api/accounts/...`), clients (`/api/clients`), loans with approve, disburse and repayments (`/api/loans/...`), `GET /api/transactions/{external_reference}` and `POST /admin/recover`. See [API.md](API.md).
+In Swagger, click **Authorize** and enter a partner key. Keys are set in `.env` as `PARTNER_API_KEYS`, in the form `name:key`. The default is `demo-partner:change-me-partner-key`. The routes are GL sync (`/api/accounts/...`), clients (`/api/clients`), loans with approve, disburse and repayments (`/api/loans/...`), the forms for each step (`/api/clients/template`, `/api/loans/template`, `/api/loans/{loan_reference}/template?step=`), `GET /api/transactions/{external_reference}` and `POST /admin/recover`. See [API.md](API.md).
 
 The background loop that sends journal entries to the ERP and finishes stuck requests has three optional settings in `.env`: `INTEGRATION_OUTBOX_ENABLED` (default `true`), `INTEGRATION_OUTBOX_POLL_SECONDS` (default `5`) and `INTEGRATION_OUTBOX_MAX_ATTEMPTS` (default `8`).
 
@@ -126,7 +128,7 @@ The background loop that sends journal entries to the ERP and finishes stuck req
 | Language | Command | What it runs |
 |---|---|---|
 | Java | `make test-java` | Builds Fineract (51 unit tests run during the build), starts it, then runs 10 integration tests against it. Details: [fineract-customization/BUILD.md](fineract-customization/BUILD.md) |
-| Python | `make test-python` | For the Mock ERP and then the Integration Service: ruff (lint and format), mypy in strict mode, then pytest. Last run on a clean stack: Mock ERP 216 passed, Integration Service 738 passed (517 unit, 221 integration), nothing skipped (`evidence/P2/tests.txt`). |
+| Python | `make test-python` | For the Mock ERP and then the Integration Service: ruff (lint and format), mypy in strict mode, then pytest. Last run on a clean stack: Mock ERP 216 passed, Integration Service 825 passed (580 unit, 245 integration), nothing skipped (`evidence/P2.5/tests.txt`). |
 
 The Python tests need the running stack and two empty test databases: `erp_test` and `integration_test`. They rebuild their tables on every run. A new data volume creates both by itself. On an older volume, create them once:
 
@@ -153,7 +155,7 @@ Each scenario has a `make` command. It prints the state before and after, in the
 | `make demo-lifecycle` | D-1: a 5,000,000 RWF loan from application to Closed: approve, pay out, 3 repayments, pay off. After each step it shows Fineract's status and balances, the ERP entries and the service's record. |
 | `make simulate-duplicates` | I-1: the same disbursement sent 4 times. It must give 4 requests, 1 Fineract disbursement, 1 ERP entry and 1 operation. |
 
-Run them after `make up`. C-1, D-1 and I-1 only call the Integration Service, like a partner, and read Fineract, the ERP and the databases to show the state. The output of the last runs is in `evidence/P1/` (A-1, A-2) and `evidence/P2/` (C-1, D-1, I-1). Each run uses new ids, so they can run again. `make demo-gl-sync` creates one extra Fineract user the first time, `demo-no-sync`, with only `READ_GLACCOUNT`, to show the 403. `make simulate-gl-sync-4x` adds two new ERP accounts (codes starting with 7, under 5000) on every run. The other simulations in SIMULATIONS.md are *planned*.
+Run them after `make up`. C-1, D-1 and I-1 only call the Integration Service, like a partner, and read Fineract, the ERP and the databases to show the state. The output of the last runs is in `evidence/P1/` (A-1, A-2) and `evidence/P2.5/` (C-1, D-1, I-1; the first runs are in `evidence/P2/`). Each run uses new ids, so they can run again. `make demo-gl-sync` creates one extra Fineract user the first time, `demo-no-sync`, with only `READ_GLACCOUNT`, to show the 403. `make simulate-gl-sync-4x` adds two new ERP accounts (codes starting with 7, under 5000) on every run. The other simulations in SIMULATIONS.md are *planned*.
 
 ## Folders
 
