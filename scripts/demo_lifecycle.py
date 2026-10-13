@@ -291,7 +291,8 @@ def main() -> int:
             "Fineract status 100": loan["status"]["id"] == 100,
         },
         "the service issues LN-<year>-<n> from a Postgres sequence and uses it as the loan "
-        "externalId in Fineract; the term and rate come from the product",
+        "externalId in Fineract; the term, rate and principal range come from Fineract's loan "
+        "template for the product",
         applied.body["external_reference"],
     )
 
@@ -315,7 +316,8 @@ def main() -> int:
             "no GL entries": fineract_gl(loan) == {},
             "no ERP entries": erp_totals(loan_reference)[0] == 0,
         },
-        "approval is a Fineract command on the loan's externalId; it moves no money",
+        "approval is a Fineract command on the loan's externalId; the amount and date come from "
+        "Fineract's approval template (the applied principal, today); it moves no money",
         approved.body["external_reference"],
     )
 
@@ -342,7 +344,9 @@ def main() -> int:
             == {("1200", "DR"): PRINCIPAL, ("1100", "CR"): PRINCIPAL},
             "ERP totals = Fineract GL": erp_totals(loan_reference)[1] == fineract_gl(loan),
         },
-        "Fineract pays out under the per-loan lock with transaction externalId DSB:<reference>; "
+        "the amount is the approved principal from Fineract's disbursement template and the date "
+        "defaults to today; Fineract pays out under the per-loan lock with transaction "
+        "externalId DSB:<reference>; "
         "the service reads that transaction back and builds the journal entry only from it, "
         "in the same DB transaction that marks the request done; the outbox sends it. "
         f"ERP entry: {show_entry(entry)}",
