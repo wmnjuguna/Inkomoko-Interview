@@ -182,6 +182,608 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
       security:
       - api_key: []
+  /api/transactions/{external_reference}:
+    get:
+      tags:
+      - transactions
+      summary: Status and history of one request
+      description: 'Every operation you sent with this external_reference: its type, status, ERP status,
+        attempts, last error and status history. Use it to learn the live status of a request whose repeat
+        returned the saved first answer.'
+      operationId: transactions_get_transaction_api_transactions__external_reference__get
+      parameters:
+      - name: external_reference
+        in: path
+        required: true
+        schema:
+          title: External Reference
+          maxLength: 40
+          minLength: 1
+          pattern: ^[A-Za-z0-9._:\-]{1,40}$
+          type: string
+      responses:
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Unprocessable Content
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransactionResponse'
+        '404':
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      security:
+      - api_key: []
+  /api/clients:
+    post:
+      tags:
+      - clients
+      summary: Create a client
+      description: Creates the client in Fineract, active from today, keyed by client_uid. 201 the first
+        time. The same external_reference and data again gives 200 with the same body; with other data,
+        409 IDEMPOTENCY_CONFLICT. A client_uid already used by another reference gives 409 CLIENT_UID_TAKEN.
+      operationId: clients_post_client_api_clients_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateClientRequest'
+        required: true
+      responses:
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Unprocessable Content
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClientResponse'
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClientResponse'
+        '202':
+          description: Accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AcceptedResponse'
+        '409':
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: Bad Gateway
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Service Unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '504':
+          description: Gateway Timeout
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      security:
+      - api_key: []
+  /api/clients/{client_uid}:
+    get:
+      tags:
+      - clients
+      summary: Check a client
+      description: 'Reads Fineract: does the client exist, is it active, and does it have the name we
+        recorded? Add ?name= to check the name you expect.'
+      operationId: clients_get_client_api_clients__client_uid__get
+      parameters:
+      - name: client_uid
+        in: path
+        required: true
+        schema:
+          title: Client Uid
+          pattern: ^[A-Z]{2,10}-[0-9]{6}$
+          type: string
+      - name: name
+        in: query
+        description: 'Optional: the name you expect. name_matches says whether Fineract agrees (case and
+          spacing ignored).'
+        required: false
+        schema:
+          title: Name
+          anyOf:
+          - maxLength: 101
+            type: string
+          - type: 'null'
+          description: 'Optional: the name you expect. name_matches says whether Fineract agrees (case
+            and spacing ignored).'
+          default: null
+      responses:
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Unprocessable Content
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClientCheckResponse'
+        '404':
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: Bad Gateway
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Service Unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '504':
+          description: Gateway Timeout
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      security:
+      - api_key: []
+  /api/loans:
+    post:
+      tags:
+      - loans
+      summary: Apply for a loan
+      description: Submits a loan application in Fineract for an existing client, on the SME Asset Finance
+        product (its term, rate and schedule). Returns the new loan_reference. 201 the first time; the
+        same external_reference and data again gives 200 with the same body (the same loan_reference).
+      operationId: loans_post_loan_api_loans_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoanApplicationRequest'
+        required: true
+      responses:
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Unprocessable Content
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoanApplicationResponse'
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoanApplicationResponse'
+        '202':
+          description: Accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AcceptedResponse'
+        '404':
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: Bad Gateway
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Service Unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '504':
+          description: Gateway Timeout
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      security:
+      - api_key: []
+  /api/loans/{loan_reference}/approve:
+    post:
+      tags:
+      - loans
+      summary: Approve a loan
+      description: 'Approves the loan in Fineract for its full principal. A loan is approved once: another
+        external_reference for the same loan gives 409 LOAN_ALREADY_APPROVED.'
+      operationId: loans_post_approval_api_loans__loan_reference__approve_post
+      parameters:
+      - name: loan_reference
+        in: path
+        required: true
+        schema:
+          title: Loan Reference
+          pattern: ^LN-[0-9]{4}-[0-9]{6}$
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApprovalRequest'
+        required: true
+      responses:
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Unprocessable Content
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApprovalResponse'
+        '202':
+          description: Accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AcceptedResponse'
+        '404':
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: Bad Gateway
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Service Unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '504':
+          description: Gateway Timeout
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      security:
+      - api_key: []
+  /api/loans/{loan_reference}:
+    get:
+      tags:
+      - loans
+      summary: Loan status and balances
+      description: The loan's status and balances as Fineract reports them right now, in whole RWF. balances
+        is null until the loan is disbursed.
+      operationId: loans_get_loan_api_loans__loan_reference__get
+      parameters:
+      - name: loan_reference
+        in: path
+        required: true
+        schema:
+          title: Loan Reference
+          pattern: ^LN-[0-9]{4}-[0-9]{6}$
+          type: string
+      responses:
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Unprocessable Content
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoanResponse'
+        '404':
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: Bad Gateway
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Service Unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '504':
+          description: Gateway Timeout
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      security:
+      - api_key: []
+  /api/loans/{loan_reference}/disburse:
+    post:
+      tags:
+      - loans
+      summary: Pay out a loan
+      description: Pays out the loan's full approved principal in Fineract, once. The answer comes from
+        Fineract's own transaction; its journal entry goes to the ERP through the outbox (erp_status).
+        Another external_reference for the same loan gives 409 LOAN_ALREADY_DISBURSED, also while the
+        first one is still running.
+      operationId: loans_post_disbursement_api_loans__loan_reference__disburse_post
+      parameters:
+      - name: loan_reference
+        in: path
+        required: true
+        schema:
+          title: Loan Reference
+          pattern: ^LN-[0-9]{4}-[0-9]{6}$
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DisbursementRequest'
+        required: true
+      responses:
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Unprocessable Content
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DisbursementResponse'
+        '202':
+          description: Accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AcceptedResponse'
+        '404':
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: Bad Gateway
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Service Unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '504':
+          description: Gateway Timeout
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      security:
+      - api_key: []
+  /api/loans/{loan_reference}/repayments:
+    post:
+      tags:
+      - loans
+      summary: Record a repayment
+      description: Records a repayment in Fineract while the loan is ACTIVE. The split into principal,
+        interest and overpayment is Fineract's own; its journal entry goes to the ERP through the outbox
+        (erp_status). A loan takes many repayments, one per external_reference.
+      operationId: loans_post_repayment_api_loans__loan_reference__repayments_post
+      parameters:
+      - name: loan_reference
+        in: path
+        required: true
+        schema:
+          title: Loan Reference
+          pattern: ^LN-[0-9]{4}-[0-9]{6}$
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RepaymentRequest'
+        required: true
+      responses:
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Unprocessable Content
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RepaymentResponse'
+        '202':
+          description: Accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AcceptedResponse'
+        '404':
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: Bad Gateway
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Service Unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '504':
+          description: Gateway Timeout
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      security:
+      - api_key: []
+  /admin/recover:
+    post:
+      tags:
+      - admin
+      summary: Re-check unfinished requests now
+      description: Looks up every request still waiting on Fineract (older than the stale limit, or due
+        again) by its externalId and finishes, fails or keeps it; then sends due journal entries to the
+        ERP. Counts only. Not for partners.
+      operationId: admin_recover_admin_recover_post
+      responses:
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Unprocessable Content
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RecoverResponse'
+      security:
+      - api_key: []
 components:
   schemas:
     Health:
@@ -334,6 +936,838 @@ components:
           title: In Progress
           type: boolean
           description: True (HTTP 202) when another sync was already running. This call changed nothing.
+    TransactionResponse:
+      title: TransactionResponse
+      required:
+      - external_reference
+      - operations
+      type: object
+      properties:
+        external_reference:
+          title: External Reference
+          type: string
+        operations:
+          title: Operations
+          type: array
+          items:
+            $ref: '#/components/schemas/OperationStatus'
+    HistoryEntry:
+      title: HistoryEntry
+      required:
+      - from
+      - to
+      - at
+      - detail
+      type: object
+      properties:
+        from:
+          title: From
+          anyOf:
+          - type: string
+          - type: 'null'
+        to:
+          title: To
+          type: string
+        at:
+          title: At
+          type: string
+          format: date-time
+        detail:
+          title: Detail
+          anyOf:
+          - type: string
+          - type: 'null'
+    OperationStatus:
+      title: OperationStatus
+      required:
+      - type
+      - op_key
+      - status
+      - erp_status
+      - client_uid
+      - loan_reference
+      - attempts
+      - last_error
+      - history
+      - created_at
+      - updated_at
+      type: object
+      properties:
+        type:
+          title: Type
+          type: string
+          description: CLIENT_CREATION, LOAN_APPLICATION, APPROVAL, DISBURSEMENT or REPAYMENT
+        op_key:
+          title: Op Key
+          type: string
+          description: <type>:<external_reference>, e.g. DSB:FIN-1
+        status:
+          title: Status
+          type: string
+        erp_status:
+          title: Erp Status
+          anyOf:
+          - type: string
+          - type: 'null'
+          description: PENDING, SENT or NEEDS_RECONCILIATION for disbursements and repayments, else null
+        client_uid:
+          title: Client Uid
+          anyOf:
+          - type: string
+          - type: 'null'
+        loan_reference:
+          title: Loan Reference
+          anyOf:
+          - type: string
+          - type: 'null'
+        attempts:
+          title: Attempts
+          type: integer
+        last_error:
+          title: Last Error
+          anyOf:
+          - type: string
+          - type: 'null'
+        history:
+          title: History
+          type: array
+          items:
+            $ref: '#/components/schemas/HistoryEntry'
+        created_at:
+          title: Created At
+          type: string
+          format: date-time
+        updated_at:
+          title: Updated At
+          type: string
+          format: date-time
+    ClientResponse:
+      title: ClientResponse
+      required:
+      - client_uid
+      - name
+      - status
+      - external_reference
+      type: object
+      properties:
+        client_uid:
+          title: Client Uid
+          type: string
+        name:
+          title: Name
+          type: string
+        status:
+          title: Status
+          type: string
+          description: 'ACTIVE: the client is active from creation'
+        external_reference:
+          title: External Reference
+          type: string
+    AcceptedResponse:
+      title: AcceptedResponse
+      required:
+      - external_reference
+      - type
+      - status
+      - client_uid
+      - loan_reference
+      - message
+      type: object
+      properties:
+        external_reference:
+          title: External Reference
+          type: string
+        type:
+          title: Type
+          type: string
+        status:
+          title: Status
+          anyOf:
+          - type: string
+          - type: 'null'
+        client_uid:
+          title: Client Uid
+          anyOf:
+          - type: string
+          - type: 'null'
+        loan_reference:
+          title: Loan Reference
+          anyOf:
+          - type: string
+          - type: 'null'
+        message:
+          title: Message
+          type: string
+      description: '202: the same request is still running. It is not run a second time.'
+    CreateClientRequest:
+      title: CreateClientRequest
+      required:
+      - external_reference
+      - client_uid
+      - first_name
+      - last_name
+      type: object
+      properties:
+        external_reference:
+          title: External Reference
+          maxLength: 40
+          minLength: 1
+          pattern: ^[A-Za-z0-9._:\-]{1,40}$
+          type: string
+          description: Your key for this request. Send the same value on every retry.
+        client_uid:
+          title: Client Uid
+          pattern: ^[A-Z]{2,10}-[0-9]{6}$
+          type: string
+          description: Your business id for the client, e.g. SME-000001. Unique.
+        first_name:
+          title: First Name
+          maxLength: 50
+          minLength: 1
+          pattern: ^\p{L}+(?:[ '.\-]\p{L}+)*\.?$
+          type: string
+        last_name:
+          title: Last Name
+          maxLength: 50
+          minLength: 1
+          pattern: ^\p{L}+(?:[ '.\-]\p{L}+)*\.?$
+          type: string
+      additionalProperties: false
+    ClientCheckResponse:
+      title: ClientCheckResponse
+      required:
+      - client_uid
+      - name
+      - active
+      - status
+      - matches_our_record
+      - name_matches
+      type: object
+      properties:
+        client_uid:
+          title: Client Uid
+          type: string
+        name:
+          title: Name
+          type: string
+          description: The name Fineract holds
+        active:
+          title: Active
+          type: boolean
+        status:
+          title: Status
+          type: string
+          description: Fineract's client status, e.g. ACTIVE, PENDING, CLOSED
+        matches_our_record:
+          title: Matches Our Record
+          type: boolean
+          description: True when we created this client, Fineract holds the same name, and the client
+            is active
+        name_matches:
+          title: Name Matches
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          description: Only when you sent ?name=, else null
+    LoanApplicationResponse:
+      title: LoanApplicationResponse
+      required:
+      - loan_reference
+      - client_uid
+      - principal
+      - status
+      - expected_disbursement_date
+      - external_reference
+      type: object
+      properties:
+        loan_reference:
+          title: Loan Reference
+          type: string
+          description: Our id for the loan, e.g. LN-2026-000001
+        client_uid:
+          title: Client Uid
+          type: string
+        principal:
+          title: Principal
+          type: integer
+        status:
+          title: Status
+          type: string
+          description: SUBMITTED_AND_PENDING_APPROVAL
+        expected_disbursement_date:
+          title: Expected Disbursement Date
+          type: string
+          format: date
+        external_reference:
+          title: External Reference
+          type: string
+    LoanApplicationRequest:
+      title: LoanApplicationRequest
+      required:
+      - external_reference
+      - client_uid
+      - principal
+      type: object
+      properties:
+        external_reference:
+          title: External Reference
+          maxLength: 40
+          minLength: 1
+          pattern: ^[A-Za-z0-9._:\-]{1,40}$
+          type: string
+          description: Your key for this request. Send the same value on every retry.
+        client_uid:
+          title: Client Uid
+          pattern: ^[A-Z]{2,10}-[0-9]{6}$
+          type: string
+          description: A client created through POST /api/clients
+        principal:
+          title: Principal
+          exclusiveMinimum: 0.0
+          type: integer
+          description: Whole RWF, within the product's range
+        expected_disbursement_date:
+          title: Expected Disbursement Date
+          anyOf:
+          - type: string
+            format: date
+          - type: 'null'
+          description: 'YYYY-MM-DD, today or later (Kigali time). Default: today. Term, rate and schedule
+            come from the SME Asset Finance product.'
+          default: null
+      additionalProperties: false
+    ApprovalResponse:
+      title: ApprovalResponse
+      required:
+      - loan_reference
+      - client_uid
+      - status
+      - approved_on
+      - approved_principal
+      - external_reference
+      type: object
+      properties:
+        loan_reference:
+          title: Loan Reference
+          type: string
+        client_uid:
+          title: Client Uid
+          type: string
+        status:
+          title: Status
+          type: string
+          description: APPROVED
+        approved_on:
+          title: Approved On
+          type: string
+          format: date
+        approved_principal:
+          title: Approved Principal
+          type: integer
+        external_reference:
+          title: External Reference
+          type: string
+    ApprovalRequest:
+      title: ApprovalRequest
+      required:
+      - external_reference
+      type: object
+      properties:
+        external_reference:
+          title: External Reference
+          maxLength: 40
+          minLength: 1
+          pattern: ^[A-Za-z0-9._:\-]{1,40}$
+          type: string
+          description: Your key for this request. Send the same value on every retry.
+        approved_on:
+          title: Approved On
+          anyOf:
+          - type: string
+            format: date
+          - type: 'null'
+          description: 'YYYY-MM-DD, not in the future (Kigali time). Default: today.'
+          default: null
+      additionalProperties: false
+    LoanResponse:
+      title: LoanResponse
+      required:
+      - loan_reference
+      - client_uid
+      - status
+      - closed_obligations_met
+      - overpaid
+      - currency
+      - principal
+      - approved_principal
+      - submitted_on
+      - approved_on
+      - expected_disbursement_on
+      - disbursed_on
+      - closed_on
+      - expected_maturity_on
+      - balances
+      - payoff_amount
+      type: object
+      properties:
+        loan_reference:
+          title: Loan Reference
+          type: string
+        client_uid:
+          title: Client Uid
+          type: string
+        status:
+          $ref: '#/components/schemas/LoanStatus'
+        closed_obligations_met:
+          title: Closed Obligations Met
+          type: boolean
+        overpaid:
+          title: Overpaid
+          type: boolean
+        currency:
+          title: Currency
+          anyOf:
+          - type: string
+          - type: 'null'
+        principal:
+          title: Principal
+          anyOf:
+          - type: integer
+          - type: 'null'
+        approved_principal:
+          title: Approved Principal
+          anyOf:
+          - type: integer
+          - type: 'null'
+        submitted_on:
+          title: Submitted On
+          anyOf:
+          - type: string
+            format: date
+          - type: 'null'
+        approved_on:
+          title: Approved On
+          anyOf:
+          - type: string
+            format: date
+          - type: 'null'
+        expected_disbursement_on:
+          title: Expected Disbursement On
+          anyOf:
+          - type: string
+            format: date
+          - type: 'null'
+        disbursed_on:
+          title: Disbursed On
+          anyOf:
+          - type: string
+            format: date
+          - type: 'null'
+        closed_on:
+          title: Closed On
+          anyOf:
+          - type: string
+            format: date
+          - type: 'null'
+        expected_maturity_on:
+          title: Expected Maturity On
+          anyOf:
+          - type: string
+            format: date
+          - type: 'null'
+        balances:
+          anyOf:
+          - $ref: '#/components/schemas/LoanBalances'
+          - type: 'null'
+          description: null until the loan is disbursed
+        payoff_amount:
+          title: Payoff Amount
+          anyOf:
+          - type: integer
+          - type: 'null'
+          description: What clears the loan today, from Fineract; only while it is active
+      description: The loan as Fineract reports it right now.
+    LoanBalances:
+      title: LoanBalances
+      required:
+      - principal_disbursed
+      - principal_repaid
+      - principal_outstanding
+      - interest_charged
+      - interest_repaid
+      - interest_outstanding
+      - fees_outstanding
+      - penalties_outstanding
+      - total_expected_repayment
+      - total_repaid
+      - total_outstanding
+      - total_overdue
+      - overpaid_amount
+      type: object
+      properties:
+        principal_disbursed:
+          title: Principal Disbursed
+          anyOf:
+          - type: integer
+          - type: 'null'
+        principal_repaid:
+          title: Principal Repaid
+          anyOf:
+          - type: integer
+          - type: 'null'
+        principal_outstanding:
+          title: Principal Outstanding
+          anyOf:
+          - type: integer
+          - type: 'null'
+        interest_charged:
+          title: Interest Charged
+          anyOf:
+          - type: integer
+          - type: 'null'
+        interest_repaid:
+          title: Interest Repaid
+          anyOf:
+          - type: integer
+          - type: 'null'
+        interest_outstanding:
+          title: Interest Outstanding
+          anyOf:
+          - type: integer
+          - type: 'null'
+        fees_outstanding:
+          title: Fees Outstanding
+          anyOf:
+          - type: integer
+          - type: 'null'
+        penalties_outstanding:
+          title: Penalties Outstanding
+          anyOf:
+          - type: integer
+          - type: 'null'
+        total_expected_repayment:
+          title: Total Expected Repayment
+          anyOf:
+          - type: integer
+          - type: 'null'
+        total_repaid:
+          title: Total Repaid
+          anyOf:
+          - type: integer
+          - type: 'null'
+        total_outstanding:
+          title: Total Outstanding
+          anyOf:
+          - type: integer
+          - type: 'null'
+        total_overdue:
+          title: Total Overdue
+          anyOf:
+          - type: integer
+          - type: 'null'
+        overpaid_amount:
+          title: Overpaid Amount
+          anyOf:
+          - type: integer
+          - type: 'null'
+    LoanStatus:
+      title: LoanStatus
+      required:
+      - code
+      - value
+      type: object
+      properties:
+        code:
+          title: Code
+          type: string
+          description: Fineract's status code in our form, e.g. ACTIVE
+        value:
+          title: Value
+          type: string
+          description: Fineract's own label, e.g. Active
+    DisbursementResponse:
+      title: DisbursementResponse
+      required:
+      - loan_reference
+      - client_uid
+      - external_reference
+      - type
+      - status
+      - amount
+      - transaction_date
+      - erp_status
+      - loan_status
+      type: object
+      properties:
+        loan_reference:
+          title: Loan Reference
+          type: string
+        client_uid:
+          title: Client Uid
+          anyOf:
+          - type: string
+          - type: 'null'
+        external_reference:
+          title: External Reference
+          type: string
+        type:
+          title: Type
+          type: string
+          description: DISBURSEMENT
+        status:
+          title: Status
+          type: string
+          description: ERP_PENDING, or NEEDS_RECONCILIATION
+        amount:
+          title: Amount
+          anyOf:
+          - type: integer
+          - type: 'null'
+        transaction_date:
+          title: Transaction Date
+          anyOf:
+          - type: string
+            format: date
+          - type: 'null'
+        erp_status:
+          title: Erp Status
+          type: string
+          description: PENDING or NEEDS_RECONCILIATION
+        loan_status:
+          title: Loan Status
+          anyOf:
+          - type: string
+          - type: 'null'
+          description: Fineract's loan status after it, e.g. ACTIVE
+      description: 'Built from Fineract''s own transaction. status and erp_status are as they were when
+
+        this answer was first given; GET /api/transactions/{external_reference} shows the latest.'
+    DisbursementRequest:
+      title: DisbursementRequest
+      required:
+      - external_reference
+      type: object
+      properties:
+        external_reference:
+          title: External Reference
+          maxLength: 40
+          minLength: 1
+          pattern: ^[A-Za-z0-9._:\-]{1,40}$
+          type: string
+          description: Your key for this request. Send the same value on every retry.
+        transaction_date:
+          title: Transaction Date
+          anyOf:
+          - type: string
+            format: date
+          - type: 'null'
+          description: 'YYYY-MM-DD, not in the future (Kigali time). Default: today. The full approved
+            principal is paid out.'
+          default: null
+      additionalProperties: false
+    RepaymentResponse:
+      title: RepaymentResponse
+      required:
+      - loan_reference
+      - client_uid
+      - external_reference
+      - type
+      - status
+      - amount
+      - transaction_date
+      - erp_status
+      - loan_status
+      - principal_portion
+      - interest_portion
+      - overpayment_portion
+      - fees_portion
+      - penalties_portion
+      - outstanding_after
+      type: object
+      properties:
+        loan_reference:
+          title: Loan Reference
+          type: string
+        client_uid:
+          title: Client Uid
+          anyOf:
+          - type: string
+          - type: 'null'
+        external_reference:
+          title: External Reference
+          type: string
+        type:
+          title: Type
+          type: string
+          description: DISBURSEMENT
+        status:
+          title: Status
+          type: string
+          description: ERP_PENDING, or NEEDS_RECONCILIATION
+        amount:
+          title: Amount
+          anyOf:
+          - type: integer
+          - type: 'null'
+        transaction_date:
+          title: Transaction Date
+          anyOf:
+          - type: string
+            format: date
+          - type: 'null'
+        erp_status:
+          title: Erp Status
+          type: string
+          description: PENDING or NEEDS_RECONCILIATION
+        loan_status:
+          title: Loan Status
+          anyOf:
+          - type: string
+          - type: 'null'
+          description: Fineract's loan status after it, e.g. ACTIVE
+        principal_portion:
+          title: Principal Portion
+          anyOf:
+          - type: integer
+          - type: 'null'
+        interest_portion:
+          title: Interest Portion
+          anyOf:
+          - type: integer
+          - type: 'null'
+        overpayment_portion:
+          title: Overpayment Portion
+          anyOf:
+          - type: integer
+          - type: 'null'
+        fees_portion:
+          title: Fees Portion
+          anyOf:
+          - type: integer
+          - type: 'null'
+        penalties_portion:
+          title: Penalties Portion
+          anyOf:
+          - type: integer
+          - type: 'null'
+        outstanding_after:
+          title: Outstanding After
+          anyOf:
+          - type: integer
+          - type: 'null'
+          description: Loan principal still owed right after this repayment, from Fineract's loan summary
+            read just after it (null if that read failed)
+      description: type is REPAYMENT. The split is Fineract's own.
+    RepaymentRequest:
+      title: RepaymentRequest
+      required:
+      - external_reference
+      - amount
+      type: object
+      properties:
+        external_reference:
+          title: External Reference
+          maxLength: 40
+          minLength: 1
+          pattern: ^[A-Za-z0-9._:\-]{1,40}$
+          type: string
+          description: Your key for this request. Send the same value on every retry.
+        amount:
+          title: Amount
+          exclusiveMinimum: 0.0
+          type: integer
+          description: Whole RWF
+        transaction_date:
+          title: Transaction Date
+          anyOf:
+          - type: string
+            format: date
+          - type: 'null'
+          description: 'YYYY-MM-DD, not in the future (Kigali time). Default: today.'
+          default: null
+        payment_type:
+          title: Payment Type
+          anyOf:
+          - maxLength: 50
+            minLength: 1
+            type: string
+          - type: 'null'
+          description: A Fineract payment type name, e.g. Money Transfer. Optional.
+          default: null
+      additionalProperties: false
+    RecoverResponse:
+      title: RecoverResponse
+      required:
+      - operations
+      - outbox
+      type: object
+      properties:
+        operations:
+          $ref: '#/components/schemas/OperationCounts'
+        outbox:
+          $ref: '#/components/schemas/OutboxCounts'
+    OperationCounts:
+      title: OperationCounts
+      required:
+      - checked
+      - completed
+      - needs_reconciliation
+      - failed
+      - still_unknown
+      - skipped_busy
+      - finished_meanwhile
+      type: object
+      properties:
+        checked:
+          title: Checked
+          type: integer
+        completed:
+          title: Completed
+          type: integer
+        needs_reconciliation:
+          title: Needs Reconciliation
+          type: integer
+        failed:
+          title: Failed
+          type: integer
+        still_unknown:
+          title: Still Unknown
+          type: integer
+        skipped_busy:
+          title: Skipped Busy
+          type: integer
+        finished_meanwhile:
+          title: Finished Meanwhile
+          type: integer
+    OutboxCounts:
+      title: OutboxCounts
+      required:
+      - claimed
+      - sent
+      - retried
+      - rate_limited
+      - needs_reconciliation
+      - stale
+      type: object
+      properties:
+        claimed:
+          title: Claimed
+          type: integer
+        sent:
+          title: Sent
+          type: integer
+        retried:
+          title: Retried
+          type: integer
+        rate_limited:
+          title: Rate Limited
+          type: integer
+        needs_reconciliation:
+          title: Needs Reconciliation
+          type: integer
+        stale:
+          title: Stale
+          type: integer
   securitySchemes:
     api_key:
       type: apiKey
@@ -342,3 +1776,7 @@ components:
 tags:
 - name: health
 - name: gl-sync
+- name: transactions
+- name: clients
+- name: loans
+- name: admin
