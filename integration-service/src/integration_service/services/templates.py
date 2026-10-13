@@ -7,8 +7,8 @@ and are not copied here.
 
 Three parts:
 - parse_*: pure functions from a template's JSON to a frozen form. They raise
-  FineractServerError (an unexpected answer) when the shape is wrong, like
-  services.loans.parse_product does, so read_or_fail() treats it as a failed read.
+  FineractServerError (an unexpected answer) when the shape is wrong, so
+  read_or_fail() treats it as a failed read.
 - fetch_*: one Fineract read each (two for the loan application form), through anything
   with FineractClient.get(). Fineract errors pass through unchanged: wrap the call in
   read_or_fail() inside a write, or turn the error into a partner error with
