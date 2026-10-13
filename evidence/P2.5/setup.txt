@@ -1,0 +1,29 @@
+# clean stack: docker compose down -v, then docker buildx build --load of mock-erp-inkomoko:0.1.0 and integration-service-inkomoko:0.1.0 at HEAD 71650a3 (built 2026-10-13T21:19:10+03:00; Fineract image not rebuilt), then docker compose up -d --no-build --wait, started 2026-10-13T21:29:46+03:00
+# setup container: exit code 0
+$ docker compose logs --no-log-prefix setup
+fineract: up
+erp: up
+office Kigali Main Office: created
+currency RWF: added
+role Integration Service: created
+api user integration-api: created
+api user integration-api: login ok
+gl sync: 13 SYNCED, 0 SYNC_PENDING, 0 FAILED (13 sent to Fineract)
+gl accounts for the loan product: all 9 synced
+loan product SME Asset Finance: created
+setup done
+
+$ docker compose ps -a --format "table {{.Service}}\t{{.Status}}"
+SERVICE               STATUS
+db                    Up About a minute (healthy)
+fineract              Up About a minute (healthy)
+integration-service   Up 5 seconds (healthy)
+mock-erp              Up About a minute (healthy)
+setup                 Exited (0) 6 seconds ago
+
+$ psql integration_db: select version_num from alembic_version
+0003
+
+$ curl -s localhost:8091/health
+{"database":"ok","status":"UP"}
+

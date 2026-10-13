@@ -1,0 +1,31 @@
+# make test-python on the clean stack, 2026-10-13T21:33:17+03:00 (after C-1, D-1, I-1 and the templates walk)
+# test databases erp_test (owner erp) and integration_test (owner integration) were made by infra/postgres/01-init.sh on the fresh volume; nothing was created by hand
+# the Integration Service integration tests run against the live Fineract as the least-privilege API user (tests/conftest.py reads FINERACT_API_USERNAME and FINERACT_API_PASSWORD from .env), and against the live Mock ERP; nothing was skipped
+# Integration Service split: 580 unit tests, 245 integration tests (pytest --co)
+$ make test-python
+cd mock-erp && uv run ruff check . && uv run ruff format --check . && uv run mypy && uv run pytest -q
+All checks passed!
+47 files already formatted
+Success: no issues found in 32 source files
+........................................................................ [ 33%]
+........................................................................ [ 66%]
+........................................................................ [100%]
+216 passed in 6.51s
+cd integration-service && uv run ruff check . && uv run ruff format --check . && uv run mypy && uv run pytest -q
+All checks passed!
+90 files already formatted
+Success: no issues found in 50 source files
+........................................................................ [  8%]
+........................................................................ [ 17%]
+........................................................................ [ 26%]
+........................................................................ [ 34%]
+........................................................................ [ 43%]
+........................................................................ [ 52%]
+........................................................................ [ 61%]
+........................................................................ [ 69%]
+........................................................................ [ 78%]
+........................................................................ [ 87%]
+........................................................................ [ 96%]
+.................................                                        [100%]
+825 passed in 93.26s (0:01:33)
+# exit code: 0
