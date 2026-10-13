@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% from "macros.html" import icon %}
+{% block title %}Not found{% endblock %}
+{% block crumb %}Journal{% endblock %}
+{% block content %}
+<div class="page">
+  <div class="empty-state big">
+    <span class="empty-icon">{{ icon("search", 26, 2) }}</span>
+    <div class="lbl">404 · not_found</div>
+    <h1>Entry not found</h1>
+    <p>{{ message }} Check the reference, or it may not have reached the ERP yet.</p>
+    <div class="empty-actions">
+      <a class="btn primary" href="/ui/journal">Back to the journal</a>
+      <a class="btn" href="/ui/journal/new">{{ icon("plus", 18, 2.2) }}New entry</a>
+    </div>
+  </div>
+</div>
+{% endblock %}

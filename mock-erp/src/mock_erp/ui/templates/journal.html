@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% from "macros.html" import icon %}
+{% block title %}{% if title_ref %}{{ title_ref }} · {% endif %}Journal{% endblock %}
+{% block crumb %}Journal{% endblock %}
+{% block content %}
+<div class="page">
+  <div class="page-head">
+    <div>
+      <h1>Journal</h1>
+      <p>Every entry the ERP accepted. Nothing is edited or deleted; a reversal is a new, opposite entry.</p>
+    </div>
+    <div class="page-head-actions">
+      <span class="live-tag"><span class="dot good live"></span>Live</span>
+      <a class="btn primary" href="/ui/journal/new">{{ icon("plus", 18, 2.2) }}New entry</a>
+    </div>
+  </div>
+
+  <form class="journal-filters" id="journal-filters" role="search" action="/ui/journal" method="get"
+        hx-get="/ui/journal/_list" hx-target="#journal-results" hx-swap="outerHTML"
+        hx-trigger="input changed delay:300ms from:#j-q, change, submit">
+    <div class="search">
+      <label for="j-q" class="sr-only">Search by reference or description</label>
+      <span class="search-icon">{{ icon("search", 16, 2) }}</span>
+      <input id="j-q" type="search" name="q" value="{{ filters.q }}" placeholder="Search reference or description" autocomplete="off">
+    </div>
+    <div class="date-range">
+      <div class="field date-field">
+        <label class="lbl" for="j-from">From</label>
+        <input id="j-from" type="date" name="date_from" value="{{ filters.date_from.isoformat() if filters.date_from else '' }}">
+      </div>
+      <div class="field date-field">
+        <label class="lbl" for="j-to">To</label>
+        <input id="j-to" type="date" name="date_to" value="{{ filters.date_to.isoformat() if filters.date_to else '' }}">
+      </div>
+    </div>
+    <input type="hidden" name="selected" id="j-selected" value="{{ filters.selected }}">
+    <noscript><button type="submit" class="btn">Search</button></noscript>
+  </form>
+
+  <div class="journal-layout">
+    {% include "partials/journal_list.html" %}
+    {% if entry %}{% include "partials/entry_detail.html" %}{% endif %}
+  </div>
+</div>
+{% endblock %}

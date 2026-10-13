@@ -1,0 +1,57 @@
+{% from "macros.html" import icon %}
+{% set debits = entry.lines | selectattr("debit") | list %}
+{% set credits = entry.lines | selectattr("credit") | list %}
+{% set dr = debits | sum(attribute="debit") %}
+{% set cr = credits | sum(attribute="credit") %}
+{% if partial %}<title>{{ entry.external_reference }} · Journal · Mock ERP</title>{% endif %}
+<section class="entry-detail" id="entry-detail" aria-labelledby="entry-detail-title">
+  <div class="detail-head">
+    <div>
+      <div class="lbl">{{ entry.source | capitalize }} entry</div>
+      <h2 id="entry-detail-title" tabindex="-1">{{ entry.external_reference }}</h2>
+    </div>
+    {% if dr == cr %}
+    <span class="chip good">{{ icon("check", 12, 3) }}Balanced</span>
+    {% else %}
+    <span class="chip bad"><span class="dot bad"></span>Off by {{ (dr - cr) | abs | rwf }}</span>
+    {% endif %}
+  </div>
+  {% if entry.description %}<p class="detail-desc">{{ entry.description }}</p>{% endif %}
+
+  <div class="t-account">
+    <div class="t-side">
+      <div class="lbl t-debit">Debit</div>
+      <ul>
+        {% for l in debits %}
+        <li><span><span class="num t-code">{{ l.account_code }}</span> {{ l.account_name }}</span><span class="num t-amt">{{ l.debit | rwf }}</span></li>
+        {% endfor %}
+      </ul>
+      <div class="t-total"><span class="lbl">Total debits</span><span class="num display">{{ dr | rwf }}</span></div>
+    </div>
+    <div class="t-eq" aria-hidden="true"><span>=</span></div>
+    <div class="t-side">
+      <div class="lbl t-credit">Credit</div>
+      <ul>
+        {% for l in credits %}
+        <li><span><span class="num t-code">{{ l.account_code }}</span> {{ l.account_name }}</span><span class="num t-amt">{{ l.credit | rwf }}</span></li>
+        {% endfor %}
+      </ul>
+      <div class="t-total"><span class="lbl">Total credits</span><span class="num display">{{ cr | rwf }}</span></div>
+    </div>
+  </div>
+
+  <dl class="detail-facts">
+    <div><dt class="lbl">Entry date</dt><dd class="num">{{ entry.entry_date.strftime("%d %b %Y") }}</dd></div>
+    <div><dt class="lbl">Posted</dt><dd class="num"><time datetime="{{ entry.created_at.isoformat() }}">{{ entry.created_at.strftime("%d %b %Y · %H:%M:%S") }}</time></dd></div>
+    <div><dt class="lbl">ERP transaction</dt><dd class="code-bit wrap">{{ entry.erp_transaction_id }}</dd></div>
+    <div><dt class="lbl">Correlation id</dt><dd class="code-bit wrap">{{ entry.correlation_id or "—" }}</dd></div>
+    {% if entry.reverses %}
+    <div class="wide"><dt class="lbl">Reverses</dt><dd><a href="/ui/journal/{{ entry.reverses | urlencode }}" hx-get="/ui/journal/{{ entry.reverses | urlencode }}" hx-target="#entry-detail" hx-swap="outerHTML" hx-push-url="true">{{ entry.reverses }} {{ icon("chev", 12, 2.4) }}</a></dd></div>
+    {% endif %}
+  </dl>
+  <p class="hint">
+    {% if entry.source == "MANUAL" %}Posted by hand in the ERP. Fineract does not know about it.
+    {% elif entry.source == "REVERSAL" %}A reversal is a new, opposite entry. The original stays in the journal.
+    {% else %}Posted by the integration service. The split comes from Fineract's own transaction breakdown.{% endif %}
+  </p>
+</section>

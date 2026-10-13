@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}New entry{% endblock %}
+{% block crumb %}New entry{% endblock %}
+{% block content %}
+<div class="page">
+  <div class="page-head">
+    <div>
+      <h1>New entry</h1>
+      <p>Post straight to the ERP, without Fineract, to stage reconciliation cases. The same rules apply as for <span class="code-bit">POST /api/journal-entries</span>.</p>
+    </div>
+  </div>
+  {% include "partials/entry_form.html" %}
+</div>
+{% endblock %}

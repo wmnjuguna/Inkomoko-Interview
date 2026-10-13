@@ -1,0 +1,8 @@
+{% from "macros.html" import icon %}
+<section class="entry-detail" id="entry-detail" aria-labelledby="entry-detail-title">
+  <div class="empty-state flat">
+    <span class="empty-icon">{{ icon("search", 24, 2) }}</span>
+    <h2 id="entry-detail-title" tabindex="-1">Entry not found</h2>
+    <p>{{ message }}</p>
+  </div>
+</section>

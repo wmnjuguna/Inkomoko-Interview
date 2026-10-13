@@ -1,0 +1,106 @@
+{% from "macros.html" import icon %}
+{% set labels = {"MANUAL": "Manual", "DISBURSEMENT": "Disbursement", "REPAYMENT": "Repayment", "REVERSAL": "Reversal"} %}
+{% set type_names = {"ASSET": "Assets", "LIABILITY": "Liabilities", "EQUITY": "Equity", "INCOME": "Income", "EXPENSE": "Expenses"} %}
+{% set codes = accounts | map(attribute="code") | list %}
+{% macro line_row(i, line) -%}
+<div class="line-row" data-line>
+  <div>
+    <label class="sr-only" for="line-{{ i }}-account" data-label="account">Line {{ i }} account</label>
+    <select id="line-{{ i }}-account" name="account_code">
+      <option value="">Choose account</option>
+      {% for type, group in accounts | groupby("type") %}
+      <optgroup label="{{ type_names.get(type, type) }}">
+        {% for a in group %}<option value="{{ a.code }}"{% if line.account_code == a.code %} selected{% endif %}>{{ a.code }} · {{ a.name }}</option>{% endfor %}
+      </optgroup>
+      {% endfor %}
+      {% if line.account_code and line.account_code not in codes %}<option value="{{ line.account_code }}" selected>{{ line.account_code }} (not a detail account)</option>{% endif %}
+    </select>
+  </div>
+  <div>
+    <label class="sr-only" for="line-{{ i }}-debit" data-label="debit">Line {{ i }} debit</label>
+    <input id="line-{{ i }}-debit" name="debit" class="num amount" inputmode="numeric" autocomplete="off" placeholder="Debit" value="{{ line.debit }}">
+  </div>
+  <div>
+    <label class="sr-only" for="line-{{ i }}-credit" data-label="credit">Line {{ i }} credit</label>
+    <input id="line-{{ i }}-credit" name="credit" class="num amount" inputmode="numeric" autocomplete="off" placeholder="Credit" value="{{ line.credit }}">
+  </div>
+  <button type="button" class="line-remove" data-remove-line aria-label="Remove line {{ i }}">{{ icon("x", 16, 2) }}</button>
+</div>
+{%- endmacro %}
+{% set dr = form.debit_total %}{% set cr = form.credit_total %}{% set top = [dr, cr, 1] | max %}
+{% set state = "good" if form.can_post else ("idle" if dr == cr else "bad") %}
+<form id="entry-form" class="entry-layout" hx-post="/ui/journal/new" hx-target="this" hx-swap="outerHTML" novalidate>
+  {% if notice %}
+  <div class="notice notice-{{ notice.kind }}" id="entry-notice" tabindex="-1" role="{{ 'alert' if notice.kind == 'bad' else 'status' }}">
+    <span class="notice-icon">{% if notice.kind == "bad" %}{{ icon("x", 16, 2.4) }}{% else %}{{ icon("check", 16, 2.4) }}{% endif %}</span>
+    <div class="notice-text">
+      <strong>{{ notice.message }}</strong>
+      {% if notice.detail %}<span>{{ notice.detail }}</span>{% endif %}
+    </div>
+    {% if notice.ref %}<a class="btn small" href="/ui/journal/{{ notice.ref | urlencode }}">Open entry {{ icon("chev", 14, 2.2) }}</a>{% endif %}
+  </div>
+  {% endif %}
+
+  <div class="entry-editor">
+    <div class="form-grid">
+      <div class="field">
+        <label class="lbl" for="e-ref">Reference</label>
+        <input id="e-ref" name="external_reference" value="{{ form.external_reference }}" placeholder="MAN-0001" autocomplete="off" required maxlength="64">
+      </div>
+      <div class="field">
+        <label class="lbl" for="e-date">Entry date</label>
+        <input id="e-date" name="entry_date" type="date" value="{{ form.entry_date }}" required>
+      </div>
+      <fieldset class="field wide plain">
+        <legend class="lbl">Source</legend>
+        <div class="seg seg-4">
+          {% for s in ["MANUAL", "DISBURSEMENT", "REPAYMENT", "REVERSAL"] %}
+          <label><input type="radio" name="source" value="{{ s }}" data-source{% if form.source == s %} checked{% endif %}><span>{{ labels[s] }}</span></label>
+          {% endfor %}
+        </div>
+      </fieldset>
+      <div class="field wide" data-reverses{% if form.source != "REVERSAL" %} hidden{% endif %}>
+        <label class="lbl" for="e-reverses">Reverses</label>
+        <input id="e-reverses" name="reverses" value="{{ form.reverses }}" placeholder="Reference of the entry to undo" autocomplete="off"{% if form.source != "REVERSAL" %} disabled{% endif %}>
+        <p class="hint">A reversal must name an entry that is already in the journal.</p>
+      </div>
+      <div class="field wide">
+        <label class="lbl" for="e-desc">Description <span class="muted" style="font-weight:500">(optional)</span></label>
+        <input id="e-desc" name="description" value="{{ form.description }}" placeholder="What this entry is for" maxlength="500" autocomplete="off">
+      </div>
+    </div>
+
+    <div class="lines">
+      <div class="line-row line-head" aria-hidden="true">
+        <span class="lbl">Account</span><span class="lbl r">Debit</span><span class="lbl r">Credit</span><span></span>
+      </div>
+      <div data-lines>
+        {% for line in form.lines %}{{ line_row(loop.index, line) }}{% endfor %}
+      </div>
+      <template id="line-template">{{ line_row("__N__", {"account_code": "", "debit": "", "credit": ""}) }}</template>
+      <button type="button" class="add-line" data-add-line>{{ icon("plus", 16, 2.4) }}Add line</button>
+    </div>
+  </div>
+
+  <aside class="balance-panel" aria-label="Balance check" data-balance>
+    <div class="balance-head">
+      <span class="balance-title">Balance check</span>
+      <span class="balance-badge {{ state }}" data-badge aria-live="polite">{% if state == "good" %}Balanced{% elif state == "idle" %}Empty{% else %}Off balance{% endif %}</span>
+    </div>
+    <div class="meter">
+      <div class="meter-row"><span>Debits</span><span class="num" data-total="debit">{{ dr | rwf }}</span></div>
+      <div class="meter-track"><span class="meter-bar debit" data-bar="debit" style="width: {{ (dr * 100 / top) | round | int }}%"></span></div>
+    </div>
+    <div class="meter">
+      <div class="meter-row"><span>Credits</span><span class="num" data-total="credit">{{ cr | rwf }}</span></div>
+      <div class="meter-track"><span class="meter-bar credit" data-bar="credit" style="width: {{ (cr * 100 / top) | round | int }}%"></span></div>
+    </div>
+    <div>
+      <div class="balance-label">Difference</div>
+      <div class="balance-diff num {{ state }}" data-diff>{% if dr == cr %}0{% else %}Off by {{ (dr - cr) | abs | rwf }}{% endif %}</div>
+    </div>
+    <button type="submit" class="post-btn" data-post{% if not form.can_post %} disabled{% endif %}>Post entry</button>
+    <p class="balance-note" data-post-hint>{% if form.can_post %}Ready. The ERP checks it again when you post.{% else %}Needs at least two lines, with debits equal to credits.{% endif %}</p>
+    <p class="balance-tip">Tip: while the ERP is down, post the waiting reference here with a different amount, then clear the fault. The retry gets a 409.</p>
+  </aside>
+</form>

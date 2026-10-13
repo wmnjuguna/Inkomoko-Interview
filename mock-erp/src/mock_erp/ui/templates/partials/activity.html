@@ -17,10 +17,10 @@
   {% for e in recent %}
   <li class="activity-item">
     <span class="dot src-{{ e.source }}"></span>
-    <span style="min-width:0">
+    <a class="act-link" href="/ui/journal/{{ e.external_reference | urlencode }}">
       <span class="act-top"><span class="act-tag">{{ e.source | lower }}</span><time class="act-time num" datetime="{{ e.created_at.isoformat() }}" title="{{ e.created_at.strftime('%Y-%m-%d %H:%M:%S %Z') }}">{{ e.created_at.strftime('%H:%M:%S') }}</time></span>
       <span class="act-text"><b>{{ e.external_reference }}</b> · <span class="num">{{ e.amount | rwf }}</span> RWF{% if e.reverses %} · reverses {{ e.reverses }}{% endif %}</span>
-    </span>
+    </a>
   </li>
   {% endfor %}
 </ol>

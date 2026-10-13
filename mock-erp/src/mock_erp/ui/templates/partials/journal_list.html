@@ -1,0 +1,62 @@
+{% from "macros.html" import icon %}
+{% set labels = {"": "All", "DISBURSEMENT": "Disbursement", "REPAYMENT": "Repayment", "REVERSAL": "Reversal", "MANUAL": "Manual"} %}
+<div class="journal-results" id="journal-results"
+     hx-get="/ui/journal/_list" hx-include="#journal-filters" hx-trigger="every 5s, change"
+     hx-target="this" hx-swap="outerHTML">
+  <fieldset class="source-chips">
+    <legend class="sr-only">Filter by source</legend>
+    {% for key in [""] + sources|list %}
+    {% set count_key = key or "ALL" %}
+    <label class="filter-chip">
+      <input type="radio" name="source" value="{{ key }}" form="journal-filters" id="src-{{ count_key }}"{% if filters.source == key %} checked{% endif %}>
+      <span>{% if key %}<span class="dot src-{{ key }}"></span>{% endif %}{{ labels[key] }}<span class="chip-count num" id="count-{{ count_key }}">{{ counts[count_key] }}</span></span>
+    </label>
+    {% endfor %}
+  </fieldset>
+
+  {% if entries %}
+  <ol class="entry-cards" aria-label="Journal entries">
+    {% for e in entries %}
+    {% set url = "/ui/journal/" ~ (e.external_reference | urlencode) %}
+    {% set on = e.external_reference == filters.selected %}
+    <li>
+      <a class="entry-card" href="{{ url }}{% if filters.active %}?{{ filters.query() | urlencode }}{% endif %}" data-ref="{{ e.external_reference }}"
+         hx-get="{{ url }}" hx-target="#entry-detail" hx-swap="outerHTML" hx-push-url="{{ url }}"{% if on %} aria-current="true"{% endif %}>
+        <span class="entry-avatar src-tone-{{ e.source }}" aria-hidden="true">{{ e.source[0] }}</span>
+        <span class="entry-main">
+          <span class="entry-top">
+            <span class="entry-ref">{{ e.external_reference }}</span>
+            <span class="entry-amount num">{{ e.total | rwf }}<small>RWF</small></span>
+          </span>
+          <span class="entry-meta">
+            <span class="chip src-chip-{{ e.source }}"><span class="dot src-{{ e.source }}"></span>{{ e.source | capitalize }}</span>
+            <span class="num">{{ e.entry_date.strftime("%d %b %Y") }}</span>
+            <span aria-hidden="true">·</span><span>{{ e.lines | length }} lines</span>
+            {% if e.reverses %}<span aria-hidden="true">·</span><span>reverses {{ e.reverses }}</span>{% endif %}
+          </span>
+          {% if e.description %}<span class="entry-desc">{{ e.description }}</span>{% endif %}
+        </span>
+      </a>
+    </li>
+    {% endfor %}
+  </ol>
+  {% if capped %}<p class="hint">Showing the newest {{ entries | length }} entries. Narrow the search to see older ones.</p>{% endif %}
+  {% elif filters.active %}
+  <div class="empty-state">
+    <span class="empty-icon">{{ icon("search", 24, 2) }}</span>
+    <h2>No entries match</h2>
+    <p>Nothing fits this search, source and date range. Try fewer filters.</p>
+    <a class="btn" href="/ui/journal">Clear filters</a>
+  </div>
+  {% else %}
+  <div class="empty-state">
+    <span class="empty-icon">{{ icon("journal", 24, 2) }}</span>
+    <h2>No entries yet</h2>
+    <p>Entries show up here the moment the ERP accepts them, from the API or from this page. Balances on the chart move with them.</p>
+    <div class="empty-actions">
+      <a class="btn primary" href="/ui/journal/new">{{ icon("plus", 18, 2.2) }}Post a manual entry</a>
+      <a class="btn" href="/openapi">{{ icon("docs", 16, 2) }}API docs</a>
+    </div>
+  </div>
+  {% endif %}
+</div>
