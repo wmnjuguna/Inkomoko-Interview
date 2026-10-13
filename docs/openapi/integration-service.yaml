@@ -381,8 +381,10 @@ paths:
       - loans
       summary: Apply for a loan
       description: Submits a loan application in Fineract for an existing client, on the SME Asset Finance
-        product (its term, rate and schedule). Returns the new loan_reference. 201 the first time; the
-        same external_reference and data again gives 200 with the same body (the same loan_reference).
+        product. The principal range, term, rate and schedule come from Fineract's loan template for the
+        product (see GET /api/loans/template); a principal outside the range is 422 VALIDATION_ERROR with
+        details.problems. Returns the new loan_reference. 201 the first time; the same external_reference
+        and data again gives 200 with the same body (the same loan_reference).
       operationId: loans_post_loan_api_loans_post
       requestBody:
         content:
@@ -458,8 +460,10 @@ paths:
       tags:
       - loans
       summary: Approve a loan
-      description: 'Approves the loan in Fineract for its full principal. A loan is approved once: another
-        external_reference for the same loan gives 409 LOAN_ALREADY_APPROVED.'
+      description: 'Approves the loan in Fineract for the amount its approval template proposes (the applied
+        principal). approved_on defaults to Fineract''s proposed date (today); it cannot be in the future
+        or after the loan''s expected disbursement date (Fineract''s rule; 422 VALIDATION_ERROR with details.problems).
+        A loan is approved once: another external_reference for the same loan gives 409 LOAN_ALREADY_APPROVED.'
       operationId: loans_post_approval_api_loans__loan_reference__approve_post
       parameters:
       - name: loan_reference
@@ -730,6 +734,192 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         '409':
           description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: Bad Gateway
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Service Unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '504':
+          description: Gateway Timeout
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      security:
+      - api_key: []
+  /api/clients/template:
+    get:
+      tags:
+      - forms
+      summary: Client form
+      description: The fields of POST /api/clients with their rules, and the office and activation date
+        Fineract uses for a new client (from Fineract's client template).
+      operationId: templates_get_client_form_api_clients_template_get
+      responses:
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Unprocessable Content
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClientFormResponse'
+        '502':
+          description: Bad Gateway
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Service Unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '504':
+          description: Gateway Timeout
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      security:
+      - api_key: []
+  /api/loans/template:
+    get:
+      tags:
+      - forms
+      summary: Loan application form
+      description: The fields of POST /api/loans with the SME Asset Finance product's defaults, ranges
+        and terms, from Fineract's loan template. Add ?client_uid= for that client's defaults. For the
+        later steps of one loan, see GET /api/loans/{loan_reference}/template.
+      operationId: templates_get_loan_application_form_api_loans_template_get
+      parameters:
+      - name: client_uid
+        in: query
+        description: 'Optional: a client created through POST /api/clients. The form then carries that
+          client''s defaults.'
+        required: false
+        schema:
+          title: Client Uid
+          anyOf:
+          - pattern: ^[A-Z]{2,10}-[0-9]{6}$
+            type: string
+          - type: 'null'
+          description: 'Optional: a client created through POST /api/clients. The form then carries that
+            client''s defaults.'
+          default: null
+      responses:
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Unprocessable Content
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoanApplicationFormResponse'
+        '404':
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: Bad Gateway
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Service Unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '504':
+          description: Gateway Timeout
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      security:
+      - api_key: []
+  /api/loans/{loan_reference}/template:
+    get:
+      tags:
+      - forms
+      summary: Form for the next step of a loan
+      description: 'The fields of the approve, disburse or repayments call for this loan, with Fineract''s
+        defaults for it now: the approved amount, the expected disbursement amount and date, the next
+        installment, or the payoff amount (step=payoff, sent as a repayment). available says whether the
+        loan''s status allows the step now.'
+      operationId: templates_get_step_form_api_loans__loan_reference__template_get
+      parameters:
+      - name: loan_reference
+        in: path
+        required: true
+        schema:
+          title: Loan Reference
+          pattern: ^LN-[0-9]{4}-[0-9]{6}$
+          type: string
+      - name: step
+        in: query
+        description: approval, disbursement, repayment or payoff
+        required: true
+        schema:
+          $ref: '#/components/schemas/Step'
+          description: approval, disbursement, repayment or payoff
+      responses:
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Unprocessable Content
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StepFormResponse'
+        '404':
+          description: Not Found
           content:
             application/json:
               schema:
@@ -1286,7 +1476,8 @@ components:
           - type: string
             format: date
           - type: 'null'
-          description: 'YYYY-MM-DD, not in the future (Kigali time). Default: today.'
+          description: 'YYYY-MM-DD, not in the future (Kigali time) and not after the loan''s expected
+            disbursement date. Default: today.'
           default: null
       additionalProperties: false
     LoanResponse:
@@ -1562,7 +1753,7 @@ components:
             format: date
           - type: 'null'
           description: 'YYYY-MM-DD, not in the future (Kigali time). Default: today. The full approved
-            principal is paid out.'
+            principal (from Fineract''s disbursement template) is paid out.'
           default: null
       additionalProperties: false
     RepaymentResponse:
@@ -1692,9 +1883,289 @@ components:
             minLength: 1
             type: string
           - type: 'null'
-          description: A Fineract payment type name, e.g. Money Transfer. Optional.
+          description: Optional. One of the partner payment types Fineract lists, by name (any case),
+            e.g. Money Transfer. Fineract's system-defined types are refused. GET /api/loans/{loan_reference}/template?step=repayment
+            lists them.
           default: null
       additionalProperties: false
+    ClientFormResponse:
+      title: ClientFormResponse
+      required:
+      - form
+      - submit_to
+      - office
+      - activation_date
+      - fields
+      type: object
+      properties:
+        form:
+          title: Form
+          type: string
+          description: client
+        submit_to:
+          title: Submit To
+          type: string
+        office:
+          title: Office
+          anyOf:
+          - type: string
+          - type: 'null'
+          description: The Fineract office new clients go to
+        activation_date:
+          title: Activation Date
+          anyOf:
+          - type: string
+          - type: 'null'
+          description: 'Fineract''s default: today, YYYY-MM-DD'
+        fields:
+          title: Fields
+          type: array
+          items:
+            $ref: '#/components/schemas/FormField'
+    FormField:
+      title: FormField
+      required:
+      - name
+      - type
+      - required
+      - read_only
+      - default
+      - minimum
+      - maximum
+      - multiple_of
+      - pattern
+      - max_length
+      - options
+      - description
+      type: object
+      properties:
+        name:
+          title: Name
+          type: string
+          description: The JSON name in the request body
+        type:
+          title: Type
+          enum:
+          - string
+          - integer
+          - number
+          - date
+          type: string
+        required:
+          title: Required
+          type: boolean
+        read_only:
+          title: Read Only
+          type: boolean
+          description: 'True: shown for information, set by Fineract or the product; do not send it'
+        default:
+          title: Default
+          anyOf:
+          - type: integer
+          - type: number
+          - type: string
+          - type: 'null'
+          description: What Fineract proposes, or what is used if left out
+        minimum:
+          title: Minimum
+          anyOf:
+          - type: integer
+          - type: number
+          - type: string
+          - type: 'null'
+        maximum:
+          title: Maximum
+          anyOf:
+          - type: integer
+          - type: number
+          - type: string
+          - type: 'null'
+        multiple_of:
+          title: Multiple Of
+          anyOf:
+          - type: integer
+          - type: 'null'
+        pattern:
+          title: Pattern
+          anyOf:
+          - type: string
+          - type: 'null'
+        max_length:
+          title: Max Length
+          anyOf:
+          - type: integer
+          - type: 'null'
+        options:
+          title: Options
+          anyOf:
+          - type: array
+            items:
+              $ref: '#/components/schemas/FormOption'
+          - type: 'null'
+          description: The allowed values, when limited
+        description:
+          title: Description
+          type: string
+    FormOption:
+      title: FormOption
+      required:
+      - value
+      - label
+      type: object
+      properties:
+        value:
+          title: Value
+          type: string
+          description: What to send
+        label:
+          title: Label
+          type: string
+          description: Fineract's label for it
+    LoanApplicationFormResponse:
+      title: LoanApplicationFormResponse
+      required:
+      - form
+      - submit_to
+      - client_uid
+      - product
+      - fields
+      type: object
+      properties:
+        form:
+          title: Form
+          type: string
+          description: loan_application
+        submit_to:
+          title: Submit To
+          type: string
+        client_uid:
+          title: Client Uid
+          anyOf:
+          - type: string
+          - type: 'null'
+        product:
+          $ref: '#/components/schemas/ProductInfo'
+        fields:
+          title: Fields
+          type: array
+          items:
+            $ref: '#/components/schemas/FormField'
+    CurrencyInfo:
+      title: CurrencyInfo
+      required:
+      - code
+      - name
+      - decimal_places
+      - in_multiples_of
+      type: object
+      properties:
+        code:
+          title: Code
+          type: string
+        name:
+          title: Name
+          type: string
+        decimal_places:
+          title: Decimal Places
+          type: integer
+        in_multiples_of:
+          title: In Multiples Of
+          type: integer
+    ProductInfo:
+      title: ProductInfo
+      required:
+      - name
+      - short_name
+      - description
+      - currency
+      type: object
+      properties:
+        name:
+          title: Name
+          type: string
+        short_name:
+          title: Short Name
+          anyOf:
+          - type: string
+          - type: 'null'
+        description:
+          title: Description
+          anyOf:
+          - type: string
+          - type: 'null'
+        currency:
+          $ref: '#/components/schemas/CurrencyInfo'
+    StepFormResponse:
+      title: StepFormResponse
+      required:
+      - form
+      - loan_reference
+      - client_uid
+      - loan_status
+      - available
+      - message
+      - submit_to
+      - currency
+      - fields
+      - values
+      type: object
+      properties:
+        form:
+          title: Form
+          type: string
+          description: 'The step: approval, disbursement, repayment or payoff'
+        loan_reference:
+          title: Loan Reference
+          type: string
+        client_uid:
+          title: Client Uid
+          anyOf:
+          - type: string
+          - type: 'null'
+        loan_status:
+          title: Loan Status
+          type: string
+          description: Fineract's loan status now, e.g. APPROVED
+        available:
+          title: Available
+          type: boolean
+          description: True when the loan's status allows this step now
+        message:
+          title: Message
+          anyOf:
+          - type: string
+          - type: 'null'
+          description: Why the step is not available, else null
+        submit_to:
+          title: Submit To
+          type: string
+        currency:
+          $ref: '#/components/schemas/CurrencyInfo'
+        fields:
+          title: Fields
+          type: array
+          items:
+            $ref: '#/components/schemas/FormField'
+        values:
+          title: Values
+          type: object
+          additionalProperties:
+            anyOf:
+            - type: integer
+            - type: number
+            - type: string
+            - type: 'null'
+          description: What Fineract reports for this step, e.g. the next installment or the payoff amount
+            and its split
+    Step:
+      title: Step
+      enum:
+      - approval
+      - disbursement
+      - repayment
+      - payoff
+      type: string
+      description: The steps of a loan after its application, as GET /api/loans/{ref}/template names them.
     RecoverResponse:
       title: RecoverResponse
       required:
@@ -1779,4 +2250,5 @@ tags:
 - name: transactions
 - name: clients
 - name: loans
+- name: forms
 - name: admin
