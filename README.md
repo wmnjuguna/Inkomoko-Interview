@@ -78,7 +78,7 @@ It listens on http://localhost:8090. Only this computer can reach it.
 
 | What | Where |
 |---|---|
-| Small web UI: chart of accounts and fault switches | http://localhost:8090/ (opens `/ui/accounts`; the faults page is `/ui/faults`) |
+| Small web UI: chart of accounts, journal, new entry and fault switches | http://localhost:8090/ (opens `/ui/accounts`; the others are `/ui/journal`, `/ui/journal/new` and `/ui/faults`) |
 | Swagger UI | http://localhost:8090/openapi/swagger |
 | OpenAPI spec | http://localhost:8090/openapi/openapi.json |
 | Health check | http://localhost:8090/health |
