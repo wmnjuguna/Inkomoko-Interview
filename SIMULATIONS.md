@@ -190,6 +190,13 @@ After the loan steps moved to Fineract's templates (the principal range, the app
 - The same ERP entries were made, with new references, and the ERP totals equalled Fineract's GL after every stage.
 - `evidence/P2.5/templates.txt` walks one more loan through the form endpoints and the new `422` cases. `evidence/P2.5/id-leak.txt` shows no Fineract id in any answer, form included.
 
+After setup moved to Fineract's templates too (the config now names the parent office and the product's choices by name or code, see [DECISIONS.md](DECISIONS.md)), D-1 and I-1 were run again on a new clean stack: `docker compose down -v`, new images for the Mock ERP and the Integration Service, then `docker compose up -d --no-build --wait`. The first setup run created the office, added RWF, created the role and the API user, synced 13 GL accounts and created the product (`evidence/P2.6/setup-first-run.txt`). A second run said `exists` for every step, and Fineract's command log stayed at 18 rows (`evidence/P2.6/setup-second-run.txt`). The office read back from Fineract sits under Head Office, and every enum of the product equals the body from before the change (`evidence/P2.6/office-and-product.txt`).
+
+| Run | Command | Result | Full output |
+|---|---|---|---|
+| D-1 | `make demo-lifecycle` | `8 of 8 checks matched`, exit 0. Run `B63B2F`, loan `LN-2026-000001`. The payoff of 3,250,799 closed the loan. | `evidence/P2.6/D-1.txt` |
+| I-1 | `make simulate-duplicates` | Requests 4, Fineract disbursements 1, ERP entries 1, operations 1. `PASS`, exit 0. | `evidence/P2.6/I-1.txt` |
+
 ### Mock ERP fault checks (direct, before the Integration Service existed)
 
 These are **not** the J-1 and J-4 runs in the table. Those go through the Integration Service and are not run yet. Here I called the Mock ERP API directly, to check that its fault switch behaves the way J-1 and J-4 will need. Run on the Mock ERP container on 2026-10-13.
