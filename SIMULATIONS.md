@@ -176,6 +176,20 @@ Result: `PASS`, exit 0.
 
 **Why:** the first call saves `DSB:<reference>` and pays out once. Calls 2 to 4 find the finished request with the same hash and get its saved answer, so Fineract is not called again. The outbox has one row, so the ERP gets one entry.
 
+### C-1, D-1 and I-1 again, with the template-driven loan flow (P2.5)
+
+After the loan steps moved to Fineract's templates (the principal range, the approved and payout amounts, the payment types and the payoff now come from Fineract), the three runs were repeated on a new clean stack: `docker compose down -v`, new images for the Mock ERP and the Integration Service, then `docker compose up -d --no-build --wait`. Setup exited 0 and health was `UP` (`evidence/P2.5/setup.txt`). All three scripts ran unchanged, apart from the "Why" text in D-1, which now names the templates.
+
+| Run | Command | Result | Full output |
+|---|---|---|---|
+| C-1 | `make demo-identity` | `5 of 5 steps matched`, exit 0. Run `54E587`, `client_uid` `DEMO-797009`. | `evidence/P2.5/C-1.txt` |
+| D-1 | `make demo-lifecycle` | `8 of 8 checks matched`, exit 0. Run `D093AC`, loan `LN-2026-000001`. The appendix check passed. | `evidence/P2.5/D-1.txt` |
+| I-1 | `make simulate-duplicates` | Requests 4, Fineract disbursements 1, ERP entries 1, operations 1. `PASS`, exit 0. The appendix check passed. | `evidence/P2.5/I-1.txt` |
+
+- D-1 gave the same figures as the first run: the approval was 5,000,000 (the approval template's amount), the payout was 5,000,000 dated today (the disbursement template's amount), Fineract's status and balances after each stage were the same as in the table above, and the payoff of 3,250,799 closed the loan.
+- The same ERP entries were made, with new references, and the ERP totals equalled Fineract's GL after every stage.
+- `evidence/P2.5/templates.txt` walks one more loan through the form endpoints and the new `422` cases. `evidence/P2.5/id-leak.txt` shows no Fineract id in any answer, form included.
+
 ### Mock ERP fault checks (direct, before the Integration Service existed)
 
 These are **not** the J-1 and J-4 runs in the table. Those go through the Integration Service and are not run yet. Here I called the Mock ERP API directly, to check that its fault switch behaves the way J-1 and J-4 will need. Run on the Mock ERP container on 2026-10-13.
