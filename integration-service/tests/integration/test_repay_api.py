@@ -215,7 +215,44 @@ def test_payment_type_by_name(client: FlaskClient, auth: dict[str, str]) -> None
     unknown = repay(client, auth, loan, ref, 10000, payment_type="Gold Bars")
     assert unknown.status_code == 422
     assert "payment_type" in unknown.get_json()["error"]["message"]
+    assert unknown.get_json()["error"]["details"]["problems"][0]["field"] == "payment_type"
     assert history(client, auth, ref)["status"] == "FAILED"
+
+
+def test_a_system_defined_payment_type_is_refused_and_nothing_is_sent(
+    client: FlaskClient, auth: dict[str, str], fineract: FineractClient
+) -> None:
+    """Fineract lists its own adjustment types (system defined) next to the partner ones.
+    Only partner payment types are taken."""
+    loan = active_loan(client, auth)
+    ref = f"IT-RPY-{tag()}"
+    response = repay(client, auth, loan, ref, 10000, payment_type="Repayment Adjustment Refund")
+    assert response.status_code == 422, response.get_json()
+    error = response.get_json()["error"]
+    assert error["code"] == "VALIDATION_ERROR"
+    assert error["details"]["problems"] == [
+        {"field": "payment_type", "problem": "must be one of: Money Transfer"}
+    ]
+    assert history(client, auth, ref)["status"] == "FAILED"
+    assert fineract_transactions(fineract, loan, "repayment") == []
+
+
+def test_a_failed_template_read_is_503_failed_and_nothing_is_sent(
+    client: FlaskClient, auth: dict[str, str], db: Engine, fineract: FineractClient
+) -> None:
+    """The repayment template is read for every repayment (it holds the currency step and
+    the payment types). If that read fails, nothing was sent."""
+    loan = active_loan(client, auth)
+    ref = f"IT-RPY-{tag()}"
+    fake = Flaky(fineract, fail_templates=1)
+    status, body = run_repay(db, fake, loan, ref, 50000)
+    assert status == 503, body
+    assert "Nothing was sent" in body["message"]
+    op = get_operation(db, "RPY", ref)
+    assert op is not None and op.status == "FAILED"
+    assert fake.template_reads == 1
+    assert fake.post_keys == []
+    assert fineract_transactions(fineract, loan, "repayment") == []
 
 
 def test_bad_amounts_are_422_and_save_nothing(client: FlaskClient, auth: dict[str, str]) -> None:

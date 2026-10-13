@@ -199,11 +199,16 @@ def history(client: FlaskClient, auth: dict[str, str], ref: str) -> dict[str, An
     return dict(ops[0])
 
 
+def is_template(path: str) -> bool:
+    return path.endswith("/template")
+
+
 class Flaky:
     """The real Fineract, with chosen failures: the first `fail_posts` writes raise
     `post_error` (after_send=True: the write reaches Fineract, then its answer is lost), the
     first `fail_gets` reads raise FineractTimeout, and the first `fail_gets_after_post` reads
-    after a clean write raise FineractTimeout too."""
+    after a clean write raise FineractTimeout too. Template reads are not counted in those:
+    the first `fail_templates` template reads raise `template_error` instead."""
 
     def __init__(
         self,
@@ -213,8 +218,13 @@ class Flaky:
         after_send: bool = False,
         fail_gets: int = 0,
         fail_gets_after_post: int = 0,
+        fail_templates: int = 0,
+        template_error: Exception | None = None,
     ) -> None:
         self.real = real
+        self.fail_templates = fail_templates
+        self.template_error = template_error or FineractTimeout("no answer (test)")
+        self.template_reads = 0
         self.post_error = post_error
         self.fail_posts = fail_posts
         self.after_send = after_send
@@ -224,6 +234,12 @@ class Flaky:
         self.post_keys: list[str | None] = []
 
     def get(self, path: str, params: Any = None, correlation_id: str | None = None) -> Any:
+        if is_template(path):
+            self.template_reads += 1
+            if self.fail_templates:
+                self.fail_templates -= 1
+                raise self.template_error
+            return self.real.get(path, params=params, correlation_id=correlation_id)
         if self.fail_gets:
             self.fail_gets -= 1
             raise FineractTimeout("no answer (test)")
@@ -426,6 +442,71 @@ def test_a_loan_not_approved_yet_is_422_and_failed(
     assert response.status_code == 422, response.get_json()
     assert "not approved" in response.get_json()["error"]["message"]
     assert history(client, auth, ref)["status"] == "FAILED"
+
+
+def test_the_approved_amount_from_fineracts_template_is_paid_out(
+    client: FlaskClient,
+    auth: dict[str, str],
+    db: Engine,
+    admin: FineractClient,
+    fineract: FineractClient,
+) -> None:
+    """Applied for 1,200,000; Fineract approved 1,000,000. The disbursement template holds
+    the approved amount, and that is what is paid out (and journaled)."""
+    loan = new_loan(client, auth, approve=False)
+    admin.post(
+        f"/loans/external-id/{loan}",
+        {
+            "approvedOnDate": kigali_today().isoformat(),
+            "approvedLoanAmount": 1000000,
+            "dateFormat": "yyyy-MM-dd",
+            "locale": "en",
+        },
+        params={"command": "approve"},
+    )
+    ref = f"IT-DSB-{tag()}"
+    response = disburse(client, auth, loan, ref)
+    assert response.status_code == 200, response.get_json()
+    assert response.get_json()["amount"] == 1000000
+    [txn] = fineract_transactions(fineract, loan, "disbursement")
+    assert int(txn["amount"]) == 1000000
+    assert outbox_entry(db, f"DSB:{ref}")["entry"]["lines"] == [
+        {"account_code": "1200", "debit": 1000000},
+        {"account_code": "1100", "credit": 1000000},
+    ]
+
+
+def test_a_failed_template_read_is_503_failed_and_nothing_is_sent(
+    client: FlaskClient, auth: dict[str, str], db: Engine, fineract: FineractClient
+) -> None:
+    loan = new_loan(client, auth)
+    ref = f"IT-DSB-{tag()}"
+    fake = Flaky(fineract, fail_templates=1)
+    status, body = run_disburse(db, fake, loan, ref)
+    assert status == 503, body
+    assert body["code"] == ErrorCode.FINERACT_UNAVAILABLE
+    assert "Nothing was sent" in body["message"]
+    op = get_operation(db, "DSB", ref)
+    assert op is not None and op.status == "FAILED"
+    assert fake.template_reads == 1
+    assert fake.post_keys == []
+    assert fineract_transactions(fineract, loan, "disbursement") == []
+
+    status, body = run_disburse(db, fake, loan, ref)
+    assert status == 200, body
+    assert fake.post_keys == [f"DSB:{ref}:2"]
+
+
+def test_a_future_date_has_its_problem_in_the_details(
+    client: FlaskClient, auth: dict[str, str]
+) -> None:
+    response = disburse(
+        client, auth, "LN-2026-999999", f"IT-DSB-{tag()}", transaction_date="2999-01-01"
+    )
+    assert response.status_code == 422
+    assert response.get_json()["error"]["details"]["problems"] == [
+        {"field": "transaction_date", "problem": "cannot be in the future (Kigali date)"}
+    ]
 
 
 def test_unknown_loan_is_404(client: FlaskClient, auth: dict[str, str]) -> None:

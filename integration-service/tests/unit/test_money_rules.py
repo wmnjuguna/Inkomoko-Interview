@@ -4,8 +4,10 @@ and the write itself against a fake Fineract (lookup before any retry)."""
 
 from __future__ import annotations
 
+import json
 import re
 from datetime import date
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -34,13 +36,20 @@ from integration_service.services.money import (
     check_transaction_date,
     disbursement_answer,
     disbursement_rejection,
+    disbursement_terms,
     money_plan,
-    payment_type_id,
     repayment_answer,
+    repayment_payment_type,
     repayment_rejection,
     transaction_lookup,
     transaction_path,
     write_call,
+)
+from integration_service.services.templates import (
+    DisbursementForm,
+    RepaymentForm,
+    parse_disbursement_form,
+    parse_repayment_form,
 )
 
 ID_KEY = re.compile(r"(^id$|_id$|Id$)")
@@ -48,6 +57,24 @@ LOAN = "LN-2026-000123"
 ACCOUNTS = GlRoleAccounts(
     bank="1100", loan_portfolio="1200", interest_income="4100", overpayment_liability="2100"
 )
+
+
+FIXTURES = Path(__file__).parent.parent / "fixtures" / "fineract_templates"
+TODAY = date(2026, 10, 13)
+
+
+def template(name: str, **changes: Any) -> Any:
+    data = json.loads((FIXTURES / name).read_text(encoding="utf-8"))
+    data.update(changes)
+    return data
+
+
+def disbursement_form(**changes: Any) -> DisbursementForm:
+    return parse_disbursement_form(template("loan_disburse_template.json", **changes))
+
+
+def repayment_form() -> RepaymentForm:
+    return parse_repayment_form(template("loan_repayment_template.json"))
 
 
 def accounts() -> GlRoleAccounts:
@@ -172,6 +199,85 @@ def test_transaction_date_cannot_be_in_the_future() -> None:
         check_transaction_date(date(2026, 10, 14), today)
     assert caught.value.status == 422
     assert caught.value.code == ErrorCode.VALIDATION_ERROR
+    assert caught.value.details == {
+        "problems": [
+            {"field": "transaction_date", "problem": "cannot be in the future (Kigali date)"}
+        ]
+    }
+
+
+# --- what Fineract's templates decide ----------------------------------------------------------
+
+
+def test_disbursed_amount_is_the_templates_approved_amount() -> None:
+    """Fineract's disbursement template holds the approved principal. That is what is paid
+    out, whatever principal the loan was applied for."""
+    form = disbursement_form(amount=750000)
+    assert disbursement_terms(form, None, TODAY)[1] == 750000
+
+
+@pytest.mark.parametrize(
+    ("expected", "today", "chosen"),
+    [
+        ([2026, 10, 20], date(2026, 10, 13), date(2026, 10, 13)),  # expected later: today
+        ([2026, 10, 20], date(2026, 10, 25), date(2026, 10, 20)),  # expected passed: expected
+        ([2026, 10, 13], date(2026, 10, 13), date(2026, 10, 13)),
+        (None, date(2026, 10, 13), date(2026, 10, 13)),  # no expected date: today
+    ],
+)
+def test_default_disbursement_date_is_the_expected_date_never_later_than_today(
+    expected: list[int] | None, today: date, chosen: date
+) -> None:
+    form = disbursement_form(date=expected)
+    assert disbursement_terms(form, None, today)[0] == chosen
+
+
+def test_a_disbursement_date_sent_by_the_partner_wins() -> None:
+    form = disbursement_form(date=[2026, 10, 1])
+    assert disbursement_terms(form, date(2026, 10, 5), TODAY)[0] == date(2026, 10, 5)
+
+
+def test_a_future_disbursement_date_is_refused_by_the_template_check() -> None:
+    with pytest.raises(ApiError) as caught:
+        disbursement_terms(disbursement_form(), date(2026, 10, 14), TODAY)
+    assert caught.value.status == 422
+    assert caught.value.details == {
+        "problems": [
+            {"field": "transaction_date", "problem": "cannot be in the future (Kigali date)"}
+        ]
+    }
+
+
+def test_partner_payment_type_is_found_by_name_any_case() -> None:
+    form = repayment_form()
+    assert repayment_payment_type(form, 1000, None, "money transfer", TODAY) == 1
+    assert repayment_payment_type(form, 1000, None, "Money Transfer", TODAY) == 1
+    assert repayment_payment_type(form, 1000, None, None, TODAY) is None
+
+
+@pytest.mark.parametrize(
+    "name", ["Repayment Adjustment Refund", "Repayment Adjustment Chargeback", "Cheque"]
+)
+def test_system_defined_or_unknown_payment_types_are_refused(name: str) -> None:
+    """System payment types are for Fineract's own adjustments; only partner ones are taken."""
+    with pytest.raises(ApiError) as caught:
+        repayment_payment_type(repayment_form(), 1000, None, name, TODAY)
+    error = caught.value
+    assert (error.code, error.status) == (ErrorCode.VALIDATION_ERROR, 422)
+    assert error.details == {
+        "problems": [{"field": "payment_type", "problem": "must be one of: Money Transfer"}]
+    }
+    assert "Refund" not in error.message and "Chargeback" not in error.message
+
+
+def test_repayment_problems_are_all_listed() -> None:
+    with pytest.raises(ApiError) as caught:
+        repayment_payment_type(repayment_form(), 1000, date(2026, 10, 14), "Gold Bars", TODAY)
+    assert caught.value.details is not None
+    assert [p["field"] for p in caught.value.details["problems"]] == [
+        "transaction_date",
+        "payment_type",
+    ]
 
 
 # --- Fineract bodies ---------------------------------------------------------------------------
@@ -205,16 +311,6 @@ def test_transaction_path_quotes_our_references() -> None:
         transaction_path(LOAN, "RPY:PAY.1_x")
         == "/loans/external-id/LN-2026-000123/transactions/external-id/RPY%3APAY.1_x"
     )
-
-
-def test_payment_type_is_found_by_name() -> None:
-    template = {
-        "paymentTypeOptions": [{"id": 1, "name": "Money Transfer"}, {"id": 4, "name": "Cash"}]
-    }
-    assert payment_type_id(template, "cash") == 4
-    assert payment_type_id(template, "Money Transfer") == 1
-    assert payment_type_id(template, "Cheque") is None
-    assert payment_type_id({}, "Cash") is None
 
 
 # --- what the partner gets ---------------------------------------------------------------------
