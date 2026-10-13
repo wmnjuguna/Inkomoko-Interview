@@ -21,7 +21,6 @@ from integration_service.services.clients import (
     client_rejection,
     client_status,
     creation_body,
-    find_office_id,
     names_match,
     parse_client,
 )
@@ -148,22 +147,6 @@ def test_fineract_body_creates_an_active_client_keyed_by_client_uid() -> None:
         "dateFormat": "yyyy-MM-dd",
         "locale": "en",
     }
-
-
-def test_office_is_found_by_name_in_the_client_template() -> None:
-    template = {
-        "officeId": 1,
-        "officeOptions": [
-            {"id": 1, "name": "Head Office"},
-            {"id": 2, "name": "Kigali Main Office"},
-        ],
-    }
-    assert find_office_id(template, "Kigali Main Office") == 2
-
-
-def test_missing_office_is_a_lookup_error() -> None:
-    with pytest.raises(LookupError):
-        find_office_id({"officeOptions": [{"id": 1, "name": "Head Office"}]}, "Kigali Main Office")
 
 
 def test_parse_client_reads_fineract_fields() -> None:

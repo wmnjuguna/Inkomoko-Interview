@@ -300,6 +300,28 @@ def test_a_future_approval_date_is_a_field_problem() -> None:
     }
 
 
+def test_an_approval_after_the_expected_disbursement_date_is_a_field_problem() -> None:
+    """Fineract refuses an approval dated after the loan's expected disbursement date
+    (error.msg.loan.expecteddisbursal.should.be.on.or.after.approval.date). The approval
+    template holds that date, so the partner gets the rule and the date to use."""
+    data = fixture("loan_approval_template.json")
+    data["expectedDisbursementDate"] = [2026, 10, 10]
+    form = templates.parse_approval_form(data)
+    with pytest.raises(ApiError) as caught:
+        approval_terms(form, None, TODAY)
+    assert caught.value.status == 422
+    assert caught.value.details == {
+        "problems": [
+            {
+                "field": "approved_on",
+                "problem": "must be on or before the expected disbursement date 2026-10-10",
+            }
+        ]
+    }
+    on_time = approval_terms(form, date(2026, 10, 10), TODAY)
+    assert on_time == ApprovalTerms(date(2026, 10, 10), 2500000)
+
+
 def test_the_approval_form_is_read_by_external_id() -> None:
     path = "/loans/external-id/LN-2026-000001/template"
     fake = FakeFineract({path: fixture("loan_approval_template.json")})

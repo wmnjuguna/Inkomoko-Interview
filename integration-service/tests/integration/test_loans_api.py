@@ -18,8 +18,9 @@ from typing import Any
 import pytest
 from flask.testing import FlaskClient
 from sqlalchemy import Engine, text
+from test_disburse_api import Flaky
 
-from integration_service.clients.errors import FineractTimeout
+from integration_service.clients.errors import FineractTimeout, FineractUnavailable
 from integration_service.clients.fineract import FineractClient
 from integration_service.config import Settings
 from integration_service.errors import ApiError, ErrorCode
@@ -607,3 +608,51 @@ def id_keys(value: Any) -> list[str]:
 def no_ids(body: Any) -> None:
     """Checked on every answer as it comes, success or error: no Fineract id key."""
     assert id_keys(body) == [], body
+
+
+# --- a retry looks up the earlier attempt before anything else -----------------------------------
+
+
+def test_an_application_retry_finds_the_earlier_attempt_before_reading_the_template(
+    db: Engine, fineract: FineractClient, client_uid: str
+) -> None:
+    """Attempt 1 reached Fineract although we heard "not reachable", so it was FAILED. On
+    the retry the template read fails: the earlier loan is looked up first and finished."""
+    ref = f"IT-APP-{tag()}"
+    request = LoanApplicationRequest(
+        external_reference=ref, client_uid=client_uid, principal=700000
+    )
+    fake = Flaky(fineract, FineractUnavailable("lost (test)"), fail_posts=1, after_send=True)
+    with pytest.raises(ApiError) as caught:
+        apply_for_loan(db, fake, request, "partner-a", None)
+    assert caught.value.status == 503
+    op = get_operation(db, "APP", ref)
+    assert op is not None and op.loan_reference is not None
+    reads = fake.template_reads
+
+    fake.fail_templates = 1
+    answer = apply_for_loan(db, fake, request, "partner-a", None)
+    assert answer.status == 201
+    assert answer.body["loan_reference"] == op.loan_reference
+    assert fake.template_reads == reads
+    assert len(fake.post_keys) == 1
+
+
+def test_an_approval_retry_finds_the_earlier_attempt_before_reading_the_template(
+    db: Engine, fineract: FineractClient, client: FlaskClient, auth: dict[str, str], client_uid: str
+) -> None:
+    loan = apply(client, auth, client_uid, f"IT-APP-{tag()}").get_json()["loan_reference"]
+    ref = f"IT-APR-{tag()}"
+    request = ApprovalRequest(external_reference=ref)
+    fake = Flaky(fineract, FineractUnavailable("lost (test)"), fail_posts=1, after_send=True)
+    with pytest.raises(ApiError) as caught:
+        approve_loan(db, fake, loan, request, "partner-a", None)
+    assert caught.value.status == 503
+    reads = fake.template_reads
+
+    fake.fail_templates = 1
+    answer = approve_loan(db, fake, loan, request, "partner-a", None)
+    assert answer.status == 200
+    assert answer.body["status"] == "APPROVED"
+    assert fake.template_reads == reads
+    assert len(fake.post_keys) == 1

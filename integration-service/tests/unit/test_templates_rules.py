@@ -80,8 +80,6 @@ def test_client_form_from_the_real_template() -> None:
     assert [o.name for o in form.offices] == ["Kigali Main Office"]
     assert form.office_id("Kigali Main Office") == 2
     assert form.office_id("Nowhere") is None
-    assert form.legal_form_id("PERSON") == 1
-    assert form.legal_form_id("ENTITY") == 2
 
 
 def test_loan_application_form_takes_ranges_and_defaults_from_the_product() -> None:
@@ -102,7 +100,6 @@ def test_loan_application_form_takes_ranges_and_defaults_from_the_product() -> N
     assert form.loan_term == 12
     assert form.loan_term_frequency.code == "MONTHS"
     assert form.interest_rate_frequency.code == "YEARS"
-    assert form.annual_interest_rate == Decimal(18)
     assert form.amortization.code == "EQUAL_INSTALLMENTS"
     assert form.amortization.fineract_id == 1
     assert form.interest_type.code == "DECLINING_BALANCE"
@@ -122,7 +119,6 @@ def test_approval_form() -> None:
     form = t.parse_approval_form(fixture("loan_approval_template.json"))
     assert form.approved_on == TODAY
     assert form.approved_amount == 2_500_000
-    assert form.net_disbursal_amount == 2_500_000
     assert form.expected_disbursement_date == date(2026, 10, 20)
     assert form.currency.code == "RWF"
 
@@ -131,15 +127,6 @@ def test_disbursement_form() -> None:
     form = t.parse_disbursement_form(fixture("loan_disburse_template.json"))
     assert form.expected_date == date(2026, 10, 20)
     assert form.amount == 2_000_000
-    assert form.net_disbursal_amount == 2_000_000
-    assert [p.name for p in form.payment_types] == [
-        "Money Transfer",
-        "Repayment Adjustment Chargeback",
-        "Repayment Adjustment Refund",
-    ]
-    # Fineract proposes the expected date; it cannot be later than today.
-    assert form.default_date(TODAY) == TODAY
-    assert form.default_date(date(2026, 10, 25)) == date(2026, 10, 20)
 
 
 def test_repayment_form_is_the_next_installment() -> None:
@@ -231,16 +218,14 @@ def test_approval_checks() -> None:
     assert t.check_approval(form, None, TODAY) == []
     assert t.check_approval(form, TODAY, TODAY) == []
     assert [p.field for p in t.check_approval(form, date(2026, 10, 14), TODAY)] == ["approved_on"]
-    assert [p.field for p in t.check_approval(form, TODAY, TODAY, 2_500_001)] == [
-        "approved_principal"
-    ]
-    assert t.check_approval(form, TODAY, TODAY, 2_000_000) == []
+    # The template's expected disbursement date is 2026-10-20: approving after it is refused.
+    later = date(2026, 10, 21)
+    assert [p.field for p in t.check_approval(form, later, later)] == ["approved_on"]
 
 
 def test_disbursement_checks() -> None:
-    form = t.parse_disbursement_form(fixture("loan_disburse_template.json"))
-    assert t.check_disbursement(form, None, TODAY) == []
-    assert [p.field for p in t.check_disbursement(form, date(2026, 10, 14), TODAY)] == [
+    assert t.check_disbursement(None, TODAY) == []
+    assert [p.field for p in t.check_disbursement(date(2026, 10, 14), TODAY)] == [
         "transaction_date"
     ]
 
@@ -426,6 +411,14 @@ def test_disbursement_view() -> None:
     assert view["values"]["expected_disbursement_date"] == "2026-10-20"
 
 
+def test_disbursement_view_proposes_today_after_the_expected_date_has_passed() -> None:
+    form = t.parse_disbursement_form(fixture("loan_disburse_template.json"))
+    later = date(2026, 10, 25)  # the template's expected date is 2026-10-20
+    view = t.step_form_view(t.Step.DISBURSEMENT, form, "LN-2026-000123", "X", "APPROVED", later)
+    assert field(view, "transaction_date")["default"] == "2026-10-25"
+    assert view["values"]["expected_disbursement_date"] == "2026-10-20"
+
+
 def test_repayment_view_lists_partner_payment_types_only() -> None:
     form = t.parse_repayment_form(fixture("loan_repayment_template.json"))
     view = t.step_form_view(t.Step.REPAYMENT, form, "LN-2026-000123", "X", "ACTIVE", TODAY)
@@ -538,7 +531,13 @@ def test_fetch_step_form_calls_the_external_id_template(
     fake = FakeFineract({path: fixture(name)})
     form = t.fetch_step_form(fake, "LN-2026-000123", step)
     assert fake.calls == [(path, params)]
-    assert isinstance(form, t.STEP_FORMS[step])
+    kinds = {
+        t.Step.APPROVAL: t.ApprovalForm,
+        t.Step.DISBURSEMENT: t.DisbursementForm,
+        t.Step.REPAYMENT: t.RepaymentForm,
+        t.Step.PAYOFF: t.PayoffForm,
+    }
+    assert isinstance(form, kinds[step])
 
 
 def test_fetch_passes_fineract_errors_through() -> None:

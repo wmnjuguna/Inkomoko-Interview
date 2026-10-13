@@ -216,20 +216,15 @@ def test_disbursed_amount_is_the_templates_approved_amount() -> None:
     assert disbursement_terms(form, None, TODAY)[1] == 750000
 
 
-@pytest.mark.parametrize(
-    ("expected", "today", "chosen"),
-    [
-        ([2026, 10, 20], date(2026, 10, 13), date(2026, 10, 13)),  # expected later: today
-        ([2026, 10, 20], date(2026, 10, 25), date(2026, 10, 20)),  # expected passed: expected
-        ([2026, 10, 13], date(2026, 10, 13), date(2026, 10, 13)),
-        (None, date(2026, 10, 13), date(2026, 10, 13)),  # no expected date: today
-    ],
-)
-def test_default_disbursement_date_is_the_expected_date_never_later_than_today(
-    expected: list[int] | None, today: date, chosen: date
+@pytest.mark.parametrize("expected", [[2026, 10, 20], [2026, 10, 5], [2026, 10, 13], None])
+def test_default_disbursement_date_is_today_whatever_the_expected_date(
+    expected: list[int] | None,
 ) -> None:
+    """The money moves today, so that is the default date. Fineract's template proposes the
+    expected disbursement date; once it has passed, that would backdate the payout (and its
+    schedule, interest and journal entry) without the partner asking for it."""
     form = disbursement_form(date=expected)
-    assert disbursement_terms(form, None, today)[0] == chosen
+    assert disbursement_terms(form, None, TODAY)[0] == TODAY
 
 
 def test_a_disbursement_date_sent_by_the_partner_wins() -> None:

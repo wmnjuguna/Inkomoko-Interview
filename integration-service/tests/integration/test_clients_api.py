@@ -17,6 +17,7 @@ from typing import Any
 import pytest
 from flask.testing import FlaskClient
 from sqlalchemy import Engine, text
+from test_disburse_api import Flaky as TemplateFlaky
 
 from integration_service.clients.errors import FineractTimeout, FineractUnavailable
 from integration_service.clients.fineract import FineractClient
@@ -311,6 +312,27 @@ def test_unreachable_fails_then_the_same_reference_retries_with_the_next_key(
     op = get_operation(db, "CLI", ref)
     assert op is not None and op.status == "COMPLETED" and op.attempts == 2
     assert down.keys == [f"CLI:{ref}:1"]
+
+
+def test_a_retry_finds_the_earlier_attempt_before_reading_the_client_template(
+    db: Engine, fineract: FineractClient
+) -> None:
+    """Attempt 1 reached Fineract although we heard "not reachable", so it was FAILED. On
+    the retry the client template read fails: the client is looked up first and finished."""
+    uid, ref = fresh()
+    fake = TemplateFlaky(
+        fineract, FineractUnavailable("lost (test)"), fail_posts=1, after_send=True
+    )
+    with pytest.raises(ApiError) as caught:
+        create_client(db, fake, request(uid, ref), "partner-a", None)
+    assert caught.value.status == 503
+    reads = fake.template_reads
+
+    fake.fail_templates = 1
+    answer = create_client(db, fake, request(uid, ref), "partner-a", None)
+    assert answer.status == 201
+    assert fake.template_reads == reads
+    assert fake.post_keys == [f"CLI:{ref}:1"]
 
 
 def test_unclear_with_failed_lookup_stays_pending_then_recovery_decides(

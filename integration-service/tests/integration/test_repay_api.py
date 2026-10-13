@@ -422,3 +422,23 @@ def test_a_payoff_that_lands_late_is_found_not_refused_as_closed(
     assert body["outstanding_after"] == 0
     assert len(fineract_transactions(fineract, loan, "repayment")) == 1
     assert fake.post_keys == [f"RPY:{ref}:1"]  # attempt 2 itself was never sent
+
+
+def test_a_retry_looks_up_the_earlier_attempt_before_reading_the_template(
+    client: FlaskClient, auth: dict[str, str], db: Engine, fineract: FineractClient
+) -> None:
+    """Attempt 1 reached Fineract although we heard "not reachable". On the retry the
+    template read fails: the earlier repayment is found first and finished."""
+    loan = active_loan(client, auth)
+    ref = f"IT-RPY-{tag()}"
+    fake = Flaky(fineract, FineractUnavailable("lost (test)"), fail_posts=1, after_send=True)
+    assert run_repay(db, fake, loan, ref, 50000)[0] == 503
+    reads = fake.template_reads
+
+    fake.fail_templates = 1
+    status, body = run_repay(db, fake, loan, ref, 50000)
+    assert status == 200, body
+    assert body["amount"] == 50000
+    assert fake.template_reads == reads
+    assert fake.post_keys == [f"RPY:{ref}:1"]
+    assert len(fineract_transactions(fineract, loan, "repayment")) == 1

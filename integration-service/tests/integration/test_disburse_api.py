@@ -758,3 +758,47 @@ def test_a_busy_loan_is_503_failed_and_nothing_is_sent(
     assert op is not None and op.status == "FAILED"
     assert fake.post_keys == []
     assert fineract_transactions(fineract, loan, "disbursement") == []
+
+
+def test_a_retry_looks_up_the_earlier_attempt_before_reading_the_template(
+    client: FlaskClient, auth: dict[str, str], db: Engine, fineract: FineractClient
+) -> None:
+    """Attempt 1 reached Fineract although we heard "not reachable", so it was FAILED. On
+    the retry the template read fails. The earlier attempt is looked up first: it is found
+    and finished, never answered with "Nothing was sent"."""
+    loan = new_loan(client, auth)
+    ref = f"IT-DSB-{tag()}"
+    fake = Flaky(fineract, FineractUnavailable("lost (test)"), fail_posts=1, after_send=True)
+    assert run_disburse(db, fake, loan, ref)[0] == 503
+    assert len(fineract_transactions(fineract, loan, "disbursement")) == 1
+    reads = fake.template_reads
+
+    fake.fail_templates = 1
+    status, body = run_disburse(db, fake, loan, ref)
+    assert status == 200, body
+    assert body["amount"] == 1200000
+    assert fake.template_reads == reads  # found first: no template read, nothing sent
+    assert fake.post_keys == [f"DSB:{ref}:1"]
+    op = get_operation(db, "DSB", ref)
+    assert op is not None and op.status == "ERP_PENDING"
+    assert len(fineract_transactions(fineract, loan, "disbursement")) == 1
+
+
+def test_a_retry_whose_lookup_fails_stays_pending_and_reads_no_template(
+    client: FlaskClient, auth: dict[str, str], db: Engine, fineract: FineractClient
+) -> None:
+    """On a retry, a lookup that fails leaves the outcome unknown: 504, still
+    FINERACT_PENDING, and nothing is read or sent until it is known."""
+    loan = new_loan(client, auth)
+    ref = f"IT-DSB-{tag()}"
+    fake = Flaky(fineract, FineractUnavailable("down (test)"), fail_posts=1)
+    assert run_disburse(db, fake, loan, ref)[0] == 503
+    reads = fake.template_reads
+
+    fake.fail_gets = 1
+    status, body = run_disburse(db, fake, loan, ref)
+    assert status == 504, body
+    op = get_operation(db, "DSB", ref)
+    assert op is not None and op.status == "FINERACT_PENDING"
+    assert fake.template_reads == reads
+    assert fake.post_keys == [f"DSB:{ref}:1"]
