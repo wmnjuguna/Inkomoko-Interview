@@ -489,8 +489,16 @@ def test_lock_is_released_when_the_work_fails(eng: Engine) -> None:
         raise RuntimeError("Fineract call blew up")
     with loan_lock(eng, LOAN, timeout_seconds=0.2):
         pass
+    # Only this loan's key in this database: other suites may hold their own locks on the
+    # same Postgres server at the same time. A bigint key is split over classid and objid.
+    key = loan_lock_key(LOAN) & 0xFFFFFFFFFFFFFFFF
     with eng.connect() as conn:
         held = conn.execute(
-            text("SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND granted")
+            text(
+                "SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND granted "
+                "AND objsubid = 1 AND classid::bigint = :high AND objid::bigint = :low "
+                "AND database = (SELECT oid FROM pg_database WHERE datname = current_database())"
+            ),
+            {"high": key >> 32, "low": key & 0xFFFFFFFF},
         ).scalar()
     assert held == 0
