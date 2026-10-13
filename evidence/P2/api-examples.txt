@@ -1,0 +1,62 @@
+# Real Integration Service calls used as examples in API.md, 2026-10-13T17:12:34+03:00, on the clean stack after C-1, D-1 and I-1
+# LN-2026-000001 is the D-1 loan (Closed), LN-2026-000002 is the I-1 loan (Active). JSON keys are sorted.
+
+$ GET /api/loans/LN-2026-000002
+  -> HTTP 200
+  {"approved_on": "2026-10-13", "approved_principal": 1000000, "balances": {"fees_outstanding": 0, "interest_charged": 100161, "interest_outstanding": 100161, "interest_repaid": 0, "overpaid_amount": 0, "penalties_outstanding": 0, "principal_disbursed": 1000000, "principal_outstanding": 1000000, "principal_repaid": 0, "total_expected_repayment": 1100161, "total_outstanding": 1100161, "total_overdue": 0, "total_repaid": 0}, "client_uid": "DEMO-555080", "closed_obligations_met": false, "closed_on": null, "currency": "RWF", "disbursed_on": "2026-10-13", "expected_disbursement_on": "2026-10-13", "expected_maturity_on": "2027-10-13", "loan_reference": "LN-2026-000002", "overpaid": false, "payoff_amount": 1100161, "principal": 1000000, "status": {"code": "ACTIVE", "value": "Active"}, "submitted_on": "2026-10-13"}
+
+$ GET /api/loans/LN-2026-000001
+  -> HTTP 200
+  {"approved_on": "2026-10-13", "approved_principal": 5000000, "balances": {"fees_outstanding": 0, "interest_charged": 500799, "interest_outstanding": 0, "interest_repaid": 500799, "overpaid_amount": 0, "penalties_outstanding": 0, "principal_disbursed": 5000000, "principal_outstanding": 0, "principal_repaid": 5000000, "total_expected_repayment": 5500799, "total_outstanding": 0, "total_overdue": 0, "total_repaid": 5500799}, "client_uid": "DEMO-273604", "closed_obligations_met": true, "closed_on": "2026-10-13", "currency": "RWF", "disbursed_on": "2026-10-13", "expected_disbursement_on": "2026-10-13", "expected_maturity_on": "2027-10-13", "loan_reference": "LN-2026-000001", "overpaid": false, "payoff_amount": null, "principal": 5000000, "status": {"code": "CLOSED_OBLIGATIONS_MET", "value": "Closed (obligations met)"}, "submitted_on": "2026-10-13"}
+
+$ GET /api/transactions/DSB-BE75C7-74d4
+  -> HTTP 200
+  {"external_reference": "DSB-BE75C7-74d4", "operations": [{"attempts": 1, "client_uid": "DEMO-273604", "created_at": "2026-10-13T14:07:03.913797Z", "erp_status": "SENT", "history": [{"at": "2026-10-13T14:07:03.914776Z", "detail": "request saved", "from": null, "to": "RECEIVED"}, {"at": "2026-10-13T14:07:03.916654Z", "detail": "saved and claimed", "from": "RECEIVED", "to": "FINERACT_PENDING"}, {"at": "2026-10-13T14:07:04.435993Z", "detail": "Fineract said yes", "from": "FINERACT_PENDING", "to": "FINERACT_DONE"}, {"at": "2026-10-13T14:07:04.442002Z", "detail": "journal entry waiting for the ERP", "from": "FINERACT_DONE", "to": "ERP_PENDING"}, {"at": "2026-10-13T14:07:07.196808Z", "detail": "the ERP saved the journal entry", "from": "ERP_PENDING", "to": "COMPLETED"}], "last_error": null, "loan_reference": "LN-2026-000001", "op_key": "DSB:DSB-BE75C7-74d4", "status": "COMPLETED", "type": "DISBURSEMENT", "updated_at": "2026-10-13T14:07:07.194756Z"}]}
+
+$ GET /api/transactions/NOPE-0001
+  -> HTTP 404
+  {"error": {"code": "NOT_FOUND", "correlation_id": "c-docs-p2-004", "details": {}, "message": "No request with external_reference NOPE-0001."}}
+
+$ POST /api/loans/LN-2026-000002/disburse
+  body: {"external_reference": "DOCS-DSB-2ND-0001"}
+  -> HTTP 409
+  {"error": {"code": "LOAN_ALREADY_DISBURSED", "correlation_id": "c-docs-p2-005", "details": {"holder_status": "COMPLETED"}, "message": "This loan is already paid out, or being paid out, under another external_reference."}}
+
+$ POST /api/loans/LN-2026-000001/approve
+  body: {"external_reference": "DOCS-APR-2ND-0001"}
+  -> HTTP 409
+  {"error": {"code": "LOAN_ALREADY_APPROVED", "correlation_id": "c-docs-p2-006", "details": {"holder_status": "COMPLETED"}, "message": "This loan is already approved, or being approved, under another external_reference."}}
+
+$ POST /api/loans/LN-2026-000001/repayments
+  body: {"amount": 5000, "external_reference": "DOCS-RPY-CLOSED-0001"}
+  -> HTTP 422
+  {"error": {"code": "VALIDATION_ERROR", "correlation_id": "c-docs-p2-007", "details": {"loan_status": "CLOSED_OBLIGATIONS_MET"}, "message": "Loan LN-2026-000001 takes repayments only while it is ACTIVE; Fineract shows it CLOSED_OBLIGATIONS_MET."}}
+
+$ POST /api/loans/LN-2026-000002/repayments
+  body: {"amount": 1000.5, "external_reference": "DOCS-RPY-DEC-0001"}
+  -> HTTP 422
+  {"error": {"code": "VALIDATION_ERROR", "correlation_id": "c-docs-p2-008", "details": {"problems": [{"field": "amount", "problem": "Input should be a valid integer"}]}, "message": "amount: Input should be a valid integer"}}
+
+$ POST /api/loans
+  body: {"client_uid": "NOPE-000000", "external_reference": "DOCS-APP-NOCLIENT-0001", "principal": 1000000}
+  -> HTTP 404
+  {"error": {"code": "CLIENT_NOT_FOUND", "correlation_id": "c-docs-p2-009", "details": {}, "message": "No client NOPE-000000. Create it with POST /api/clients first."}}
+
+$ POST /api/loans/LN-2099-000001/disburse
+  body: {"external_reference": "DOCS-DSB-NOLOAN-0001"}
+  -> HTTP 404
+  {"error": {"code": "LOAN_NOT_FOUND", "correlation_id": "c-docs-p2-010", "details": {}, "message": "No loan LN-2099-000001."}}
+
+$ POST /api/clients   (no X-API-Key)
+  body: {"client_uid": "DEMO-238601", "external_reference": "DOCS-CLI-0001"}
+  -> HTTP 401
+  {"error": {"code": "UNAUTHENTICATED", "correlation_id": "c-docs-p2-011", "details": {}, "message": "Missing or wrong X-API-Key."}}
+
+$ POST /api/accounts/GL-1200/sync
+  -> HTTP 200
+  {"account": {"attempts": 1, "code": "1200", "erp_reference": "GL-1200", "last_error": null, "name": "Loan Receivable", "status": "SYNCED"}, "in_progress": false}
+
+$ POST /admin/recover
+  -> HTTP 200
+  {"operations": {"checked": 0, "completed": 0, "failed": 0, "finished_meanwhile": 0, "needs_reconciliation": 0, "skipped_busy": 0, "still_unknown": 0}, "outbox": {"claimed": 0, "needs_reconciliation": 0, "rate_limited": 0, "retried": 0, "sent": 0, "stale": 0}}
+
