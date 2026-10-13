@@ -347,6 +347,10 @@ def _currency(key: str) -> Callable[[dict[str, Any]], Any]:
     return lambda product: (product.get("currency") or {}).get(key)
 
 
+def _option_code(key: str) -> Callable[[dict[str, Any]], Any]:
+    return lambda product: (product.get(key) or {}).get("code")
+
+
 def _plain(key: str) -> Callable[[dict[str, Any]], Any]:
     return lambda product: product.get(key)
 
@@ -374,6 +378,11 @@ _KEY_SETTINGS: tuple[tuple[str, Callable[[dict[str, Any]], Any]], ...] = (
     ("interestType", _option_id("interestType")),
     ("interestCalculationPeriodType", _option_id("interestCalculationPeriodType")),
     ("transactionProcessingStrategyCode", _plain("transactionProcessingStrategyCode")),
+    # Template defaults: compared too, so a product built on other defaults is reported.
+    ("daysInYearType", _option_id("daysInYearType")),
+    ("daysInMonthType", _option_id("daysInMonthType")),
+    ("repaymentStartDateType", _option_id("repaymentStartDateType")),
+    ("loanScheduleType", _option_code("loanScheduleType")),
     ("multiDisburseLoan", _plain("multiDisburseLoan")),
     ("accountingRule", _option_id("accountingRule")),
 )
