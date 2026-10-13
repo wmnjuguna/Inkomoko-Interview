@@ -10,7 +10,7 @@ from flask_openapi3.models.tag import Tag
 
 from mock_erp.db import get_engine
 from mock_erp.logs import log_field
-from mock_erp.schemas.common import ErrorResponse
+from mock_erp.schemas.common import API_ERRORS, ErrorResponse
 from mock_erp.schemas.journal import (
     JournalEntryIn,
     JournalEntryList,
@@ -22,7 +22,11 @@ from mock_erp.schemas.journal import (
 from mock_erp.services import journal as service
 
 bp = APIBlueprint(
-    "journal", __name__, abp_tags=[Tag(name="journal")], abp_security=[{"api_key": []}]
+    "journal",
+    __name__,
+    abp_tags=[Tag(name="journal")],
+    abp_security=[{"api_key": []}],
+    abp_responses=API_ERRORS,
 )
 
 

@@ -17,6 +17,7 @@ from mock_erp.api import journal as journal_api
 from mock_erp.config import Settings
 from mock_erp.db import make_engine
 from mock_erp.errors import register_error_handlers, validation_error_response
+from mock_erp.schemas.common import ErrorResponse
 from mock_erp.ui import views as ui_views
 
 SECURITY_SCHEMES: dict[str, SecurityScheme | dict[str, Any]] = {
@@ -39,6 +40,7 @@ def create_app(settings: Settings | None = None, engine: Engine | None = None) -
         security_schemes=SECURITY_SCHEMES,
         validation_error_status=422,
         validation_error_callback=validation_error_response,
+        validation_error_model=ErrorResponse,
         doc_prefix="/openapi",
     )
     app.config["ERP_API_KEY"] = settings.api_key

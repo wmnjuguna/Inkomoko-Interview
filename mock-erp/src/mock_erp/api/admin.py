@@ -10,10 +10,16 @@ from flask_openapi3.models.tag import Tag
 
 from mock_erp import faults
 from mock_erp.db import get_engine
-from mock_erp.schemas.common import ErrorResponse
+from mock_erp.schemas.common import ADMIN_ERRORS, ErrorResponse
 from mock_erp.schemas.faults import FaultSettingIn, FaultSettingOut
 
-bp = APIBlueprint("admin", __name__, abp_tags=[Tag(name="admin")], abp_security=[{"api_key": []}])
+bp = APIBlueprint(
+    "admin",
+    __name__,
+    abp_tags=[Tag(name="admin")],
+    abp_security=[{"api_key": []}],
+    abp_responses=ADMIN_ERRORS,
+)
 
 
 @bp.get(

@@ -17,11 +17,15 @@ from mock_erp.schemas.accounts import (
     AccountPath,
     CreateAccountRequest,
 )
-from mock_erp.schemas.common import ErrorResponse
+from mock_erp.schemas.common import API_ERRORS, ErrorResponse
 from mock_erp.services import accounts as service
 
 bp = APIBlueprint(
-    "accounts", __name__, abp_tags=[Tag(name="accounts")], abp_security=[{"api_key": []}]
+    "accounts",
+    __name__,
+    abp_tags=[Tag(name="accounts")],
+    abp_security=[{"api_key": []}],
+    abp_responses=API_ERRORS,
 )
 
 

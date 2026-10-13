@@ -54,3 +54,13 @@ def test_migrations_seed_the_chart(db: Engine) -> None:
     with db.connect() as conn:
         count = conn.execute(text("SELECT count(*) FROM accounts")).scalar_one()
     assert count == 13
+
+
+def test_spec_describes_the_real_422_and_health_answers(client: FlaskClient) -> None:
+    spec = client.get("/openapi/openapi.json").json
+    post = spec["paths"]["/api/journal-entries"]["post"]["responses"]
+    ref = post["422"]["content"]["application/json"]["schema"]["$ref"]
+    assert ref.endswith("/ErrorResponse")
+    assert "ValidationErrorModel" not in str(spec)
+    health = spec["paths"]["/health"]["get"]["responses"]
+    assert {"200", "503"} <= set(health)
