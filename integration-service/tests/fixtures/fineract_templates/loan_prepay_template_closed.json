@@ -1,0 +1,57 @@
+{
+  "externalLoanId": "LN-2026-000123",
+  "type": {
+    "id": 2,
+    "code": "loanTransactionType.repayment",
+    "value": "Repayment"
+  },
+  "date": [
+    2026,
+    10,
+    13
+  ],
+  "currency": {
+    "code": "RWF",
+    "name": "Rwanda Franc",
+    "decimalPlaces": 0,
+    "inMultiplesOf": 1,
+    "nameCode": "currency.RWF",
+    "displayLabel": "Rwanda Franc [RWF]"
+  },
+  "amount": 0,
+  "netDisbursalAmount": 1200000.0,
+  "principalPortion": 0,
+  "interestPortion": 0,
+  "feeChargesPortion": 0,
+  "penaltyChargesPortion": 0,
+  "outstandingLoanBalance": 0,
+  "manuallyReversed": false,
+  "paymentTypeOptions": [
+    {
+      "id": 1,
+      "name": "Money Transfer",
+      "description": "Money Transfer",
+      "isCashPayment": false,
+      "position": 1,
+      "isSystemDefined": false
+    },
+    {
+      "id": 2,
+      "name": "Repayment Adjustment Chargeback",
+      "description": "Repayment Adjustment Chargeback",
+      "isCashPayment": false,
+      "position": 1,
+      "codeName": "REPAYMENT_ADJUSTMENT_CHARGEBACK",
+      "isSystemDefined": true
+    },
+    {
+      "id": 3,
+      "name": "Repayment Adjustment Refund",
+      "description": "Repayment Adjustment Refund",
+      "isCashPayment": false,
+      "position": 1,
+      "codeName": "REPAYMENT_ADJUSTMENT_REFUND",
+      "isSystemDefined": true
+    }
+  ]
+}

@@ -1,0 +1,33 @@
+{
+  "clientId": 101,
+  "clientAccountNo": "000000101",
+  "clientName": "Template Probe",
+  "clientExternalId": "PROBE-000001",
+  "clientOfficeId": 1,
+  "isLoanProductLinkedToFloatingRate": false,
+  "isFloatingInterestRate": false,
+  "timeline": {
+    "expectedDisbursementDate": [
+      2026,
+      10,
+      13
+    ]
+  },
+  "productOptions": [
+    {
+      "id": 1,
+      "name": "SME Asset Finance"
+    }
+  ],
+  "loanOfficerOptions": [],
+  "accountLinkingOptions": [],
+  "isTopup": false,
+  "fraud": false,
+  "isInterestRecalculationEnabled": false,
+  "isRatesEnabled": false,
+  "expectedDisbursementDate": [
+    2026,
+    10,
+    13
+  ]
+}

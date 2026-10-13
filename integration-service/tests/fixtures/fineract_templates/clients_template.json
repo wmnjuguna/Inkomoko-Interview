@@ -1,0 +1,44 @@
+{
+  "activationDate": [
+    2026,
+    10,
+    13
+  ],
+  "isStaff": false,
+  "officeId": 2,
+  "officeOptions": [
+    {
+      "id": 2,
+      "name": "Kigali Main Office",
+      "nameDecorated": "....Kigali Main Office"
+    }
+  ],
+  "savingProductOptions": [],
+  "genderOptions": [],
+  "clientTypeOptions": [],
+  "clientClassificationOptions": [],
+  "clientNonPersonConstitutionOptions": [],
+  "clientNonPersonMainBusinessLineOptions": [],
+  "clientLegalFormOptions": [
+    {
+      "id": 1,
+      "code": "legalFormType.person",
+      "value": "Person"
+    },
+    {
+      "id": 2,
+      "code": "legalFormType.entity",
+      "value": "Entity"
+    }
+  ],
+  "familyMemberOptions": {
+    "relationshipIdOptions": [],
+    "genderIdOptions": [],
+    "maritalStatusIdOptions": [],
+    "professionIdOptions": []
+  },
+  "address": [
+    null
+  ],
+  "isAddressEnabled": false
+}

@@ -1,0 +1,329 @@
+{
+  "clientId": 101,
+  "clientAccountNo": "000000101",
+  "clientName": "Template Probe",
+  "clientExternalId": "PROBE-000001",
+  "clientOfficeId": 1,
+  "loanProductName": "SME Asset Finance",
+  "loanProductDescription": "SME asset finance: 18% a year, declining balance, 12 monthly equal installments, paid out once, RWF.",
+  "isLoanProductLinkedToFloatingRate": false,
+  "currency": {
+    "code": "RWF",
+    "name": "Rwanda Franc",
+    "decimalPlaces": 0,
+    "inMultiplesOf": 1,
+    "nameCode": "currency.RWF",
+    "displayLabel": "Rwanda Franc [RWF]"
+  },
+  "principal": 5000000.0,
+  "approvedPrincipal": 5000000.0,
+  "proposedPrincipal": 5000000.0,
+  "netDisbursalAmount": 5000000.0,
+  "termFrequency": 12,
+  "termPeriodFrequencyType": {
+    "id": 2,
+    "code": "repaymentFrequency.periodFrequencyType.months",
+    "value": "Months"
+  },
+  "numberOfRepayments": 12,
+  "repaymentEvery": 1,
+  "repaymentFrequencyType": {
+    "id": 2,
+    "code": "repaymentFrequency.periodFrequencyType.months",
+    "value": "Months"
+  },
+  "interestRatePerPeriod": 18.0,
+  "interestRateFrequencyType": {
+    "id": 3,
+    "code": "interestRateFrequency.periodFrequencyType.years",
+    "value": "Per year"
+  },
+  "annualInterestRate": 18.0,
+  "isFloatingInterestRate": false,
+  "amortizationType": {
+    "id": 1,
+    "code": "amortizationType.equal.installments",
+    "value": "Equal installments"
+  },
+  "interestType": {
+    "id": 0,
+    "code": "interestType.declining.balance",
+    "value": "Declining Balance"
+  },
+  "interestCalculationPeriodType": {
+    "id": 1,
+    "code": "interestCalculationPeriodType.same.as.repayment.period",
+    "value": "Same as repayment period"
+  },
+  "allowPartialPeriodInterestCalculation": false,
+  "transactionProcessingStrategyCode": "mifos-standard-strategy",
+  "disallowExpectedDisbursements": false,
+  "timeline": {
+    "expectedDisbursementDate": [
+      2026,
+      10,
+      13
+    ]
+  },
+  "charges": [],
+  "productOptions": [
+    {
+      "id": 1,
+      "name": "SME Asset Finance"
+    }
+  ],
+  "loanOfficerOptions": [],
+  "loanPurposeOptions": [],
+  "fundOptions": [],
+  "termFrequencyTypeOptions": [
+    {
+      "id": 0,
+      "code": "loanTermFrequency.periodFrequencyType.days",
+      "value": "Days"
+    },
+    {
+      "id": 1,
+      "code": "loanTermFrequency.periodFrequencyType.weeks",
+      "value": "Weeks"
+    },
+    {
+      "id": 2,
+      "code": "loanTermFrequency.periodFrequencyType.months",
+      "value": "Months"
+    },
+    {
+      "id": 3,
+      "code": "loanTermFrequency.periodFrequencyType.years",
+      "value": "Years"
+    }
+  ],
+  "repaymentFrequencyTypeOptions": [
+    {
+      "id": 0,
+      "code": "repaymentFrequency.periodFrequencyType.days",
+      "value": "Days"
+    },
+    {
+      "id": 1,
+      "code": "repaymentFrequency.periodFrequencyType.weeks",
+      "value": "Weeks"
+    },
+    {
+      "id": 2,
+      "code": "repaymentFrequency.periodFrequencyType.months",
+      "value": "Months"
+    }
+  ],
+  "interestRateFrequencyTypeOptions": [
+    {
+      "id": 2,
+      "code": "interestRateFrequency.periodFrequencyType.months",
+      "value": "Per month"
+    },
+    {
+      "id": 3,
+      "code": "interestRateFrequency.periodFrequencyType.years",
+      "value": "Per year"
+    },
+    {
+      "id": 4,
+      "code": "interestRateFrequency.periodFrequencyType.whole_term",
+      "value": "Whole term"
+    }
+  ],
+  "amortizationTypeOptions": [
+    {
+      "id": 1,
+      "code": "amortizationType.equal.installments",
+      "value": "Equal installments"
+    },
+    {
+      "id": 0,
+      "code": "amortizationType.equal.principal",
+      "value": "Equal principal payments"
+    }
+  ],
+  "interestTypeOptions": [
+    {
+      "id": 1,
+      "code": "interestType.flat",
+      "value": "Flat"
+    },
+    {
+      "id": 0,
+      "code": "interestType.declining.balance",
+      "value": "Declining Balance"
+    }
+  ],
+  "interestCalculationPeriodTypeOptions": [
+    {
+      "id": 0,
+      "code": "interestCalculationPeriodType.daily",
+      "value": "Daily"
+    },
+    {
+      "id": 1,
+      "code": "interestCalculationPeriodType.same.as.repayment.period",
+      "value": "Same as repayment period"
+    }
+  ],
+  "transactionProcessingStrategyOptions": [
+    {
+      "code": "creocore-strategy",
+      "name": "Creocore Unique"
+    },
+    {
+      "code": "early-repayment-strategy",
+      "name": "Early Repayment Strategy"
+    },
+    {
+      "code": "mifos-standard-strategy",
+      "name": "Penalties, Fees, Interest, Principal order"
+    },
+    {
+      "code": "heavensfamily-strategy",
+      "name": "HeavensFamily Unique"
+    },
+    {
+      "code": "interest-principal-penalties-fees-order-strategy",
+      "name": "Interest, Principal, Penalties, Fees Order"
+    },
+    {
+      "code": "principal-interest-penalties-fees-order-strategy",
+      "name": "Principal, Interest, Penalties, Fees Order"
+    },
+    {
+      "code": "rbi-india-strategy",
+      "name": "Overdue/Due Fee/Int,Principal"
+    },
+    {
+      "code": "due-penalty-fee-interest-principal-in-advance-principal-penalty-fee-interest-strategy",
+      "name": "Due penalty, fee, interest, principal, In advance principal, penalty, fee, interest"
+    },
+    {
+      "code": "due-penalty-interest-principal-fee-in-advance-penalty-interest-principal-fee-strategy",
+      "name": "Due penalty, interest, principal, fee, In advance penalty, interest, principal, fee"
+    },
+    {
+      "code": "advanced-payment-allocation-strategy",
+      "name": "Advanced payment allocation strategy"
+    }
+  ],
+  "chargeOptions": [],
+  "loanCollateralOptions": [],
+  "accountLinkingOptions": [],
+  "multiDisburseLoan": false,
+  "canDefineInstallmentAmount": false,
+  "isTopup": false,
+  "fraud": false,
+  "product": {
+    "id": 1,
+    "name": "SME Asset Finance",
+    "shortName": "SMEA",
+    "description": "SME asset finance: 18% a year, declining balance, 12 monthly equal installments, paid out once, RWF.",
+    "status": "loanProduct.active",
+    "externalId": "PRD-SME-ASSET-FINANCE",
+    "currency": {
+      "code": "RWF",
+      "name": "Rwanda Franc",
+      "decimalPlaces": 0,
+      "inMultiplesOf": 1,
+      "nameCode": "currency.RWF",
+      "displayLabel": "Rwanda Franc [RWF]"
+    },
+    "principal": 5000000.0,
+    "minPrincipal": 100000.0,
+    "maxPrincipal": 50000000.0,
+    "numberOfRepayments": 12,
+    "minNumberOfRepayments": 12,
+    "maxNumberOfRepayments": 12,
+    "repaymentEvery": 1,
+    "repaymentFrequencyType": {
+      "id": 2,
+      "code": "repaymentFrequency.periodFrequencyType.months",
+      "value": "Months"
+    },
+    "interestRatePerPeriod": 18.0,
+    "minInterestRatePerPeriod": 18.0,
+    "maxInterestRatePerPeriod": 18.0,
+    "interestRateFrequencyType": {
+      "id": 3,
+      "code": "interestRateFrequency.periodFrequencyType.years",
+      "value": "Per year"
+    },
+    "annualInterestRate": 18.0,
+    "amortizationType": {
+      "id": 1,
+      "code": "amortizationType.equal.installments",
+      "value": "Equal installments"
+    },
+    "interestType": {
+      "id": 0,
+      "code": "interestType.declining.balance",
+      "value": "Declining Balance"
+    },
+    "interestCalculationPeriodType": {
+      "id": 1,
+      "code": "interestCalculationPeriodType.same.as.repayment.period",
+      "value": "Same as repayment period"
+    },
+    "transactionProcessingStrategyCode": "mifos-standard-strategy",
+    "transactionProcessingStrategyName": "Penalties, Fees, Interest, Principal order",
+    "installmentAmountInMultiplesOf": 1,
+    "multiDisburseLoan": false,
+    "allowAttributeOverrides": {
+      "amortizationType": true,
+      "interestType": true,
+      "transactionProcessingStrategyCode": true,
+      "interestCalculationPeriodType": true,
+      "inArrearsTolerance": true,
+      "repaymentEvery": true,
+      "graceOnPrincipalAndInterestPayment": true,
+      "graceOnArrearsAgeing": true,
+      "isNew": true
+    },
+    "accountingRule": {
+      "id": 2,
+      "code": "accountingRuleType.cash",
+      "value": "CASH BASED"
+    }
+  },
+  "daysInMonthType": {
+    "id": 1,
+    "code": "DaysInMonthType.actual",
+    "value": "Actual"
+  },
+  "daysInYearType": {
+    "id": 1,
+    "code": "DaysInYearType.actual",
+    "value": "Actual"
+  },
+  "isInterestRecalculationEnabled": false,
+  "isVariableInstallmentsAllowed": false,
+  "minimumGap": 0,
+  "maximumGap": 0,
+  "isEqualAmortization": false,
+  "isRatesEnabled": false,
+  "productId": 1,
+  "expectedDisbursementDate": [
+    2026,
+    10,
+    13
+  ],
+  "repaymentStartDateType": {
+    "id": 1,
+    "code": "repaymentStartDateType.disbursementDate",
+    "value": "Disbursement Date"
+  },
+  "interestRecognitionOnDisbursementDate": false,
+  "loanScheduleType": {
+    "id": 0,
+    "code": "CUMULATIVE",
+    "value": "Cumulative"
+  },
+  "loanScheduleProcessingType": {
+    "id": 0,
+    "code": "HORIZONTAL",
+    "value": "Horizontal"
+  }
+}

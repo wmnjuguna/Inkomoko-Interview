@@ -1,0 +1,23 @@
+{
+  "approvalDate": [
+    2026,
+    10,
+    13
+  ],
+  "approvalAmount": 2500000.0,
+  "netDisbursalAmount": 2500000.0,
+  "availableDisbursementAmountWithOverApplied": 2500000.0,
+  "expectedDisbursementDate": [
+    2026,
+    10,
+    20
+  ],
+  "currency": {
+    "code": "RWF",
+    "name": "Rwanda Franc",
+    "decimalPlaces": 0,
+    "inMultiplesOf": 1,
+    "nameCode": "currency.RWF",
+    "displayLabel": "Rwanda Franc [RWF]"
+  }
+}
