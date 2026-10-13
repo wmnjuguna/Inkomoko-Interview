@@ -1,6 +1,6 @@
 # Architecture
 
-> **Status:** the Fineract plugin is built and tested. The Python parts are still a design. Sections marked *planned* describe what I will build.
+> **Status:** the Fineract plugin and the Mock ERP are built and tested. The Integration Service is still a design. Sections marked *planned* describe what I will build.
 
 ## The parts
 
@@ -8,7 +8,7 @@
 |---|---|---|
 | **Fineract** (with my plugin) | Java 21, Fineract 1.15.0 | The bank's record of clients, loans, payments and balances. My plugin adds GL accounts from the ERP safely. |
 | **Integration Service** | Python, FastAPI | The only API that partners call. It keeps track of every request, stops duplicates, calls Fineract and sends journal entries to the ERP. |
-| **Mock ERP** | Python, FastAPI | The accounting system. It owns the chart of accounts and stores journal entries. It can pretend to be down or slow, for testing. |
+| **Mock ERP** | Python 3.13, Flask | The accounting system. It owns the chart of accounts and stores journal entries. It can pretend to be down or slow, for testing. It has a small web UI. |
 | **PostgreSQL 18.3** | — | One server. Each part has its own database and its own user: `fineract_tenants` and `fineract_default` for Fineract, `integration_db`, `erp_db`. |
 
 There is no message queue, cache or separate worker. [DECISIONS.md](DECISIONS.md) explains why.
@@ -19,7 +19,7 @@ flowchart LR
   subgraph compose [docker compose]
     IS[Integration Service<br/>FastAPI]
     F[Fineract 1.15.0<br/>+ glsync plugin]
-    E[Mock ERP<br/>FastAPI]
+    E[Mock ERP<br/>Flask]
     DB[(PostgreSQL 18.3<br/>fineract_tenants · fineract_default<br/>integration_db · erp_db)]
   end
   IS -->|clients, loans, disbursements, repayments<br/>externalId = our reference| F
@@ -39,6 +39,43 @@ Every request carries an `X-Correlation-ID`, so one request can be followed thro
 2. **Partner requests (Parts C–F).** *(planned)* The Integration Service first saves the request in its own database. Then it calls Fineract and sends our reference as Fineract's `externalId`. Then it saves the result.
 3. **Journal entries (Part H).** *(planned)* After a disbursement or a repayment, the Integration Service reads how Fineract split the money (principal and interest). It builds the journal entry from that. It saves the entry in an outbox table, in the same database transaction as the Fineract result. A background loop sends it to the ERP and retries if the ERP is down.
 4. **Reconciliation (Part K).** *(planned)* It reads transactions from Fineract and journal entries from the ERP. It matches them by `external_reference`. It reports each one as `MATCHED`, `MISSING_IN_ERP`, `MISSING_IN_FINERACT` or `AMOUNT_MISMATCH`. It never changes anything.
+
+## The Mock ERP
+
+It is a small Flask app. Gunicorn runs it with 2 worker processes and 4 threads each. It listens on port 8090, and only on `localhost`. The image is `python:3.13.16-alpine3.24` and it runs as a non-root user.
+
+| Layer | What it uses |
+|---|---|
+| HTTP and checks | Flask 3 and flask-openapi3. Each request and response is a Pydantic model, so bad input gets a `422` and the OpenAPI spec is generated from the code. |
+| Rules | Plain Python in `services/`. No Flask code there. |
+| Database | SQLAlchemy 2 Core (no ORM) with psycopg 3. Alembic creates the tables when the container starts. |
+| Web UI | Jinja2 templates with HTMX, under `/ui`. |
+
+**How a request goes through it.** Every `/api` call takes the same path:
+
+1. The correlation id is read from `X-Correlation-ID`, or a new one is made. It is sent back on the response.
+2. The API key is checked (`X-API-Key`). A wrong or missing key gets `401` and stops here.
+3. The fault switch is checked. If a fault is on, the request may fail here on purpose.
+4. Pydantic checks the body or the query. A bad one gets `422`.
+5. The service applies the rules and writes to Postgres in one short transaction.
+6. One JSON log line is written, with the correlation id, the status and the fault, if any.
+
+Every error has the same shape: `{"error": {"code", "message", "details", "correlation_id"}}`.
+
+**The fault switch.** It is one row in the `fault_settings` table, not a value in memory. So both Gunicorn workers always see the same setting. A fault can be limited to a number of calls, like "fail the next 2 calls". Each call it hits takes one from the count, in a single `UPDATE … RETURNING` statement. So the count stays exact, even when calls arrive at the same time. The last one switches the fault off. This needs `RETURNING old.*`, which is new in Postgres 18.
+
+| Mode | What the caller sees |
+|---|---|
+| `down` | `503` at once. Nothing is saved. |
+| `timeout` | Waits, then `504`. Nothing is saved. |
+| `timeout_after_write` | The entry is saved. Then it waits, then sends the real answer. The caller has usually given up by then. |
+| `rate_limited` | `429` with a `Retry-After` header |
+
+`/health`, `/admin`, `/ui` and `/openapi` never fail on purpose. So you can always check health and switch a fault off. Gunicorn's timeout (180 s) is longer than the longest fault wait (120 s).
+
+**Debits must equal credits, checked twice.** Python checks it first and gives a clear `422`. A Postgres trigger checks it again when the transaction commits, after all the lines are in. The trigger also refuses lines on a HEADER account. So even a write that skips the Python code can't save an unbalanced entry.
+
+**Requests at the same time.** A new account or journal entry is saved with `INSERT … ON CONFLICT DO NOTHING` on the unique `external_reference`. If two requests with the same reference race, one row is saved. The other request then reads that row and answers as a repeat. The tests send 10 at the same time and check this.
 
 ## A disbursement, step by step *(planned)*
 
@@ -61,7 +98,7 @@ sequenceDiagram
   Note over API,DB: J5 crash before this commit: on restart, look it up again
   API-->>P: 200, erp_status PENDING
   W->>DB: pick up waiting outbox rows
-  W->>E: POST /journal-entries (same reference)
+  W->>E: POST /api/journal-entries (same reference)
   Note over W,E: J1 ERP down, J4 ERP timeout: safe to retry, the ERP ignores duplicates
   E-->>W: 201 created, or 200 already exists
   W->>DB: mark COMPLETED
@@ -101,7 +138,7 @@ The Fineract database starts empty. Fineract creates its own tables when it star
 | Data | Where it comes from |
 |---|---|
 | Office, currency, loan product, API user | A setup script, through Fineract's API *(planned)* |
-| Chart of accounts | Seeded in the Mock ERP *(planned)* |
+| Chart of accounts | Seeded in the Mock ERP by its second migration: 4 HEADER groups (1000, 2000, 4000, 5000) and 9 DETAIL accounts under them |
 | GL accounts in Fineract | Only from the ERP, through the Integration Service and my plugin |
 | Clients, loans, payments | Only from partners, through the Integration Service |
 
@@ -116,7 +153,7 @@ The Fineract database starts empty. Fineract creates its own tables when it star
 
 The `:1` at the end only becomes `:2` after we check Fineract and see the transaction does not exist. Fineract keeps `externalId` unique, so a second try can never create a second transaction.
 
-## Database tables *(planned, except the plugin table)*
+## Database tables *(planned, except the plugin table and erp_db)*
 
 **integration_db**
 
@@ -129,7 +166,14 @@ The `:1` at the end only becomes `:2` after we check Fineract and see the transa
 | `gl_sync` | ERP code, ERP reference, Fineract GL id (internal only), sync status, attempts | Code and reference are unique |
 | `outbox` | operation, journal entry, status, attempts, next attempt time | |
 
-**erp_db**: `accounts` (code, unique reference, name, type, currency), `journal_entries` (unique reference, request hash, date, source), `journal_lines` (entry, account, debit, credit). Debits must equal credits.
+**erp_db** (built)
+
+| Table | Main columns | Rules |
+|---|---|---|
+| `accounts` | `code`, `external_reference`, name, type, usage (HEADER or DETAIL), `parent_code`, currency, request hash | `code` is the key. `external_reference` is unique. Type is one of the five account types. |
+| `journal_entries` | id (a UUID, shown as `erp_transaction_id`), `external_reference`, request hash, entry date, source, `reverses`, description, correlation id | `external_reference` is unique. Source is DISBURSEMENT, REPAYMENT, REVERSAL or MANUAL. |
+| `journal_lines` | entry, account code, debit, credit | Each line is a debit or a credit, never both. Amounts are whole RWF. A trigger checks at commit that debits equal credits and that no line uses a HEADER account. |
+| `fault_settings` | mode, path prefix, delay, remaining uses, Retry-After | Always exactly one row |
 
 **fineract_default** (Fineract): Fineract's own tables, unchanged, plus my table `glsync_external_ref` (GL account id, ERP reference, payload hash, created at). Our IDs go in Fineract's own `external_id` columns: `client_uid` on clients, `loan_reference` on loans, and the operation's `external_reference` on loan transactions.
 
