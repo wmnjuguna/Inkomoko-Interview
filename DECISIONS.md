@@ -225,6 +225,42 @@ What I learned about the templates on Fineract 1.15.0:
 
 **A retry looks before it reads.** A retry of a `FAILED` request first looks up its earlier attempt in Fineract by our key. Only then does it read templates. An earlier attempt that landed late is ours and is finished at once, without a template read. Reading first would check the retry against a loan that may have moved on. If the lookup itself fails, we do not know what happened, so the request stays `FINERACT_PENDING` with `504` until recovery decides.
 
+### Setup reads the templates too
+
+**Chosen:** setup builds each Fineract form from Fineract's own template, like the partner writes do. The files in `fineract/configuration/` hold only our business choices, written as names or codes. They hold no Fineract numeric id. A name or code the template does not offer stops setup, and the message lists the allowed values.
+
+**Why.** Before, `office.json` had `"parentId": 1` and `loan-product.json` had enum ids like `"repaymentFrequencyType": 2`. Those numbers are Fineract's, not ours. They only work because a fresh Fineract 1.15 happens to number things that way. Now the file says `"parent": "Head Office"` and `"repaymentFrequency": "MONTHS"`, and Fineract gives the number.
+
+What each setup step reads:
+
+| Step | Fineract read | What we take from it |
+|---|---|---|
+| Office | `GET /offices/external-id/OFF-KGL-MAIN`, then `GET /offices/{id}` | Whether our office exists, and its name, parent and opening date |
+| | `GET /offices/template` | The parent's id, found by name in `allowedParents` |
+| | `GET /offices/{parent id}` | The parent's opening date. The template lists parents without it. |
+| Currency | `GET /currencies` | The selected codes and the codes Fineract offers |
+| Role | `GET /permissions` | The permission codes that exist |
+| API user | `GET /users/template` | The office id and the role id, found by name in `allowedOffices` and `availableRoles` |
+| Loan product | `GET /loanproducts/template` | The id for each of our codes, three defaults, the strategies, the currencies, and the GL accounts allowed for each GL role |
+
+Where each loan product field comes from:
+
+| Source | Fields |
+|---|---|
+| Our config, plain values | name, short name, external id, description, currency code, decimals, amounts and their range, number of repayments, repayment every, interest rate and its range, strategy code, the GL account for each role (by ERP reference) |
+| Our config, as a code the template turns into an id | `repaymentFrequency` (`MONTHS`), `interestRateFrequency` (`YEARS`), `amortization` (`EQUAL_INSTALLMENTS`), `interestType` (`DECLINING_BALANCE`), `interestCalculationPeriod` (`SAME_AS_REPAYMENT_PERIOD`) |
+| The template's default | `daysInYearType`, `daysInMonthType`, `repaymentStartDateType` |
+| Fixed in code, checked against the template | cash accounting (`CASH`), schedule type `CUMULATIVE`, one payout, no interest recalculation |
+
+The strategy, the currency and every GL account are checked against the template's lists. A GL account must be in the list for its role (asset, income, expense or liability), so a mapping to the wrong account type stops setup before Fineract sees it. A unit test checks that the body built from the saved 1.15 template is exactly the body the old code built. So the product did not change.
+
+- **Why `interestRateFrequency` stays in the config.** The template's default is "Per month". Our rate is 18% a year. Taking the default would make it 18% a month. The period of the rate is a business choice, so it is ours to write.
+- **The three settings that left the config.** `daysInYearType`, `daysInMonthType` and `repaymentStartDateType` are now the template's defaults. On 1.15 these are Actual, Actual and the disbursement date, the same values the config had. We had no business reason to pick them. The risk is that a later Fineract version has other defaults and quietly builds another product. Two checks cover this. A live test builds the body from the running Fineract's template and compares it with the old body (GL ids left out). And a re-run compares these three, and the schedule type, with the existing product, and stops if they differ.
+- **Fineract does not check an office's opening date.** Fineract 1.15 accepts an opening date in the future, or one before the parent office opened. *(Read in the source, `OfficeCommandFromApiJsonDeserializer` and `Office.fromJson`, not tried.)* Fineract does refuse a client activated before its office opened, so a wrong date would only fail later, on a client, far from its cause. *(Also read in the source.)* So setup refuses both before it creates the office. On a re-run, an office with our external id but another name, parent or opening date stops setup.
+- **`/currencies` splits its answer in two.** `selectedCurrencyOptions` has the currencies already in use. `currencyOptions` has only the others. On the clean stack, 2 were selected and 162 offered, with no code in both. So a code is valid if it is in either list, and the error message lists both.
+
+Shown on a clean stack in `evidence/P2.6/`: the first run created every step, the second run said `exists` for each and wrote nothing, and the office and product read back from Fineract match (`office-and-product.txt`).
+
 ## Sync or async
 
 **Chosen:** the Integration Service calls Fineract directly and waits for the answer. Journal entries go to the ERP through an outbox table and a background loop. There is no message queue.
@@ -310,7 +346,7 @@ All of these are made by the setup step (`python -m integration_service.setup`, 
 | Office | `Kigali Main Office` (external id `OFF-KGL-MAIN`), under the default Head Office *(assumption)* | Keeps Fineract's top office as it is. Fineract only shows a user the clients and loans in its own office and below, so the API user sits in this office too. |
 | Currency | RWF, no decimals | RWF has no cents. Fineract already knows RWF with 0 decimals. Setup adds it to the organisation's list and keeps the others, because `PUT /currencies` replaces the whole list. The product sets 0 decimals too. |
 | Loan product | "SME Asset Finance" (`SMEA`, external id `PRD-SME-ASSET-FINANCE`): 18% a year, 12 monthly payments, declining balance, equal payments, paid out once, RWF. Default amount 5,000,000 RWF (100,000 to 50,000,000). Strategy `mifos-standard-strategy`. | The values the brief suggests. Checked with `GET /loanproducts/1` in `evidence/P1/product.txt`. |
-| Accounting | Cash-based (`accountingRule` 2) | Journal entries only on payout and repayment, which matches Part H. Reconciliation is one entry per payment. It is less realistic, because no interest is booked between payments. |
+| Accounting | Cash-based (`CASH` in the product template) | Journal entries only on payout and repayment, which matches Part H. Reconciliation is one entry per payment. It is less realistic, because no interest is booked between payments. |
 | GL accounts | All owned by the ERP and synced. Codes follow the usual pattern: 1xxx assets, 2xxx liabilities, 4xxx income, 5xxx expenses. | In 1.15.0, cash-based accounting needs 9 GL roles. The ERP seed has a DETAIL account of the right type for each one (table below). The optional charge-off and goodwill roles are left out, because the brief does not use them. |
 | API user | `integration-api`, with its own role `Integration Service` (11 permissions, below) | Least privilege. The admin user is only used by the setup step. |
 
@@ -347,9 +383,9 @@ Checked on the clean stack (`evidence/P1/least-privilege.txt`): the user can rea
 
 ### Re-running setup
 
-Each step looks first, then creates only what is missing. A second run on the clean stack printed `exists` for every step and sent nothing to Fineract (`evidence/P1/setup-second-run.txt`). Some rules:
+Each step looks first, then creates only what is missing. A second run on the clean stack printed `exists` for every step and sent nothing to Fineract (`evidence/P1/setup-second-run.txt`, and again after the template change in `evidence/P2.6/setup-second-run.txt`). Some rules:
 
-- The office is found by name. If an office with that name sits under another parent, setup stops.
+- The office is found by its external id, `OFF-KGL-MAIN`. If it has another name, parent or opening date, setup stops. An office with our name but another external id also stops setup.
 - The role's permissions are set back to exactly the list in `role.json`. An unknown permission code stops setup before anything is written.
 - The API user's office and role are set back if they changed. Its password is never changed on a re-run. Fineract can't show it, so there is nothing to compare. Instead, setup logs in as the user once. A wrong password or a missing permission stops setup with a clear message.
 - An existing loan product is never changed, because loans may already use it. If its key settings differ from the config, setup stops and lists the differences.
