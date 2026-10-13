@@ -323,7 +323,3 @@ def set_fault() -> Response:
 def clear_fault() -> Response:
     setting = faults.clear_fault(get_engine())
     return fault_response(setting, "Fault cleared · the ERP answers normally", "good")
-
-
-# The journal pages live in their own module on this same blueprint.
-from mock_erp.ui import journal_views  # noqa: E402, F401
