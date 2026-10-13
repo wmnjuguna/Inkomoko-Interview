@@ -1,0 +1,17 @@
+{
+  "name": "Integration Service",
+  "description": "Least-privilege role for the Inkomoko Integration Service API user",
+  "permissions": [
+    "SYNC_GLACCOUNT",
+    "READ_GLACCOUNT",
+    "CREATE_CLIENT",
+    "ACTIVATE_CLIENT",
+    "READ_CLIENT",
+    "CREATE_LOAN",
+    "APPROVE_LOAN",
+    "DISBURSE_LOAN",
+    "REPAYMENT_LOAN",
+    "READ_LOAN",
+    "READ_LOANPRODUCT"
+  ]
+}
