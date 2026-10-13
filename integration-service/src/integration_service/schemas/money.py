@@ -22,9 +22,8 @@ class DisbursementRequest(BaseModel):
     )
     transaction_date: date | None = Field(
         default=None,
-        description="YYYY-MM-DD, not in the future (Kigali time). Default: the loan's "
-        "expected disbursement date, or today if that is later. The full approved principal "
-        "(from Fineract's disbursement template) is paid out.",
+        description="YYYY-MM-DD, not in the future (Kigali time). Default: today. The full "
+        "approved principal (from Fineract's disbursement template) is paid out.",
     )
 
 

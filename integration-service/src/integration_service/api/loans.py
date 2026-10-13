@@ -114,9 +114,10 @@ def post_loan(body: LoanApplicationRequest) -> tuple[dict[str, Any], int]:
     "/api/loans/<loan_reference>/approve",
     summary="Approve a loan",
     description="Approves the loan in Fineract for the amount its approval template proposes "
-    "(the applied principal). approved_on defaults to Fineract's proposed date (today). A loan "
-    "is approved once: another external_reference for the same loan gives 409 "
-    "LOAN_ALREADY_APPROVED.",
+    "(the applied principal). approved_on defaults to Fineract's proposed date (today); it "
+    "cannot be in the future or after the loan's expected disbursement date (Fineract's rule; "
+    "422 VALIDATION_ERROR with details.problems). A loan is approved once: another "
+    "external_reference for the same loan gives 409 LOAN_ALREADY_APPROVED.",
     responses={
         200: ApprovalResponse,
         202: AcceptedResponse,

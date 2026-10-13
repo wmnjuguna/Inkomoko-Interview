@@ -53,7 +53,9 @@ class ApprovalRequest(BaseModel):
         description="Your key for this request. Send the same value on every retry."
     )
     approved_on: date | None = Field(
-        default=None, description="YYYY-MM-DD, not in the future (Kigali time). Default: today."
+        default=None,
+        description="YYYY-MM-DD, not in the future (Kigali time) and not after the loan's "
+        "expected disbursement date. Default: today.",
     )
 
 

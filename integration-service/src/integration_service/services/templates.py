@@ -141,13 +141,9 @@ class ClientForm:
     offices: tuple[NamedOption, ...]
     default_office_id: int | None
     activation_date: date | None
-    legal_forms: tuple[Choice, ...]
 
     def office_id(self, name: str) -> int | None:
         return next((o.fineract_id for o in self.offices if o.name == name), None)
-
-    def legal_form_id(self, code: str) -> int | None:
-        return next((c.fineract_id for c in self.legal_forms if c.code == code), None)
 
 
 @dataclass(frozen=True)
@@ -168,7 +164,6 @@ class LoanApplicationForm:
     loan_term_frequency: Choice
     interest_rate_per_period: RateRange
     interest_rate_frequency: Choice
-    annual_interest_rate: Decimal | None
     amortization: Choice
     interest_type: Choice
     interest_calculation_period: Choice
@@ -184,7 +179,6 @@ class ApprovalForm:
 
     approved_on: date | None
     approved_amount: int
-    net_disbursal_amount: int | None
     expected_disbursement_date: date | None
     currency: Currency
 
@@ -192,19 +186,13 @@ class ApprovalForm:
 @dataclass(frozen=True)
 class DisbursementForm:
     """...transactions/template?command=disburse. expected_date is the loan's expected
-    disbursement date (it can be in the future); amount is the approved principal."""
+    disbursement date, shown for information only: Fineract proposes it as the date, but a
+    payout made today is dated today (Fineract takes any date from the approval date to
+    today, before or after the expected date). amount is the approved principal."""
 
     expected_date: date | None
     amount: int
-    net_disbursal_amount: int | None
     currency: Currency
-    payment_types: tuple[PaymentType, ...]
-
-    def default_date(self, today: date) -> date:
-        """The date to propose: Fineract's expected date, but never later than today."""
-        if self.expected_date is None or self.expected_date > today:
-            return today
-        return self.expected_date
 
 
 @dataclass(frozen=True)
@@ -253,13 +241,6 @@ class PayoffForm(_PaymentForm):
 
 
 type StepForm = ApprovalForm | DisbursementForm | RepaymentForm | PayoffForm
-
-STEP_FORMS: Mapping[Step, type[StepForm]] = {
-    Step.APPROVAL: ApprovalForm,
-    Step.DISBURSEMENT: DisbursementForm,
-    Step.REPAYMENT: RepaymentForm,
-    Step.PAYOFF: PayoffForm,
-}
 
 
 # --- parsing ----------------------------------------------------------------------------------
@@ -385,7 +366,6 @@ def parse_client_form(data: Any) -> ClientForm:
             offices=offices,
             default_office_id=_int(office) if office is not None else None,
             activation_date=_date(d.get("activationDate")),
-            legal_forms=tuple(_choice(c) for c in d.get("clientLegalFormOptions") or []),
         )
 
     return _parsed("client", data, build)
@@ -422,7 +402,6 @@ def parse_loan_application_form(data: Any) -> LoanApplicationForm:
                 maximum=_decimal(product.get("maxInterestRatePerPeriod")),
             ),
             interest_rate_frequency=_choice(d["interestRateFrequencyType"]),
-            annual_interest_rate=_decimal(d.get("annualInterestRate")),
             amortization=_choice(d["amortizationType"]),
             interest_type=_choice(d["interestType"]),
             interest_calculation_period=_choice(d["interestCalculationPeriodType"]),
@@ -440,7 +419,6 @@ def parse_approval_form(data: Any) -> ApprovalForm:
         return ApprovalForm(
             approved_on=_date(d.get("approvalDate")),
             approved_amount=_required_amount(d.get("approvalAmount"), currency),
-            net_disbursal_amount=_amount(d.get("netDisbursalAmount"), currency),
             expected_disbursement_date=_date(d.get("expectedDisbursementDate")),
             currency=currency,
         )
@@ -454,9 +432,7 @@ def parse_disbursement_form(data: Any) -> DisbursementForm:
         return DisbursementForm(
             expected_date=_date(d.get("date")),
             amount=_required_amount(d.get("amount"), currency),
-            net_disbursal_amount=_amount(d.get("netDisbursalAmount"), currency),
             currency=currency,
-            payment_types=_payment_types(d.get("paymentTypeOptions")),
         )
 
     return _parsed("disbursement", data, build)
@@ -705,28 +681,23 @@ def check_application(
     return problems
 
 
-def check_approval(
-    form: ApprovalForm,
-    approved_on: date | None,
-    today: date,
-    approved_principal: int | None = None,
-) -> list[FieldProblem]:
-    """approved_on not in the future; an approved amount no more than Fineract proposes."""
+def check_approval(form: ApprovalForm, approved_on: date | None, today: date) -> list[FieldProblem]:
+    """approved_on not in the future, and not after the loan's expected disbursement date.
+    Fineract refuses the latter with
+    error.msg.loan.expecteddisbursal.should.be.on.or.after.approval.date."""
     problems = _not_future("approved_on", approved_on, today)
-    if approved_principal is not None:
-        problems += _check_amount(
-            "approved_principal",
-            approved_principal,
-            IntRange(None, 1, form.approved_amount),
-            form.currency,
-            " (the applied principal)",
+    expected = form.expected_disbursement_date
+    if not problems and approved_on is not None and expected is not None and approved_on > expected:
+        problems.append(
+            FieldProblem(
+                "approved_on",
+                f"must be on or before the expected disbursement date {expected.isoformat()}",
+            )
         )
     return problems
 
 
-def check_disbursement(
-    form: DisbursementForm, transaction_date: date | None, today: date
-) -> list[FieldProblem]:
+def check_disbursement(transaction_date: date | None, today: date) -> list[FieldProblem]:
     return _not_future("transaction_date", transaction_date, today)
 
 
@@ -963,13 +934,13 @@ def _payment_type_field(form: RepaymentForm | PayoffForm) -> dict[str, Any]:
     )
 
 
-def _date_field(name: str, default: date | None, today: date, text: str) -> dict[str, Any]:
+def _date_field(name: str, default: date | None, latest: date, text: str) -> dict[str, Any]:
     return _field(
         name,
         "date",
         f"YYYY-MM-DD, not in the future (Kigali time). {text}",
         default=_iso(default),
-        maximum=today.isoformat(),
+        maximum=latest.isoformat(),
     )
 
 
@@ -984,7 +955,12 @@ def _step_body(
             f"POST {loan}/approve",
             [
                 _external_reference_field(),
-                _date_field("approved_on", form.approved_on, today, "Default: today."),
+                _date_field(
+                    "approved_on",
+                    form.approved_on,
+                    min(today, form.expected_disbursement_date or today),
+                    "Default: today. Not after the expected disbursement date.",
+                ),
                 _field(
                     "approved_principal",
                     "integer",
@@ -1003,12 +979,7 @@ def _step_body(
             f"POST {loan}/disburse",
             [
                 _external_reference_field(),
-                _date_field(
-                    "transaction_date",
-                    form.default_date(today),
-                    today,
-                    "Default: the expected disbursement date, or today if that is later.",
-                ),
+                _date_field("transaction_date", today, today, "Default: today."),
                 _field(
                     "amount",
                     "integer",
