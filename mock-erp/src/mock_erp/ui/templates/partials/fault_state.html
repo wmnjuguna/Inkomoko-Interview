@@ -1,0 +1,45 @@
+{% from "macros.html" import icon, fault_scope, caller_sees %}
+<div class="live-region" id="fault-state" hx-get="/ui/faults/state" hx-trigger="every 5s" hx-swap="outerHTML">
+  {% if fault.active %}
+  <section class="banner on" aria-label="Active fault">
+    <div class="banner-main">
+      <span class="banner-icon">{{ icon("bolt", 20, 2) }}</span>
+      <div>
+        <div class="banner-title">{{ fault_labels[fault.mode] }} is on</div>
+        <div class="banner-text">Callers get <span class="code-bit">{{ caller_sees(fault.mode, fault) }}</span> · {{ fault_scope(fault) }}</div>
+      </div>
+    </div>
+    <button type="button" class="btn dark" hx-post="/ui/faults/clear" hx-target="#fault-state" hx-swap="outerHTML">{{ icon("check", 18, 2.2) }}Clear fault</button>
+  </section>
+  {% else %}
+  <section class="banner off" aria-label="Fault status">
+    <div class="banner-main">
+      <span class="banner-icon">{{ icon("check", 20, 2.2) }}</span>
+      <div>
+        <div class="banner-title">No fault on</div>
+        <div class="banner-text">The ERP answers every call normally. Pick a switch below to break it.</div>
+      </div>
+    </div>
+  </section>
+  {% endif %}
+
+  <div class="tiles" role="group" aria-label="Fault modes">
+    {% for t in tiles %}
+    {% set on = fault.active and fault.mode == t.mode %}
+    <button type="button" class="tile" name="mode" value="{{ t.mode }}" aria-pressed="{{ 'true' if on else 'false' }}"
+      {% if on %}hx-post="/ui/faults/clear"{% else %}hx-post="/ui/faults" hx-include="#fault-options" hx-vals='{"mode": "{{ t.mode }}"}'{% endif %}
+      hx-target="#fault-state" hx-swap="outerHTML">
+      <span class="tile-top">
+        <span class="tile-badge num" aria-hidden="true">{{ t.badge }}</span>
+        <span class="switch" aria-hidden="true"></span>
+      </span>
+      <span class="tile-label">{{ t.label }}</span>
+      <span class="tile-mode">{{ t.mode }}</span>
+      <span class="tile-what">{{ t.what }}</span>
+      <span class="tile-resp code-bit"><span class="lead">caller sees</span>{{ caller_sees(t.mode, fault) }}</span>
+      <span class="tile-foot">{% if on %}On · {{ fault_scope(fault) }} · click to clear{% else %}Off · click to switch on{% endif %}</span>
+    </button>
+    {% endfor %}
+  </div>
+</div>
+{% if clear_error %}<div id="fault-error" hx-swap-oob="innerHTML"></div>{% endif %}

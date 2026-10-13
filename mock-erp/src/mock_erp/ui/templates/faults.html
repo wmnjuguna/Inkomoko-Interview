@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}Fault switches{% endblock %}
+{% block crumb %}Fault switches{% endblock %}
+{% block content %}
+<div class="page">
+  <div class="page-head">
+    <div>
+      <h1>Fault switches</h1>
+      <p>Break the ERP on purpose, then watch the caller recover. Only paths under the prefix fail. Health, admin, the API docs and these pages never fail.</p>
+    </div>
+  </div>
+
+  {% include "partials/fault_state.html" %}
+
+  <form class="options" id="fault-options" aria-labelledby="options-title" onsubmit="return false">
+    <h2 id="options-title">Options for the next switch</h2>
+    <div class="options-grid">
+      <div class="field">
+        <label class="lbl" for="f-path">Only for paths starting with</label>
+        <input id="f-path" name="path_prefix" list="f-paths" value="{{ fault.path_prefix }}" autocomplete="off">
+        <datalist id="f-paths">
+          <option value="/api"></option>
+          <option value="/api/journal-entries"></option>
+          <option value="/api/accounts"></option>
+        </datalist>
+      </div>
+      <div class="field">
+        <label class="lbl" for="f-count">Next calls only</label>
+        <input id="f-count" name="remaining" class="num" type="number" min="1" inputmode="numeric" placeholder="until cleared" value="{{ fault.remaining if fault.active and fault.remaining is not none else '' }}">
+      </div>
+      <div class="field">
+        <label class="lbl" for="f-delay">Delay (seconds)</label>
+        <input id="f-delay" name="delay_seconds" class="num" type="number" min="1" max="120" inputmode="numeric" value="{{ fault.delay_seconds }}">
+      </div>
+      <div class="field">
+        <label class="lbl" for="f-retry">Retry-After (seconds)</label>
+        <input id="f-retry" name="retry_after" class="num" type="number" min="1" max="3600" inputmode="numeric" value="{{ fault.retry_after }}">
+      </div>
+    </div>
+    <p class="hint">Delay applies to the two timeout modes, Retry-After to rate limiting. Leave “Next calls only” empty to keep the fault on until you clear it. A switch replaces any fault already on.</p>
+    <div id="fault-error" aria-live="assertive"></div>
+  </form>
+</div>
+{% endblock %}

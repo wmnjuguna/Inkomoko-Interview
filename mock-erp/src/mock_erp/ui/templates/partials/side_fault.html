@@ -1,0 +1,4 @@
+{% from "macros.html" import fault_scope %}<a class="side-fault{% if fault.active %} on{% endif %}" id="side-fault" href="/ui/faults"{% if oob %} hx-swap-oob="true"{% endif %}>
+  <span class="side-fault-head"><span class="dot {{ 'warn alarm' if fault.active else 'good' }}"></span>{% if fault.active %}{{ fault_labels[fault.mode] }}{% else %}No fault on{% endif %}</span>
+  <span class="side-fault-text" style="display:block">{% if fault.active %}{{ fault.mode }} · {{ fault_scope(fault) }}{% else %}Answering normally{% endif %}</span>
+</a>

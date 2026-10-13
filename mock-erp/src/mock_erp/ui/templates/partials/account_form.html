@@ -1,0 +1,56 @@
+{% set f = form or {} %}
+<form id="account-form" class="account-form" hx-post="/ui/accounts" hx-target="this" hx-swap="outerHTML" novalidate>
+  {% if error %}
+  <p class="form-error" role="alert"><span class="dot bad"></span><span>{{ error }}</span></p>
+  <div style="height:14px"></div>
+  {% endif %}
+  <div class="form-grid">
+    <div class="field">
+      <label class="lbl" for="acc-code">Code</label>
+      <input id="acc-code" name="code" class="num" inputmode="numeric" autocomplete="off" placeholder="1400" value="{{ f.code or '' }}" required pattern="[0-9]{4,10}" aria-describedby="acc-code-hint">
+      <p class="hint" id="acc-code-hint">Digits only, 4 to 10 long.</p>
+    </div>
+    <div class="field">
+      <label class="lbl" for="acc-ref">External reference</label>
+      <input id="acc-ref" name="external_reference" autocomplete="off" placeholder="GL-1400" value="{{ f.external_reference or '' }}" required>
+      <p class="hint">The caller's id for this account.</p>
+    </div>
+    <div class="field wide">
+      <label class="lbl" for="acc-name">Name</label>
+      <input id="acc-name" name="name" autocomplete="off" placeholder="Micro Loans" value="{{ f.name or '' }}" required maxlength="200">
+    </div>
+    <div class="field">
+      <label class="lbl" for="acc-type">Type</label>
+      <select id="acc-type" name="type">
+        {% for t in ["ASSET", "LIABILITY", "EQUITY", "INCOME", "EXPENSE"] %}
+        <option value="{{ t }}"{% if f.type == t %} selected{% endif %}>{{ t | capitalize }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <fieldset class="field" style="border:0;margin:0;padding:0">
+      <legend class="lbl" style="padding:0;margin-bottom:6px">Usage</legend>
+      <div class="seg">
+        <label><input type="radio" name="usage" value="DETAIL"{% if f.usage != "HEADER" %} checked{% endif %}><span>Detail</span></label>
+        <label><input type="radio" name="usage" value="HEADER"{% if f.usage == "HEADER" %} checked{% endif %}><span>Header</span></label>
+      </div>
+    </fieldset>
+    <div class="field wide">
+      <label class="lbl" for="acc-parent">Parent</label>
+      <select id="acc-parent" name="parent_code" aria-describedby="acc-parent-hint">
+        <option value="">No parent (top-level header)</option>
+        {% set codes = headers | map(attribute="code") | list %}
+        {% for h in headers %}
+        <option value="{{ h.code }}" data-type="{{ h.type }}"{% if f.parent_code == h.code or (not f and loop.first) %} selected{% endif %}>{{ h.code }} · {{ h.name }} ({{ h.type | lower }})</option>
+        {% endfor %}
+        {% if f.parent_code and f.parent_code not in codes %}
+        <option value="{{ f.parent_code }}" selected>{{ f.parent_code }} (not a known header)</option>
+        {% endif %}
+      </select>
+      <p class="hint" id="acc-parent-hint">A detail account needs a header parent of the same type.</p>
+    </div>
+  </div>
+  <div class="form-actions">
+    <button type="button" class="btn" data-close-dialog>Cancel</button>
+    <button type="submit" class="btn primary">Add account</button>
+  </div>
+</form>

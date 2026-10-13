@@ -1,0 +1,11 @@
+{% from "macros.html" import fault_scope %}<div class="pills" id="status-pills"{% if oob %} hx-swap-oob="true"{% endif %}>
+  {% if fault.active %}
+  <span class="chip lg warn"><span class="dot warn alarm"></span>ERP degraded</span>
+  <a class="chip lg warn" href="/ui/faults" title="Open the fault switches">
+    <span class="dot warn alarm"></span>Fault: {{ fault.mode }}<span class="sr-only"> · {{ fault_scope(fault) }}</span>
+  </a>
+  {% else %}
+  <span class="chip lg good"><span class="dot good"></span>ERP healthy</span>
+  {% endif %}
+</div>
+{% if oob %}{% include "partials/side_fault.html" %}{% include "partials/nav_fault_badge.html" %}{% endif %}

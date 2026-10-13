@@ -1,0 +1,73 @@
+{% from "macros.html" import icon %}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}Mock ERP{% endblock %} · Mock ERP</title>
+<meta name="htmx-config" content='{"responseHandling":[{"code":"204","swap":false},{"code":"[23]..","swap":true},{"code":"409|422","swap":true,"error":false},{"code":"[45]..","swap":false,"error":true}],"scrollIntoViewOnBoost":false}'>
+<link rel="preload" href="{{ url_for('ui.static', filename='fonts/plus-jakarta-sans-latin-wght-normal.woff2') }}" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="{{ url_for('ui.static', filename='fonts/bricolage-grotesque-latin-wght-normal.woff2') }}" as="font" type="font/woff2" crossorigin>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='6' fill='%230f766e'/%3E%3Cpath d='M7 17V11M12 17V7M17 17v-4' stroke='white' stroke-width='2.2' stroke-linecap='round'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="{{ url_for('ui.static', filename='app.css') }}">
+<script src="{{ url_for('ui.static', filename='htmx.min.js') }}" defer></script>
+<script src="{{ url_for('ui.static', filename='app.js') }}" defer></script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="shell" id="shell">
+
+  <nav class="sidebar" aria-label="Sections">
+    <a class="brand" href="{{ url_for('ui.accounts_page') }}">
+      <span class="brand-logo">{{ icon("logo", 18, 2.2) }}</span>
+      <span><span class="brand-name">Mock ERP</span><br><span class="brand-sub">Inkomoko · sandbox</span></span>
+    </a>
+
+    <div>
+      <div class="nav-title" id="nav-title">Ledger</div>
+      <ul class="nav-list" aria-labelledby="nav-title">
+        <li><a class="nav-link" href="/ui/accounts"{% if active == "accounts" %} aria-current="page"{% endif %}>{{ icon("accounts") }}<span class="grow">Chart of accounts</span></a></li>
+        <li><a class="nav-link" href="/ui/journal"{% if active == "journal" %} aria-current="page"{% endif %}>{{ icon("journal") }}<span class="grow">Journal</span><span class="nav-badge num" aria-label="{{ entry_count }} entries">{{ entry_count }}</span></a></li>
+        <li><a class="nav-link" href="/ui/journal/new"{% if active == "new" %} aria-current="page"{% endif %}>{{ icon("pen") }}<span class="grow">New entry</span></a></li>
+        <li><a class="nav-link" href="/ui/faults"{% if active == "faults" %} aria-current="page"{% endif %}>{{ icon("bolt") }}<span class="grow">Fault switches</span>{% include "partials/nav_fault_badge.html" %}</a></li>
+      </ul>
+    </div>
+
+    <div class="side-foot">
+      {% include "partials/side_fault.html" %}
+      <div class="operator">
+        <span class="operator-avatar" aria-hidden="true">OP</span>
+        <span><span style="color:#f5f5f4;font-weight:600">Operator</span><br><span style="color:var(--faint)">localhost only</span></span>
+      </div>
+    </div>
+  </nav>
+
+  <div class="main-panel">
+    <header class="topbar">
+      <nav class="crumbs" aria-label="Breadcrumb">
+        <ol>
+          <li><a href="/ui/accounts">Mock ERP</a></li>
+          <li>{{ icon("chev", 14, 2) }}<span aria-current="page">{% block crumb %}{% endblock %}</span></li>
+        </ol>
+      </nav>
+      <div class="topbar-actions">
+        {% include "partials/status.html" %}
+        <a class="btn small" href="/openapi">{{ icon("docs", 16, 2) }}API docs</a>
+        <button type="button" class="btn small" id="rail-toggle" aria-controls="activity-rail" aria-pressed="true">{{ icon("pulse", 16, 2) }}Activity</button>
+      </div>
+    </header>
+
+    <main id="main" tabindex="-1">
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+
+  <aside class="rail" id="activity-rail" aria-label="Live activity"
+         hx-get="/ui/activity" hx-trigger="every 5s" hx-swap="innerHTML">
+    {% include "partials/activity.html" %}
+  </aside>
+</div>
+
+<div class="toasts" id="toasts" role="status" aria-live="polite" aria-atomic="false"></div>
+{% block dialogs %}{% endblock %}
+</body>
+</html>

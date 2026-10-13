@@ -1,0 +1,30 @@
+{% from "macros.html" import fault_scope %}<div class="rail-head">
+  <h2>Live activity</h2>
+  <span class="rail-live"><span class="dot good live"></span>LIVE</span>
+</div>
+<a class="rail-fault {{ 'on' if fault.active else 'off' }}" href="/ui/faults">
+  {% if fault.active %}
+  <strong><span class="dot warn alarm"></span>{{ fault_labels[fault.mode] }}</strong>
+  <span class="sub">{{ fault.mode }} · {{ fault_scope(fault) }}</span>
+  {% else %}
+  <strong><span class="dot good"></span>No fault on</strong>
+  <span class="sub">Every call is answered normally.</span>
+  {% endif %}
+</a>
+<div class="rail-title">Latest journal entries</div>
+{% if recent %}
+<ol class="activity">
+  {% for e in recent %}
+  <li class="activity-item">
+    <span class="dot src-{{ e.source }}"></span>
+    <span style="min-width:0">
+      <span class="act-top"><span class="act-tag">{{ e.source | lower }}</span><time class="act-time num" datetime="{{ e.created_at.isoformat() }}" title="{{ e.created_at.strftime('%Y-%m-%d %H:%M:%S %Z') }}">{{ e.created_at.strftime('%H:%M:%S') }}</time></span>
+      <span class="act-text"><b>{{ e.external_reference }}</b> · <span class="num">{{ e.amount | rwf }}</span> RWF{% if e.reverses %} · reverses {{ e.reverses }}{% endif %}</span>
+    </span>
+  </li>
+  {% endfor %}
+</ol>
+{% else %}
+<div class="rail-empty">No entries yet. Post one from the API and it shows up here.</div>
+{% endif %}
+{% if oob %}{% include "partials/status.html" %}{% endif %}

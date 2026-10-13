@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% from "macros.html" import icon %}
+{% block title %}Chart of accounts{% endblock %}
+{% block crumb %}Chart of accounts{% endblock %}
+{% block content %}
+<div class="page">
+  <div class="page-head">
+    <div>
+      <h1>Chart of accounts</h1>
+      <p>The ERP owns the chart. Header accounts group the tree; only detail accounts take journal lines. Balances are on each account's normal side, in whole RWF.</p>
+    </div>
+    <div class="page-head-actions">
+      <span class="live-tag"><span class="dot good live"></span>Live balances</span>
+      <button type="button" class="btn primary" data-open-dialog="add-account">{{ icon("plus", 18, 2.2) }}Add account</button>
+    </div>
+  </div>
+
+  {% include "partials/accounts_live.html" %}
+</div>
+{% endblock %}
+
+{% block dialogs %}
+<dialog class="sheet" id="add-account" aria-labelledby="add-account-title">
+  <div class="sheet-head">
+    <div>
+      <h2 id="add-account-title">Add account</h2>
+      <p>Same rules as <span class="code-bit">POST /api/accounts</span>. Sending the same details twice is safe.</p>
+    </div>
+    <button type="button" class="btn icon-only small" data-close-dialog aria-label="Close">{{ icon("x", 18, 2) }}</button>
+  </div>
+  <div class="sheet-body">
+    {% include "partials/account_form.html" %}
+  </div>
+</dialog>
+{% endblock %}

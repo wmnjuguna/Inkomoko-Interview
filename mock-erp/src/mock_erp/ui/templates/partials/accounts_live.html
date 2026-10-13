@@ -1,0 +1,94 @@
+{% from "macros.html" import icon %}
+{% macro amount_cells(row) -%}
+  <span class="amt c-dr num{% if row.debit == 0 %} zero{% endif %}"><span class="sr-only">Debits </span>{{ row.debit | rwf }}</span>
+  <span class="amt c-cr num{% if row.credit == 0 %} zero{% endif %}"><span class="sr-only">Credits </span>{{ row.credit | rwf }}</span>
+  <span class="bal">
+    <span class="bal-num num{% if row.is_zero %} zero{% elif row.balance < 0 %} neg{% endif %}"><span class="sr-only">Balance </span>{{ row.balance | rwf }}</span>
+    {% if row.depth > 0 %}
+    <span class="bar type-{{ row.account.type }}{% if row.balance < 0 %} neg{% endif %}" role="img" aria-label="{{ row.share }}% of the {{ row.account.parent_code }} total" title="{{ row.share }}% of the {{ row.account.parent_code }} total"><span style="width: {{ row.share }}%"></span></span>
+    {% endif %}
+  </span>
+{%- endmacro %}
+
+{% macro acct_cell(row, toggle=False) -%}
+  <span class="acct" style="--depth: {{ [row.depth - 1, 0] | max if not toggle else row.depth }}">
+    {% if toggle %}<span class="chev">{{ icon("chev", 14, 2.4) }}</span>{% else %}<span class="leaf-pad" aria-hidden="true"></span>{% endif %}
+    <span class="acct-code num">{{ row.account.code }}</span>
+    <span class="acct-text">
+      <span class="acct-name">{{ row.account.name }}</span>
+      <span class="acct-ref">{{ row.account.external_reference }}<span class="type-mini"> · {{ row.account.type | lower }}</span></span>
+    </span>
+  </span>
+  <span class="c-type"><span class="type-chip type-{{ row.account.type }}">{{ row.account.type | capitalize }}</span></span>
+{%- endmacro %}
+
+{% macro render_children(rows) -%}
+  {% for row in rows %}
+    <li class="row{% if row.is_header %} sub{% endif %}" data-code="{{ row.account.code }}">
+      {{ acct_cell(row) }}
+      {{ amount_cells(row) }}
+    </li>
+    {% if row.children %}{{ render_children(row.children) }}{% endif %}
+  {% endfor %}
+{%- endmacro %}
+
+<div class="live-region" id="accounts-live"
+     hx-get="/ui/accounts/table" hx-trigger="every 5s" hx-swap="outerHTML"{% if oob %} hx-swap-oob="true"{% endif %}>
+
+  <section class="kpis" aria-label="Key figures">
+    <div class="kpi">
+      <div class="kpi-top"><span class="lbl">Accounts</span><span class="kpi-icon tone-teal">{{ icon("layers", 15, 2.2) }}</span></div>
+      <div class="kpi-value num">{{ account_count }}</div>
+      <div class="kpi-sub">{{ header_count }} headers · {{ account_count - header_count }} detail</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-top"><span class="lbl">Journal entries</span><span class="kpi-icon tone-indigo">{{ icon("journal", 15, 2.2) }}</span></div>
+      <div class="kpi-value num">{{ stats.entries | rwf }}</div>
+      <div class="kpi-sub">{% if stats.entries %}posted and kept{% else %}nothing posted yet{% endif %}</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-top"><span class="lbl">Ledger total</span><span class="kpi-icon tone-ink">{{ icon("scale", 15, 2) }}</span></div>
+      <div class="kpi-value num">{{ stats.debit_total | rwf }}<small>RWF</small></div>
+      <div class="kpi-sub">
+        {% if stats.debit_total == stats.credit_total %}<span class="dot good"></span>Debits equal credits
+        {% else %}<span class="dot bad"></span>Out of balance by {{ (stats.debit_total - stats.credit_total) | abs | rwf }}{% endif %}
+      </div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-top"><span class="lbl">Loan book</span><span class="kpi-icon tone-sky">{{ icon("trend", 15, 2.2) }}</span></div>
+      <div class="kpi-value num">{% if loan_book %}{{ loan_book.balance | rwf }}<small>RWF</small>{% else %}—{% endif %}</div>
+      <div class="kpi-sub">1200 Loan Receivable</div>
+    </div>
+  </section>
+
+  <section class="card" aria-labelledby="tree-title">
+    <div class="card-bar">
+      <h2 class="sr-only" id="tree-title">Account tree</h2>
+      <div class="tools">
+        <button type="button" class="btn pill" data-tree="expand">Expand all</button>
+        <button type="button" class="btn pill" data-tree="collapse">Collapse all</button>
+      </div>
+      <span class="lbl" style="font-weight:500">Balances on each account's normal side · RWF</span>
+    </div>
+    <div class="tree">
+      <div class="tree-cols" aria-hidden="true">
+        <span class="lbl">Account</span><span class="lbl c-type">Type</span><span class="lbl r c-dr">Debits</span><span class="lbl r c-cr">Credits</span><span class="lbl r">Balance</span>
+      </div>
+      {% for root in tree %}
+      <details class="group head" data-code="{{ root.account.code }}" open>
+        <summary class="row" aria-label="{{ root.account.code }} {{ root.account.name }}, balance {{ root.balance | rwf }} RWF">
+          {{ acct_cell(root, toggle=True) }}
+          {{ amount_cells(root) }}
+        </summary>
+        {% if root.children %}
+        <ul class="tree-list">{{ render_children(root.children) }}</ul>
+        {% else %}
+        <div class="empty">No accounts under {{ root.account.name }} yet.</div>
+        {% endif %}
+      </details>
+      {% else %}
+      <div class="empty">No accounts yet. Add a header account to start the chart.</div>
+      {% endfor %}
+    </div>
+  </section>
+</div>
