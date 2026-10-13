@@ -1,6 +1,6 @@
 # Architecture
 
-> **Status:** the Fineract plugin, the Mock ERP, the Fineract setup step and the Integration Service are built and tested: GL sync, clients, loans, disbursements, repayments, duplicate protection, journal entries through an outbox, and recovery. They were run on a clean stack (`evidence/P2/`). Reconciliation (Part K) is still a design. Sections marked *planned* describe what I will build.
+> **Status:** the Fineract plugin, the Mock ERP, the Fineract setup step and the Integration Service are built and tested: GL sync, clients, loans, disbursements, repayments, duplicate protection, journal entries through an outbox, and recovery. They were run on a clean stack (`evidence/P2/`), and again after the loan steps moved to Fineract's templates (`evidence/P2.5/`). Reconciliation (Part K) is still a design. Sections marked *planned* describe what I will build.
 
 ## The parts
 
@@ -130,15 +130,37 @@ Each step first looks for what it would create. If it is there, it is left alone
 
 ### Partner requests (Parts C to F)
 
-Every request that changes something takes the same path. The code is in `services/operations.py`, `services/fineract_calls.py`, `services/clients.py`, `services/loans.py` and `services/money.py`.
+Every request that changes something takes the same path. The code is in `services/operations.py`, `services/fineract_calls.py`, `services/templates.py`, `services/clients.py`, `services/loans.py` and `services/money.py`.
 
 1. **Check the input.** Pydantic checks the body. Date rules use the Kigali date. Nothing is saved for a bad request.
 2. **Save and claim it (`begin`).** One database transaction inserts the operation, keyed by type and `external_reference`, with a hash of the body and the partner. It moves `RECEIVED -> FINERACT_PENDING` and sets `attempts` to 1. If the row already exists, the saved answer, a `202` or a `409` is returned here, and Fineract is not called.
-3. **Write to Fineract once.** Writes to a loan (approve, disburse, repay) run under a Postgres advisory lock for that loan. Our op key goes to Fineract as `externalId`, and `<op key>:<attempt>` as `Idempotency-Key`. A second attempt is looked up first.
-4. **Decide from the answer.** A clear yes, or a lookup that finds it, is done. Not sent, or a clear refusal, is `FAILED`. A timeout, `5xx` or `425` is looked up by `externalId` straight away. If the lookup does not find it, the request stays `FINERACT_PENDING` and the partner gets `504`. Recovery decides later.
-5. **Finish in one transaction.** For a disbursement or a repayment, the service reads Fineract's own transaction back and builds the journal entry from it. Then one transaction marks the operation `FINERACT_DONE`, saves the answer, writes the outbox row and moves to `ERP_PENDING`. For a client, an application or an approval, the same transaction writes our `clients` or `loans` row and moves to `COMPLETED`.
+3. **Read the rules from Fineract.** A retry first looks up its earlier attempt by our key. If it landed late, it is ours and is finished here. If the lookup fails, the request stays `FINERACT_PENDING` and the partner gets `504`. Otherwise the service reads Fineract's template for the step (`services/templates.py`) and checks the request against it: the principal range for an application, the amount and date for an approval, the approved amount for a payout, the payment types for a repayment. A value that does not fit is `422` with `details.problems`, and the request is `FAILED`. A template that can't be read means nothing was sent: `FAILED`. For a payout or a repayment this read happens under the loan's lock, just before the write.
+4. **Write to Fineract once.** Writes to a loan (approve, disburse, repay) run under a Postgres advisory lock for that loan. Our op key goes to Fineract as `externalId`, and `<op key>:<attempt>` as `Idempotency-Key`. A second attempt is looked up first.
+5. **Decide from the answer.** A clear yes, or a lookup that finds it, is done. Not sent, or a clear refusal, is `FAILED`. A timeout, `5xx` or `425` is looked up by `externalId` straight away. If the lookup does not find it, the request stays `FINERACT_PENDING` and the partner gets `504`. Recovery decides later.
+6. **Finish in one transaction.** For a disbursement or a repayment, the service reads Fineract's own transaction back and builds the journal entry from it. Then one transaction marks the operation `FINERACT_DONE`, saves the answer, writes the outbox row and moves to `ERP_PENDING`. For a client, an application or an approval, the same transaction writes our `clients` or `loans` row and moves to `COMPLETED`.
 
 Fineract's error text is never passed on. Partners only see our own messages and, where useful, Fineract's error codes.
+
+### Fineract templates and the form endpoints
+
+`services/templates.py` reads Fineract's template APIs and turns each one into a typed form: the client template, the loan template for the product, the approval template, and the transaction templates for `disburse`, `repayment` and `prepayLoan`. It has three parts:
+
+- **parse:** pure functions from a template's JSON to a frozen form. A shape we do not expect is treated as a failed read.
+- **fetch:** one Fineract read each (two for the loan application form: the product by its external id, then the template).
+- **check and view:** pure checks of a partner's value against a form (a list of field problems, which become `details.problems` in a `422`), and the partner view of a form.
+
+The forms keep the Fineract ids that a Fineract body needs (product, office, payment type, enum ids). The partner views never show them: an option's value is a name or a code.
+
+The writes in `services/clients.py`, `services/loans.py` and `services/money.py` use these forms (step 3 above). `api/templates.py` serves the same forms to partners, read only:
+
+| Route | Fineract template |
+|---|---|
+| `GET /api/clients/template` | `GET /clients/template` |
+| `GET /api/loans/template[?client_uid=]` | `GET /loans/template?templateType=individual&productId=..[&clientId=..]` |
+| `GET /api/loans/{loan_reference}/template?step=approval` | `GET /loans/external-id/{ref}/template?templateType=approval` |
+| `...?step=disbursement`, `repayment`, `payoff` | `GET /loans/external-id/{ref}/transactions/template?command=disburse`, `repayment`, `prepayLoan` |
+
+Fineract answers a template whatever the loan's status, so the step form also reads the loan and sets `available` from its status. [DECISIONS.md](DECISIONS.md) has the reasons and what the probe found.
 
 ### The outbox and the recovery loop
 
@@ -188,8 +210,11 @@ sequenceDiagram
   API->>DB: begin: insert operation DSB:<ref>, RECEIVED -> FINERACT_PENDING, commit
   Note over API,DB: L1 same reference: saved answer, 202 or 409. L2 another live DSB for this loan: 409
   API->>DB: take the loan's advisory lock (L3)
+  Note over API,F: attempt > 1: look up DSB:<ref> first. Found: ours, finish it (no template read).<br/>Lookup fails: stays FINERACT_PENDING, 504.
+  API->>F: GET /loans/external-id/{loan}/transactions/template?command=disburse
+  Note over API,F: the amount is the approved principal. The date is today unless the partner sent one.<br/>Template not readable: FAILED, 503, nothing sent.
   API->>F: POST /loans/external-id/{loan}?command=disburse<br/>externalId DSB:<ref>, Idempotency-Key DSB:<ref>:<attempt>
-  Note over API,F: attempt > 1: look it up first. Fineract down: FAILED, 503.<br/>Timeout, 5xx, 425: look it up. Not found yet: stays FINERACT_PENDING, 504.
+  Note over API,F: Fineract down: FAILED, 503.<br/>Timeout, 5xx, 425: look it up. Not found yet: stays FINERACT_PENDING, 504.
   F-->>API: 200
   API->>F: GET .../transactions/external-id/DSB:<ref> (Fineract's own transaction)
   API->>F: GET the loan (status, principal still owed)
@@ -204,7 +229,7 @@ sequenceDiagram
   W->>DB: outbox SENT, operation COMPLETED, erp_status SENT
 ```
 
-A repayment is the same, with two more checks under the lock: the loan must be `ACTIVE` in Fineract, and an unknown `payment_type` is refused before anything is sent.
+A repayment is the same, with the repayment template in place of the disbursement template, and one more check under the lock: the loan must be `ACTIVE` in Fineract. A `payment_type` that is not one of the partner payment types in the template is refused before anything is sent.
 
 ## The Fineract plugin
 
