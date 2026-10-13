@@ -8,14 +8,14 @@ This is my take-home assessment. It connects three things:
 
 The goal is to show that money moves exactly once, even with duplicate requests, timeouts, crashes and requests that arrive at the same time.
 
-> **Status:** Part A (GL sync, the Fineract plugin and the Python side) and Part B (Fineract setup) are built, tested and run on a clean stack. The Mock ERP is built and tested. The Integration Service has GL sync only: clients, loans and payments are not started yet. Anything marked *planned* does not exist yet.
+> **Status:** Parts A to H are built and tested. Parts A to D and F to H have been run on a clean stack (`evidence/P1/`, `evidence/P2/`). Part E, the Integration API, is built except `POST /api/reconciliation`. Part I is run for I-1 only. Parts J and K are not run, and reconciliation (K) is not built. Anything marked *planned* does not exist yet.
 
 ## What is done
 
 | Tier | Parts | Status |
 |---|---|---|
-| 1. Core (required) | A–G | Part A (plugin and GL sync) and Part B (setup): done and tested. The Mock ERP: done and tested. Parts C–G: not started. |
-| 2. Reliability (required) | H–K | Not started |
+| 1. Core (required) | A–G | A (plugin and GL sync), B (setup), C (clients), D (loan steps), F (duplicate requests) and G (Mock ERP): done, tested and run. E (the Integration API): done except `POST /api/reconciliation`. |
+| 2. Reliability (required) | H–K | H (journal entries built from Fineract's own split, sent through an outbox): done, tested and run. I: I-1 run; I-2 and I-3 not run yet. J: the retry and recovery code is built and tested, but the J simulations are not run yet. K (reconciliation): not started. |
 | 3. Stretch (optional) | L | Not started. Ideas: GL master-data reconciliation, a dead-letter view |
 
 ## Versions
@@ -117,14 +117,16 @@ It listens on http://localhost:8091. Only this computer can reach it.
 | OpenAPI spec | http://localhost:8091/openapi/openapi.json |
 | Health check | http://localhost:8091/health |
 
-In Swagger, click **Authorize** and enter a partner key. Keys are set in `.env` as `PARTNER_API_KEYS`, in the form `name:key`. The default is `demo-partner:change-me-partner-key`. Today it has three routes: `POST /api/accounts/sync`, `GET /api/accounts/sync` and `POST /api/accounts/{erp_reference}/sync`. See [API.md](API.md).
+In Swagger, click **Authorize** and enter a partner key. Keys are set in `.env` as `PARTNER_API_KEYS`, in the form `name:key`. The default is `demo-partner:change-me-partner-key`. The routes are GL sync (`/api/accounts/...`), clients (`/api/clients`), loans with approve, disburse and repayments (`/api/loans/...`), `GET /api/transactions/{external_reference}` and `POST /admin/recover`. See [API.md](API.md).
+
+The background loop that sends journal entries to the ERP and finishes stuck requests has three optional settings in `.env`: `INTEGRATION_OUTBOX_ENABLED` (default `true`), `INTEGRATION_OUTBOX_POLL_SECONDS` (default `5`) and `INTEGRATION_OUTBOX_MAX_ATTEMPTS` (default `8`).
 
 ## Tests
 
 | Language | Command | What it runs |
 |---|---|---|
 | Java | `make test-java` | Builds Fineract (51 unit tests run during the build), starts it, then runs 10 integration tests against it. Details: [fineract-customization/BUILD.md](fineract-customization/BUILD.md) |
-| Python | `make test-python` | For the Mock ERP and then the Integration Service: ruff (lint and format), mypy in strict mode, then pytest. Last run on a clean stack: Mock ERP 216 passed, Integration Service 259 passed (`evidence/P1/tests.txt`). |
+| Python | `make test-python` | For the Mock ERP and then the Integration Service: ruff (lint and format), mypy in strict mode, then pytest. Last run on a clean stack: Mock ERP 216 passed, Integration Service 738 passed (517 unit, 221 integration), nothing skipped (`evidence/P2/tests.txt`). |
 
 The Python tests need the running stack and two empty test databases: `erp_test` and `integration_test`. They rebuild their tables on every run. A new data volume creates both by itself. On an older volume, create them once:
 
@@ -135,20 +137,23 @@ docker compose exec db createdb -U postgres -O integration integration_test
 
 To use other databases, set `ERP_TEST_DATABASE_URL` or `INTEGRATION_TEST_DATABASE_URL`, for example `postgresql+psycopg://integration:change-me-integration@localhost:5432/integration_test`.
 
-Some Integration Service tests call the live Fineract and Mock ERP. They never assume Fineract is empty and never delete anything. Where they create GL accounts, they use new 8-digit codes that start with 7, so they can run again and again. This leaves some test accounts in Fineract.
+Some Integration Service tests call the live Fineract and Mock ERP. They log in to Fineract as the API user. `tests/conftest.py` reads `FINERACT_API_USERNAME` and `FINERACT_API_PASSWORD` from `.env` when they are not already set. They never assume Fineract is empty and never delete anything. They use new GL codes (8 digits, starting with 7), new client ids and new references on every run, so they can run again and again. This leaves test clients, loans and accounts in Fineract.
 
 Other commands: `make down` stops everything. `make reset` stops everything and deletes all data. `make help` lists all commands.
 
 ## Simulations
 
-Each scenario has a `make` command. It prints the state before and after, in the format of [SIMULATIONS.md](SIMULATIONS.md). Two exist so far, both for Part A:
+Each scenario has a `make` command. It prints the state before and after, in the format of [SIMULATIONS.md](SIMULATIONS.md). Five exist so far:
 
 | Command | What it shows |
 |---|---|
 | `make demo-gl-sync` | The plugin's four rules on `GL-1200`: one mapping, same data gives the same account, different data gives 409, no permission gives 403 |
 | `make simulate-gl-sync-4x` | Two new ERP accounts, each sent 4 times at once (through the service, then straight to the plugin). Every count must be 1. |
+| `make demo-identity` | C-1: create a client, find it by `client_uid`, check its name, send it again, send different data, reuse the `client_uid` |
+| `make demo-lifecycle` | D-1: a 5,000,000 RWF loan from application to Closed: approve, pay out, 3 repayments, pay off. After each step it shows Fineract's status and balances, the ERP entries and the service's record. |
+| `make simulate-duplicates` | I-1: the same disbursement sent 4 times. It must give 4 requests, 1 Fineract disbursement, 1 ERP entry and 1 operation. |
 
-Run them after `make up`. The output of the last runs is in `evidence/P1/`. `make demo-gl-sync` creates one extra Fineract user the first time, `demo-no-sync`, with only `READ_GLACCOUNT`, to show the 403. `make simulate-gl-sync-4x` adds two new ERP accounts (codes starting with 7, under 5000) on every run. The others are *planned*.
+Run them after `make up`. C-1, D-1 and I-1 only call the Integration Service, like a partner, and read Fineract, the ERP and the databases to show the state. The output of the last runs is in `evidence/P1/` (A-1, A-2) and `evidence/P2/` (C-1, D-1, I-1). Each run uses new ids, so they can run again. `make demo-gl-sync` creates one extra Fineract user the first time, `demo-no-sync`, with only `READ_GLACCOUNT`, to show the 403. `make simulate-gl-sync-4x` adds two new ERP accounts (codes starting with 7, under 5000) on every run. The other simulations in SIMULATIONS.md are *planned*.
 
 ## Folders
 
