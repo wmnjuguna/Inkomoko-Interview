@@ -126,7 +126,9 @@ The ERP type and usage are turned into Fineract's numbers in one place (`mapping
 7. Stop unless every GL account the loan product needs is `SYNCED`.
 8. Loan product `SME Asset Finance`, with each GL role pointing at a synced account.
 
-Each step first looks for what it would create. If it is there, it is left alone, so a second run creates nothing. Two things are never changed on a re-run: the API user's password, and an existing loan product. If the product has other settings, setup stops and lists the differences, because loans may already use it.
+Each form comes from Fineract's own template, as for the partner writes. The files in `fineract/configuration/` name the parent office, the user's office and role, and the product's choices by name or code. Setup turns them into Fineract ids through `GET /offices/template`, `GET /users/template`, `GET /currencies`, `GET /permissions` and `GET /loanproducts/template` (`setup/steps.py`, `setup/product.py`). The product's days-in-year, days-in-month and repayment start settings are the template's defaults.
+
+Each step first looks for what it would create. The office is found by its external id. If it is there, it is left alone, so a second run creates nothing. Two things are never changed on a re-run: the API user's password, and an existing loan product. If the product has other settings, setup stops and lists the differences, because loans may already use it.
 
 ### Partner requests (Parts C to F)
 
