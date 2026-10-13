@@ -40,7 +40,11 @@ from integration_service.setup.config_files import (
     SetupConfig,
     load_setup_config,
 )
-from integration_service.setup.product import build_product_body, ensure_product
+from integration_service.setup.product import (
+    build_product_body,
+    ensure_product,
+    fetch_product_template,
+)
 from integration_service.setup.steps import (
     FineractApi,
     SetupError,
@@ -48,7 +52,7 @@ from integration_service.setup.steps import (
     ensure_currency,
     ensure_office,
     ensure_role,
-    find_office,
+    find_office_by_external_id,
     find_role,
     find_user,
 )
@@ -146,7 +150,7 @@ def run_setup(
     api_login makes one read as the API user (not as admin)."""
     wait_until_ready(ready, wait_seconds, say)
 
-    office_found = find_office(fc, cfg.office.name) is not None
+    office_found = find_office_by_external_id(fc, cfg.office.external_id) is not None
     ensure_office(fc, cfg.office)
     say(f"office {cfg.office.name}: {'exists' if office_found else 'created'}")
 
@@ -179,7 +183,7 @@ def run_setup(
         mapping = fc.get_erp_account(reference)
         if mapping is not None:
             gl_ids[reference] = mapping.gl_account_id
-    body = build_product_body(cfg.loan_product, gl_ids)
+    body = build_product_body(cfg.loan_product, gl_ids, fetch_product_template(fc))
     product_found = any(p.get("name") == body["name"] for p in fc.get("/loanproducts") or [])
     product_id = ensure_product(fc, body)
     say(f"loan product {body['name']}: {'exists' if product_found else 'created'}")

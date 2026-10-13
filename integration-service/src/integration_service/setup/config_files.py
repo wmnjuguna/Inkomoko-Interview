@@ -31,7 +31,7 @@ class _Config(BaseModel):
 class OfficeConfig(_Config):
     name: str = Field(min_length=1, max_length=100)
     external_id: str = Field(min_length=1, max_length=100)
-    parent_id: int = Field(gt=0)
+    parent: str = Field(min_length=1, description="Parent office name, from /offices/template")
     opening_date: date
 
 

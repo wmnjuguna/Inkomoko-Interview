@@ -1,8 +1,14 @@
 """Ensure steps for the office, currency, role and API user. Each one looks first, then
 writes only what is missing or different. Setup uses Fineract's admin user.
 
+The forms come from Fineract: GET /offices/template (the parents an office may have),
+GET /users/template (the offices and roles a user may get), GET /currencies (the currencies
+Fineract offers) and GET /permissions (the permission codes). The config files hold only our
+choices, by name or code. A choice the form does not offer stops setup and lists the allowed
+values.
+
 What a re-run does when something already exists:
-- office: found by name under its parent, never changed. Same name under another parent stops.
+- office: found by externalId, never changed. Another name or parent stops setup.
 - currency: added to the selected list when missing. The other selected ones are kept.
 - role: its permissions are set to exactly the configured list. Extra ones are turned off.
 - API user: office and roles are set back to the configured ones. The password is left alone,
@@ -12,9 +18,13 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterable
+from datetime import date
 from typing import TYPE_CHECKING, Any, Protocol
+from urllib.parse import quote
 
+from integration_service.clients.errors import FineractNotFound
 from integration_service.logs import log_event
+from integration_service.services.templates import FINERACT_DATE_FORMAT, FINERACT_LOCALE
 
 if TYPE_CHECKING:
     from integration_service.setup.config_files import ApiUserConfig, OfficeConfig, RoleConfig
@@ -68,6 +78,28 @@ class WeakPasswordError(SetupError):
     """The API user password does not meet Fineract's password policy."""
 
 
+# --- template options ----------------------------------------------------------------------
+
+
+def option_id(options: Iterable[dict[str, Any]], name: str, what: str) -> int:
+    """The id of the template option with this name. SetupError naming the allowed ones."""
+    choices = list(options)
+    for option in choices:
+        if option.get("name") == name:
+            return int(option["id"])
+    allowed = ", ".join(str(o.get("name")) for o in choices) or "none"
+    raise SetupError(f"{what} {name!r} is not one Fineract offers. Allowed: {allowed}")
+
+
+def fineract_date(value: Any) -> date:
+    """Fineract shows a date as [2026, 1, 1] or as "2026-01-01", depending on the call."""
+    if isinstance(value, list) and len(value) == 3:
+        return date(int(value[0]), int(value[1]), int(value[2]))
+    if isinstance(value, str):
+        return date.fromisoformat(value)
+    raise SetupError(f"Unexpected date from Fineract: {value!r}")
+
+
 # --- office --------------------------------------------------------------------------------
 
 
@@ -78,26 +110,67 @@ def find_office(fc: FineractApi, name: str) -> dict[str, Any] | None:
     return None
 
 
-def ensure_office(fc: FineractApi, cfg: OfficeConfig) -> int:
-    """The office's Fineract id. Creates it under its parent when missing."""
-    office = find_office(fc, cfg.name)
-    if office is not None:
-        if office.get("parentId") != cfg.parent_id:
+def find_office_by_external_id(fc: FineractApi, external_id: str) -> dict[str, Any] | None:
+    """GET /offices/external-id/{externalId}. None on Fineract's 404. This answer has no
+    parentId, so read GET /offices/{id} for the parent."""
+    try:
+        office = fc.get(f"/offices/external-id/{quote(external_id, safe='')}")
+    except FineractNotFound:
+        return None
+    return dict(office)
+
+
+def check_opening_date(opening: date, parent: dict[str, Any], today: date) -> None:
+    """Fineract 1.15 only needs an opening date. It does not check it against today or the
+    parent (OfficeCommandFromApiJsonDeserializer, Office.fromJson). A client or loan in this
+    office cannot be dated before the office opened, so a wrong date fails later and far
+    from here. Setup refuses it now."""
+    if opening > today:
+        raise SetupError(f"Office opening date {opening} is in the future (today is {today})")
+    parent_opening = fineract_date(parent["openingDate"])
+    if opening < parent_opening:
+        raise SetupError(
+            f"Office opening date {opening} is before its parent {parent.get('name')!r} "
+            f"opened on {parent_opening}"
+        )
+
+
+def ensure_office(fc: FineractApi, cfg: OfficeConfig, today: date | None = None) -> int:
+    """The office's Fineract id, found by its externalId. When missing, it is created from
+    GET /offices/template: the parent is one of the template's allowedParents, by name.
+    An existing office is never changed; a different name or parent stops setup."""
+    existing = find_office_by_external_id(fc, cfg.external_id)
+    if existing is not None:
+        office_id = int(existing["id"])
+        office = fc.get(f"/offices/{office_id}")
+        if office.get("name") != cfg.name or office.get("parentName") != cfg.parent:
             raise SetupError(
-                f"Office {cfg.name!r} exists under parent {office.get('parentId')}, "
-                f"not {cfg.parent_id}"
+                f"Office {cfg.external_id} exists as {office.get('name')!r} under parent "
+                f"{office.get('parentName')!r}, not {cfg.name!r} under {cfg.parent!r}"
             )
         log_event("setup office exists", step="office", name=cfg.name)
-        return int(office["id"])
+        return office_id
+
+    same_name = find_office(fc, cfg.name)
+    if same_name is not None:
+        raise SetupError(
+            f"Office {cfg.name!r} exists with externalId {same_name.get('externalId')!r}, "
+            f"not {cfg.external_id!r}"
+        )
+
+    template = fc.get("/offices/template")
+    parent_id = option_id(template.get("allowedParents") or [], cfg.parent, "Parent office")
+    # The template lists the parents without their opening dates.
+    check_opening_date(cfg.opening_date, fc.get(f"/offices/{parent_id}"), today or date.today())
     created = fc.post(
         "/offices",
         {
             "name": cfg.name,
-            "parentId": cfg.parent_id,
             "externalId": cfg.external_id,
+            "parentId": parent_id,
             "openingDate": cfg.opening_date.isoformat(),
-            "dateFormat": "yyyy-MM-dd",
-            "locale": "en",
+            "dateFormat": FINERACT_DATE_FORMAT,
+            "locale": FINERACT_LOCALE,
         },
     )
     log_event("setup office created", step="office", name=cfg.name)
@@ -108,12 +181,18 @@ def ensure_office(fc: FineractApi, cfg: OfficeConfig) -> int:
 
 
 def ensure_currency(fc: FineractApi, code: str) -> bool:
-    """Selects the currency. True when it was added. PUT /currencies replaces the whole
-    list, so the currencies already selected are sent again."""
-    selected = [c["code"] for c in fc.get("/currencies").get("selectedCurrencyOptions") or []]
+    """Selects the currency. True when it was added. GET /currencies is the form: the
+    selected codes plus the codes Fineract offers. PUT /currencies replaces the whole list,
+    so the currencies already selected are sent again."""
+    form = fc.get("/currencies")
+    selected = [c["code"] for c in form.get("selectedCurrencyOptions") or []]
     if code in selected:
         log_event("setup currency exists", step="currency", code=code)
         return False
+    offered = [c["code"] for c in form.get("currencyOptions") or []]
+    if code not in offered:
+        allowed = ", ".join(sorted({*selected, *offered}))
+        raise SetupError(f"Currency {code!r} is not one Fineract offers. Allowed: {allowed}")
     fc.put("/currencies", {"currencies": [*selected, code]})
     log_event("setup currency added", step="currency", code=code)
     return True
@@ -144,8 +223,18 @@ def role_permissions(fc: FineractApi, role_id: int) -> tuple[set[str], set[str]]
     return known, held
 
 
+def check_permission_codes(fc: FineractApi, codes: Iterable[str]) -> None:
+    """Every code must be one GET /permissions lists, so a typo stops setup before the role
+    is created or changed."""
+    known = {p["code"] for p in fc.get("/permissions") or []}
+    unknown = sorted(set(codes) - known)
+    if unknown:
+        raise UnknownPermissionsError(unknown)
+
+
 def ensure_role(fc: FineractApi, cfg: RoleConfig) -> int:
     """The role's Fineract id, holding exactly the configured permissions."""
+    check_permission_codes(fc, cfg.permissions)
     role = find_role(fc, cfg.name)
     if role is None:
         created = fc.post("/roles", {"name": cfg.name, "description": cfg.description})
@@ -153,10 +242,7 @@ def ensure_role(fc: FineractApi, cfg: RoleConfig) -> int:
         log_event("setup role created", step="role", name=cfg.name)
     else:
         role_id = int(role["id"])
-    known, held = role_permissions(fc, role_id)
-    unknown = sorted(set(cfg.permissions) - known)
-    if unknown:
-        raise UnknownPermissionsError(unknown)
+    _, held = role_permissions(fc, role_id)
     changes = permission_changes(held, cfg.permissions)
     if changes:
         fc.put(f"/roles/{role_id}/permissions", {"permissions": changes})
@@ -187,13 +273,10 @@ def find_user(fc: FineractApi, username: str) -> dict[str, Any] | None:
 def ensure_api_user(fc: FineractApi, cfg: ApiUserConfig, password: str) -> int:
     """The API user's Fineract id: in the configured office, with only the configured role."""
     check_password(password)
-    office = find_office(fc, cfg.office)
-    if office is None:
-        raise SetupError(f"Office {cfg.office!r} not found; run ensure_office first")
-    role = find_role(fc, cfg.role)
-    if role is None:
-        raise SetupError(f"Role {cfg.role!r} not found; run ensure_role first")
-    office_id, role_id = int(office["id"]), int(role["id"])
+    # GET /users/template is the form: the offices and roles this admin may give a user.
+    template = fc.get("/users/template")
+    office_id = option_id(template.get("allowedOffices") or [], cfg.office, "Office")
+    role_id = option_id(template.get("availableRoles") or [], cfg.role, "Role")
 
     user = find_user(fc, cfg.username)
     if user is None:

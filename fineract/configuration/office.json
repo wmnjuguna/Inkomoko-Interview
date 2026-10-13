@@ -1,6 +1,6 @@
 {
   "name": "Kigali Main Office",
   "externalId": "OFF-KGL-MAIN",
-  "parentId": 1,
+  "parent": "Head Office",
   "openingDate": "2026-01-01"
 }
