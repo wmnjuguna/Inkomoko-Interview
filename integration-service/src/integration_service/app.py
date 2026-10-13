@@ -16,6 +16,7 @@ from integration_service.api import clients as clients_api
 from integration_service.api import gl_sync as gl_sync_api
 from integration_service.api import health as health_api
 from integration_service.api import loans as loans_api
+from integration_service.api import templates as templates_api
 from integration_service.api import transactions as transactions_api
 from integration_service.config import Settings
 from integration_service.db import make_engine
@@ -60,6 +61,7 @@ def create_app(settings: Settings | None = None, engine: Engine | None = None) -
     app.register_api(transactions_api.bp)
     app.register_api(clients_api.bp)
     app.register_api(loans_api.bp)
+    app.register_api(templates_api.bp)
     app.register_api(admin_api.bp)
 
     # Outbox sender and recovery: one background thread per process, unless switched off.
