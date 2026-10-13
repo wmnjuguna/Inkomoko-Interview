@@ -8,7 +8,7 @@ choices, by name or code. A choice the form does not offer stops setup and lists
 values.
 
 What a re-run does when something already exists:
-- office: found by externalId, never changed. Another name or parent stops setup.
+- office: found by externalId, never changed. Another name, parent or opening date stops setup.
 - currency: added to the selected list when missing. The other selected ones are kept.
 - role: its permissions are set to exactly the configured list. Extra ones are turned off.
 - API user: office and roles are set back to the configured ones. The password is left alone,
@@ -138,15 +138,22 @@ def check_opening_date(opening: date, parent: dict[str, Any], today: date) -> No
 def ensure_office(fc: FineractApi, cfg: OfficeConfig, today: date | None = None) -> int:
     """The office's Fineract id, found by its externalId. When missing, it is created from
     GET /offices/template: the parent is one of the template's allowedParents, by name.
-    An existing office is never changed; a different name or parent stops setup."""
+    An existing office is never changed; a different name, parent or opening date stops
+    setup."""
     existing = find_office_by_external_id(fc, cfg.external_id)
     if existing is not None:
         office_id = int(existing["id"])
         office = fc.get(f"/offices/{office_id}")
-        if office.get("name") != cfg.name or office.get("parentName") != cfg.parent:
+        opened = fineract_date(office.get("openingDate"))
+        if (office.get("name"), office.get("parentName"), opened) != (
+            cfg.name,
+            cfg.parent,
+            cfg.opening_date,
+        ):
             raise SetupError(
                 f"Office {cfg.external_id} exists as {office.get('name')!r} under parent "
-                f"{office.get('parentName')!r}, not {cfg.name!r} under {cfg.parent!r}"
+                f"{office.get('parentName')!r}, opened {opened}, not {cfg.name!r} under "
+                f"{cfg.parent!r}, opened {cfg.opening_date}"
             )
         log_event("setup office exists", step="office", name=cfg.name)
         return office_id
