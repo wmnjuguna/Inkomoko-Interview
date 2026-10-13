@@ -187,14 +187,43 @@ Rules of one run:
 
 ### The partner API (Parts C to E)
 
-- **Our ids only.** Partners use `client_uid`, `loan_reference` and `external_reference`. Fineract's numeric ids are kept in our tables for our own use and appear in logs, never in a response. `evidence/P2/id-leak.txt` shows the check on the OpenAPI spec and on every answer of the runs.
+- **Our ids only.** Partners use `client_uid`, `loan_reference` and `external_reference`. Fineract's numeric ids are kept in our tables for our own use and appear in logs, never in a response. `evidence/P2/id-leak.txt` shows the check on the OpenAPI spec and on every answer of the runs. `evidence/P2.5/id-leak.txt` repeats it with the form endpoints, whose Fineract templates are full of ids (office, product, payment types): every option value in a form is a name or a code.
 - **`loan_reference` is ours.** We issue `LN-<year>-<6 digits>` from a Postgres sequence, with the year from the database's date. It is the loan's `externalId` in Fineract. If Fineract already holds that reference (for example after `integration_db` was rebuilt but Fineract was not), a new one is issued, up to 3 times.
 - **The office** is found by name through `GET /clients/template`. The API user has no permission to read `/offices`, and I did not want to add one only for this.
-- **Approval and payout are always for the full principal.** There is no partial approval, so the payout amount is simply the loan's principal. If a loan was approved for less outside the service, Fineract refuses the payout and we answer `422`.
+- **Approval and payout amounts come from Fineract.** The approval is for the amount in Fineract's approval template (the applied principal). There is no partial approval. The payout is for the amount in Fineract's disbursement template (the approved amount). The partner sends neither. See "Fineract templates are the source of the rules" below.
 - **Dates** use the Kigali date, the same "today" Fineract uses for this tenant. A future transaction date, or a past expected disbursement date, gets `422` before anything is saved.
 - **A replay answers `200`**, even for a create whose first answer was `201`. That is the brief's Part F rule. The saved body is returned unchanged, so `status` and `erp_status` in it are the values from the first answer. `GET /api/transactions/{external_reference}` shows the latest.
 - **The first unclear answer is `504`, repeats are `202`.** The request itself gets `504 FINERACT_TIMEOUT`, because we are still finding out. Every repeat gets `202` until recovery decides.
 - **`GET /api/loans/{loan_reference}` reads Fineract live.** The balances and `payoff_amount` are Fineract's own figures, not ours. In D-1, paying exactly `payoff_amount` closed the loan to `Closed (obligations met)` the same day.
+
+### Fineract templates are the source of the rules
+
+**Chosen:** before each write, the service reads Fineract's own template for that step and takes the rules and amounts from it. Three read-only form endpoints show the same templates to partners (`GET /api/clients/template`, `GET /api/loans/template`, `GET /api/loans/{loan_reference}/template?step=`).
+
+**Why.** Fineract already knows the product's range, terms, default dates and amounts, and payment types, for this loan and this step. Before, the service read the loan product and worked out the rest on its own: for example, the approval and payout amount was the loan's principal. That is our own reading of Fineract's rules, and it can be wrong for a loan that was changed in Fineract. The template is Fineract's own answer, so the rules stay in one place. The partner gets the same rules from the form that the write uses.
+
+What each step reads:
+
+| Step | Fineract template | What we take from it |
+|---|---|---|
+| New client | `GET /clients/template` | The office id for `Kigali Main Office` (as before) |
+| Loan application | `GET /loanproducts/external-id/PRD-SME-ASSET-FINANCE`, then `GET /loans/template?templateType=individual&productId=..` | The principal range and default, the term, rate, schedule and currency. The Fineract body is built from these. |
+| Approval | `GET /loans/external-id/{ref}/template?templateType=approval` | The amount to approve (the applied principal) and the expected disbursement date |
+| Disbursement | `.../transactions/template?command=disburse` | The amount (the approved principal) |
+| Repayment | `.../transactions/template?command=repayment` | The currency step and the payment types |
+| Payoff (`payoff_amount`, the payoff form) | `.../transactions/template?command=prepayLoan` | What clears the loan today |
+
+What I learned about the templates on Fineract 1.15.0:
+
+- **Templates ignore the loan's status.** An approval template answers `200` for a loan that is already approved. A disbursement template answers for a loan that is not approved yet. So the forms check the status themselves and say `available: false` with a reason. The writes still rely on our own status checks and on Fineract's refusal.
+- **Fineract refuses an approval after the expected disbursement date** (`error.msg.loan.expecteddisbursal.should.be.on.or.after.approval.date`). The approval template still proposes today as the approval date, even when that is too late. So we check `approved_on` ourselves and answer `422` before we send anything. Shown on the live Fineract in `evidence/P2.5/templates.txt`, part 12.
+- **A payout before the expected disbursement date is allowed.** A loan expected on 2026-10-20 was paid out on 2026-10-13 (part 10 of the same file).
+- **The default payout date is today, not the template's date.** The disbursement template proposes the loan's expected disbursement date. Once that date has passed, using it would backdate the payout to a day when no money moved. So the default is today, the day the money really moves. A partner can still send an earlier `transaction_date`.
+- **Payment types include Fineract's own.** The repayment template lists `Money Transfer` and also two system-defined types used for Fineract's own adjustments (refund and chargeback). We accept only the partner types. The others get `422`.
+
+**The trade-off: more reads.** Each write now reads one template before it sends anything (two reads for an application: the product, then the template). That is one more call to Fineract per write, and one more thing that can fail. I did not measure the extra time. In return there is no copy of Fineract's rules to keep in step. A failed template read means nothing was sent, so the request ends `FAILED` and the partner can send it again. The money templates are read under the loan's lock, right before the write. So the amount we send is the amount Fineract proposed at that moment.
+
+**A retry looks before it reads.** A retry of a `FAILED` request first looks up its earlier attempt in Fineract by our key. Only then does it read templates. An earlier attempt that landed late is ours and is finished at once, without a template read. Reading first would check the retry against a loan that may have moved on. If the lookup itself fails, we do not know what happened, so the request stays `FINERACT_PENDING` with `504` until recovery decides.
 
 ## Sync or async
 
