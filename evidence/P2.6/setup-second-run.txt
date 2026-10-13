@@ -1,0 +1,27 @@
+# second run of setup on the same stack, 2026-10-13T22:06:26+03:00
+# writes are counted in Fineract's command log, m_portfolio_command_source. It holds the office, role, permissions, user, GL sync and loan product writes of the first run (below). The currency PUT is not logged there on 1.15, so for the currency the evidence is the "exists" line only.
+$ psql fineract_default: select count(*), coalesce(max(id),0) from m_portfolio_command_source
+18|18
+$ docker compose run --rm setup
+fineract: up
+erp: up
+office Kigali Main Office: exists
+currency RWF: exists
+role Integration Service: exists
+api user integration-api: exists
+api user integration-api: login ok
+gl sync: 13 SYNCED, 0 SYNC_PENDING, 0 FAILED (0 sent to Fineract)
+gl accounts for the loan product: all 9 synced
+loan product SME Asset Finance: exists
+setup done
+# exit code: 0
+$ psql fineract_default: select count(*), coalesce(max(id),0) from m_portfolio_command_source
+18|18
+
+$ psql fineract_default: select action_name, entity_name, count(*) from m_portfolio_command_source group by 1,2 order by 2
+SYNC|GLACCOUNT|13
+CREATE|LOANPRODUCT|1
+CREATE|OFFICE|1
+PERMISSIONS|ROLE|1
+CREATE|ROLE|1
+CREATE|USER|1
