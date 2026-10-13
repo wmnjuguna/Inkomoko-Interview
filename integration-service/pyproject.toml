@@ -1,0 +1,57 @@
+[project]
+name = "integration-service"
+version = "0.1.0"
+description = "The only API partners call: GL sync, clients, loans, payments, journal entries to the ERP, reconciliation."
+requires-python = ">=3.13"
+dependencies = [
+    "flask>=3.1",
+    "flask-openapi3[swagger]>=4.1",
+    "pydantic>=2.11",
+    "sqlalchemy>=2.0.40",
+    "psycopg[binary]>=3.2",
+    "alembic>=1.16",
+    "gunicorn>=23",
+    "httpx>=0.28",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.4",
+    "ruff>=0.13",
+    "mypy>=1.18",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/integration_service"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"
+markers = ["integration: needs the Postgres from docker compose"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF", "S", "N"]
+ignore = ["S101"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S105", "S106", "S608"]
+"migrations/**" = ["S608"]
+
+[tool.mypy]
+strict = true
+python_version = "3.13"
+mypy_path = "src"
+packages = ["integration_service"]
+plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+module = ["flask_openapi3.*"]
+ignore_missing_imports = true
