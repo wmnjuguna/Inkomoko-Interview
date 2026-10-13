@@ -106,7 +106,7 @@ Fineract normally answers rule errors with 403, and it has no 409 handler. So th
 
 ### Flask, not FastAPI
 
-My first plan said FastAPI for both Python services. For the Mock ERP I chose Flask instead. The Integration Service plan stays as it is.
+My first plan said FastAPI for both Python services. I chose Flask instead, first for the Mock ERP and then for the Integration Service too (see below).
 
 | Option | Good | Bad |
 |---|---|---|
@@ -138,6 +138,32 @@ A call without a valid key gets `401` and stops. It never reaches the fault swit
 The UI under `/ui` has no login. Every `POST` there must carry the `HX-Request` header, which HTMX sends. Without it the answer is `400`. A plain form on another website can't set that header, so it can't change faults or add accounts through someone's browser.
 
 This is only safe because the ERP is only open on `localhost`. If the UI were ever reachable from other machines, it would need a real login and real CSRF tokens.
+
+## The Integration Service
+
+### Flask, the same as the Mock ERP
+
+The Integration Service uses the same stack as the Mock ERP: Flask, flask-openapi3, Pydantic, SQLAlchemy Core, Alembic and Gunicorn. The reasons above apply here too. There is one more: one stack means one way to do validation, errors, logs, migrations and tests. The patterns are already built and tested in the Mock ERP, so the new service reuses them instead of learning a second framework.
+
+### The ERP reference names the operation
+
+Every money movement gets one reference, shaped `<operation>:<partner reference>`. For example `DSB:FIN-2026-000001` for a disbursement, or `RPY:FIN-2026-000007` for a repayment. A reversal adds `:REV`.
+
+The same string is used in three places:
+
+- the Integration Service's own record of the operation,
+- the Fineract loan transaction's `externalId`,
+- the ERP journal entry's `external_reference`.
+
+So reconciliation matches the systems on one value, with no lookup table. The prefix also keeps references unique per operation type, which Part F asks for. A partner may reuse `FIN-2026-000001` for a loan application and later for its disbursement, and they stay two different operations.
+
+I chose this over storing the partner's reference as it is. That would need a separate rule whenever one partner reference leads to more than one entry, such as a payment and its reversal.
+
+The operation codes are `CLI` (new client), `APP` (loan application), `APR` (approval), `DSB` (disbursement) and `RPY` (repayment). Only `DSB` and `RPY` (and their reversals) reach the ERP.
+
+### A guard inside Fineract, as a stretch item
+
+Fineract's loan state already refuses a second disbursement on a single-disbursement loan. That is the last line of defence today. I plan a small extra guard inside Fineract, so even a broken caller can't pay a loan out twice. It is a time-boxed stretch item, built only after the required tiers pass. If it doesn't fit in the time, I will write it up here as a known gap, with the evidence.
 
 ## Sync or async
 
@@ -183,7 +209,7 @@ Fineract has no event for a new GL account anyway, so GL sync stays a direct cal
 
 ### How keys are made
 
-`Idempotency-Key = <operation>:<external_reference>:<attempt>`. It is saved before the call. The attempt number only goes up after a lookup proves nothing happened. A key is never made from the request data alone, because two real repayments can have identical data.
+`Idempotency-Key = <operation>:<external_reference>:<attempt>`, for example `DSB:FIN-2026-000001:1`. The transaction's `externalId` is the same value without the attempt number. The key is saved before the call. The attempt number only goes up after a lookup proves nothing happened. A key is never made from the request data alone, because two real repayments can have identical data.
 
 The ERP has its own unique rule on the reference, and its own debits-equal-credits rule. It does not trust the caller. (Built and tested.)
 

@@ -7,7 +7,7 @@
 | Part | Language | What it does |
 |---|---|---|
 | **Fineract** (with my plugin) | Java 21, Fineract 1.15.0 | The bank's record of clients, loans, payments and balances. My plugin adds GL accounts from the ERP safely. |
-| **Integration Service** | Python, FastAPI | The only API that partners call. It keeps track of every request, stops duplicates, calls Fineract and sends journal entries to the ERP. |
+| **Integration Service** | Python, Flask | The only API that partners call. It keeps track of every request, stops duplicates, calls Fineract and sends journal entries to the ERP. |
 | **Mock ERP** | Python 3.13, Flask | The accounting system. It owns the chart of accounts and stores journal entries. It can pretend to be down or slow, for testing. It has a small web UI. |
 | **PostgreSQL 18.3** | — | One server. Each part has its own database and its own user: `fineract_tenants` and `fineract_default` for Fineract, `integration_db`, `erp_db`. |
 
@@ -17,7 +17,7 @@ There is no message queue, cache or separate worker. [DECISIONS.md](DECISIONS.md
 flowchart LR
   P[Financing partner] -->|REST, business IDs only| IS
   subgraph compose [docker compose]
-    IS[Integration Service<br/>FastAPI]
+    IS[Integration Service<br/>Flask]
     F[Fineract 1.15.0<br/>+ glsync plugin]
     E[Mock ERP<br/>Flask]
     DB[(PostgreSQL 18.3<br/>fineract_tenants · fineract_default<br/>integration_db · erp_db)]
