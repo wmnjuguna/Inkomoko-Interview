@@ -5,10 +5,13 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from collections.abc import Iterator
 from typing import Any
 
 import pytest
+from alembic.config import Config
+from alembic.script import ScriptDirectory
 from flask import g
 from flask.testing import FlaskClient
 from flask_openapi3.blueprint import APIBlueprint
@@ -22,6 +25,8 @@ from integration_service.config import Settings
 from integration_service.logs import JsonFormatter, log_event, log_field, logger
 from integration_service.models import gl_sync
 from integration_service.schemas.common import API_ERRORS
+
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
 class ProbeBody(BaseModel):
@@ -341,7 +346,8 @@ def test_migrations_create_the_gl_sync_table(db: Engine) -> None:
     }
     with db.connect() as conn:
         version = conn.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
-    assert version == "0001"
+    cfg = Config(os.path.join(ROOT, "alembic.ini"))
+    assert version == ScriptDirectory.from_config(cfg).get_current_head()
 
 
 def _insert(db: Engine, **overrides: Any) -> None:

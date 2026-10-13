@@ -25,6 +25,26 @@ DEFAULT_TEST_DB = (
     "postgresql+psycopg://integration:change-me-integration@localhost:5432/integration_test"
 )
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# The live tests log in to Fineract as the least-privilege API user. Its name and password
+# live in the repo's .env; read them from there when the shell has not exported them.
+API_USER_VARS = ("FINERACT_API_USERNAME", "FINERACT_API_PASSWORD")
+
+
+def load_api_user(env_file: str, environ: dict[str, str] | os._Environ[str]) -> None:
+    """Copy FINERACT_API_USERNAME and FINERACT_API_PASSWORD from env_file into environ,
+    unless already set. Nothing else is read. A missing file changes nothing."""
+    try:
+        with open(env_file, encoding="utf-8") as handle:
+            lines = handle.read().splitlines()
+    except OSError:
+        return
+    for line in lines:
+        name, sep, value = line.strip().partition("=")
+        if sep and name in API_USER_VARS and not environ.get(name):
+            environ[name] = value.strip().strip("'\"")
+
+
+load_api_user(os.path.join(os.path.dirname(ROOT), ".env"), os.environ)
 
 
 @pytest.fixture(scope="session")
@@ -49,7 +69,12 @@ def engine(database_url: str) -> Iterator[Engine]:
 def reset_database(engine: Engine) -> None:
     """Empty every table the service owns."""
     with engine.begin() as conn:
-        conn.execute(text("TRUNCATE gl_sync"))
+        conn.execute(
+            text(
+                "TRUNCATE gl_sync, outbox, operation_events, loans, clients, operations "
+                "RESTART IDENTITY CASCADE"
+            )
+        )
 
 
 @pytest.fixture
