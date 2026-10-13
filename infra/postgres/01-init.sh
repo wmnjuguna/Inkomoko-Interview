@@ -10,6 +10,8 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-E
 
   CREATE USER ${INTEGRATION_DB_USER} WITH PASSWORD '${INTEGRATION_DB_PASSWORD}';
   CREATE DATABASE integration_db OWNER ${INTEGRATION_DB_USER};
+  -- Empty database for the Integration Service tests; they rebuild its schema on each run
+  CREATE DATABASE integration_test OWNER ${INTEGRATION_DB_USER};
 
   CREATE USER ${ERP_DB_USER} WITH PASSWORD '${ERP_DB_PASSWORD}';
   CREATE DATABASE erp_db OWNER ${ERP_DB_USER};

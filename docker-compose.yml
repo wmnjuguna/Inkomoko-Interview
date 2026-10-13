@@ -98,5 +98,72 @@ services:
       retries: 20
       start_period: 10s
 
+  # One-shot Fineract setup (Part B): office, RWF, role, API user, GL sync of the ERP
+  # chart, then the loan product. Safe to run again. Uses Fineract's admin user.
+  setup:
+    image: integration-service-inkomoko:0.1.0
+    # The entrypoint runs alembic upgrade head first (GL sync writes to integration_db)
+    command: ["python", "-m", "integration_service.setup"]
+    restart: "no"
+    depends_on:
+      db:
+        condition: service_healthy
+      fineract:
+        condition: service_healthy
+      mock-erp:
+        condition: service_healthy
+    environment:
+      INTEGRATION_DATABASE_URL: postgresql+psycopg://${INTEGRATION_DB_USER}:${INTEGRATION_DB_PASSWORD}@db:5432/integration_db
+      FINERACT_BASE_URL: http://fineract:8080/fineract-provider/api/v1
+      FINERACT_TENANT: default
+      FINERACT_ADMIN_USERNAME: ${FINERACT_ADMIN_USER}
+      FINERACT_ADMIN_PASSWORD: ${FINERACT_ADMIN_PASSWORD}
+      # The API user setup creates; the integration-service logs in as it
+      FINERACT_API_USERNAME: ${FINERACT_API_USERNAME}
+      FINERACT_API_PASSWORD: ${FINERACT_API_PASSWORD}
+      FINERACT_TIMEOUT_SECONDS: ${INTEGRATION_FINERACT_TIMEOUT_SECONDS:-30}
+      ERP_BASE_URL: http://mock-erp:8090
+      ERP_API_KEY: ${ERP_API_KEY}
+      FINERACT_SETUP_CONFIG_DIR: /app/fineract-configuration
+    volumes:
+      - ./fineract/configuration:/app/fineract-configuration:ro
+
+  integration-service:
+    build:
+      context: ./integration-service
+    image: integration-service-inkomoko:0.1.0
+    # Starts only after setup has made the Fineract API user it logs in as.
+    depends_on:
+      setup:
+        condition: service_completed_successfully
+      db:
+        condition: service_healthy
+      fineract:
+        condition: service_healthy
+      mock-erp:
+        condition: service_healthy
+    environment:
+      # The entrypoint runs alembic upgrade head against this database before gunicorn starts
+      INTEGRATION_DATABASE_URL: postgresql+psycopg://${INTEGRATION_DB_USER}:${INTEGRATION_DB_PASSWORD}@db:5432/integration_db
+      # name:key pairs, comma separated, one per partner
+      PARTNER_API_KEYS: ${PARTNER_API_KEYS}
+      LOG_LEVEL: ${INTEGRATION_LOG_LEVEL}
+      # Least-privilege Fineract API user, never the admin
+      FINERACT_BASE_URL: http://fineract:8080/fineract-provider/api/v1
+      FINERACT_TENANT: default
+      FINERACT_USERNAME: ${FINERACT_API_USERNAME}
+      FINERACT_PASSWORD: ${FINERACT_API_PASSWORD}
+      FINERACT_TIMEOUT_SECONDS: ${INTEGRATION_FINERACT_TIMEOUT_SECONDS:-30}
+      ERP_BASE_URL: http://mock-erp:8090
+      ERP_API_KEY: ${ERP_API_KEY}
+    ports:
+      - "127.0.0.1:8091:8091"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8091/health > /dev/null"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
 volumes:
   pgdata:

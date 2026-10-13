@@ -4,17 +4,20 @@ SHELL := /bin/bash
 FINERACT_IMAGE := fineract-inkomoko:1.15.0
 FINERACT_IT_IMAGE := fineract-inkomoko-it:1.15.0
 MOCK_ERP_IMAGE := mock-erp-inkomoko:0.1.0
+INTEGRATION_IMAGE := integration-service-inkomoko:0.1.0
 COMPOSE_NETWORK := inkomoko-fineract_default
 
-.PHONY: help build up down reset test-java test-python
+.PHONY: help build up down reset test-java test-python demo-gl-sync simulate-gl-sync-4x
 
 help:
-	@echo "build        build the Fineract image from source (runs the Java unit tests), the integration test image and the Mock ERP image, and refresh both OpenAPI specs"
+	@echo "build        build the Fineract image from source (runs the Java unit tests), the integration test image, the Mock ERP and Integration Service images, and refresh the OpenAPI specs"
 	@echo "up           start everything (creates .env from .env.example on first run)"
 	@echo "down         stop containers, keep data"
 	@echo "reset        stop containers and delete all data"
 	@echo "test-java    Java unit tests (image build) + integration tests against the running stack"
-	@echo "test-python  Mock ERP: ruff, mypy and pytest (needs the db container and an erp_test database)"
+	@echo "test-python  Mock ERP and Integration Service: ruff, mypy and pytest (needs the running stack and the test databases)"
+	@echo "demo-gl-sync         Part A behaviours 1-4 on the running stack, in the evidence format"
+	@echo "simulate-gl-sync-4x  a new ERP account sent 4 times at once (service and plugin); every count must be 1"
 
 .env:
 	cp .env.example .env
@@ -30,6 +33,15 @@ build: .env
 		-c 'import json; from mock_erp.app import create_app; print(json.dumps(create_app().api_doc))' \
 		| uv run --no-project --quiet --with pyyaml python -c 'import json, sys, yaml; sys.stdout.write(yaml.safe_dump(json.load(sys.stdin), sort_keys=False, allow_unicode=True, width=100))' \
 		> docs/openapi/mock-erp.yaml
+	docker buildx build --load -t $(INTEGRATION_IMAGE) integration-service
+	@# Same for the Integration Service: dummy settings, nothing is called while building the spec.
+	docker run --rm --entrypoint python \
+		-e INTEGRATION_DATABASE_URL=postgresql+psycopg://unused@localhost/unused -e PARTNER_API_KEYS=unused:unused \
+		-e FINERACT_BASE_URL=http://unused/fineract-provider/api/v1 -e FINERACT_USERNAME=unused -e FINERACT_PASSWORD=unused \
+		-e ERP_BASE_URL=http://unused -e ERP_API_KEY=unused $(INTEGRATION_IMAGE) \
+		-c 'import json; from integration_service.app import create_app; print(json.dumps(create_app().api_doc))' \
+		| uv run --no-project --quiet --with pyyaml python -c 'import json, sys, yaml; sys.stdout.write(yaml.safe_dump(json.load(sys.stdin), sort_keys=False, allow_unicode=True, width=100))' \
+		> docs/openapi/integration-service.yaml
 
 up: .env
 	docker compose up -d --no-build --wait
@@ -45,3 +57,11 @@ test-java: build up
 
 test-python:
 	cd mock-erp && uv run ruff check . && uv run ruff format --check . && uv run mypy && uv run pytest -q
+	cd integration-service && uv run ruff check . && uv run ruff format --check . && uv run mypy && uv run pytest -q
+
+# Part A evidence on the running stack (run setup first: make up). Uses the Integration Service venv.
+demo-gl-sync: .env
+	uv run --project integration-service python scripts/demo_gl_sync.py
+
+simulate-gl-sync-4x: .env
+	uv run --project integration-service python scripts/simulate_gl_sync_4x.py
