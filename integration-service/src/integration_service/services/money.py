@@ -17,6 +17,13 @@ A refusal is not always a refusal: on a retry (or when Fineract says our transac
 externalId is taken), our own earlier attempt may have landed late. The transaction under
 our op key is ours, so it is looked up before the operation is called FAILED.
 
+Fineract's templates decide the terms, read once before the write (never inside it):
+- the disbursement template gives the amount (the approved principal) and the default date
+  (the expected disbursement date, but never later than today);
+- the repayment template gives the currency step and the payment types. Only partner payment
+  types are taken; Fineract's system-defined ones (its own adjustments) are refused.
+A failed template read means nothing was sent: FAILED and 503.
+
 Repayments are taken only while Fineract shows the loan ACTIVE. Fineract itself accepts a
 repayment on a closed loan and turns the whole amount into an overpayment; we refuse it.
 The check runs under the per-loan lock, just before the write.
@@ -71,7 +78,6 @@ from integration_service.services.loans import (
     kigali_today,
     loan_status_code,
     our_loan,
-    read_or_fail,
     settle,
     whole_rwf,
 )
@@ -86,6 +92,16 @@ from integration_service.services.operations import (
     set_fields,
 )
 from integration_service.services.outbox import record_money_done
+from integration_service.services.templates import (
+    DisbursementForm,
+    FieldProblem,
+    RepaymentForm,
+    check_disbursement,
+    check_repayment,
+    fetch_disbursement_form,
+    fetch_repayment_form,
+    validation_error,
+)
 from integration_service.state_machine import ERP_PENDING, FINERACT_PENDING, NEEDS_RECONCILIATION
 
 Accounts = Callable[[], GlRoleAccounts]
@@ -111,15 +127,40 @@ class LoanNotRepayable(Exception):  # noqa: N818 (a refusal, not a fault)
 
 
 def check_transaction_date(requested: date | None, today: date) -> date:
-    """The date sent to Fineract: the request's, or today (Kigali). Never in the future."""
+    """The early check, before anything is saved: the request's date, or today (Kigali).
+    Never in the future. The template checks run again once the template is read."""
     chosen = requested or today
     if chosen > today:
-        raise ApiError(
-            ErrorCode.VALIDATION_ERROR,
-            "transaction_date cannot be in the future (Kigali date).",
-            422,
+        raise validation_error(
+            [FieldProblem("transaction_date", "cannot be in the future (Kigali date)")]
         )
     return chosen
+
+
+def disbursement_terms(
+    form: DisbursementForm, requested: date | None, today: date
+) -> tuple[date, int]:
+    """The date and amount to pay out, from Fineract's disbursement template: the partner's
+    date or the template's default, and the approved amount. Raises a 422 ApiError."""
+    problems = check_disbursement(form, requested, today)
+    if problems:
+        raise validation_error(problems)
+    return requested or form.default_date(today), form.amount
+
+
+def repayment_payment_type(
+    form: RepaymentForm,
+    amount: int,
+    requested: date | None,
+    payment_type: str | None,
+    today: date,
+) -> int | None:
+    """Checks a repayment against Fineract's repayment template; the Fineract id of the
+    partner payment type (None when none was named). Raises a 422 ApiError."""
+    problems = check_repayment(form, amount, requested, payment_type, today)
+    if problems:
+        raise validation_error(problems)
+    return form.payment_type_id(payment_type) if payment_type is not None else None
 
 
 def build_disbursement_body(transaction_date: date, amount: int, op_key: str) -> dict[str, Any]:
@@ -153,19 +194,6 @@ def loan_path(loan_reference: str) -> str:
 
 def transaction_path(loan_reference: str, op_key: str) -> str:
     return f"{loan_path(loan_reference)}/transactions/external-id/{quote(op_key, safe='')}"
-
-
-def payment_type_id(template: Any, name: str) -> int | None:
-    """The id of a payment type by its name (any case), from Fineract's repayment template."""
-    options = template.get("paymentTypeOptions") if isinstance(template, dict) else None
-    for option in options or []:
-        if (
-            isinstance(option, dict)
-            and str(option.get("name", "")).casefold() == name.casefold()
-            and isinstance(option.get("id"), int)
-        ):
-            return int(option["id"])
-    return None
 
 
 def check_repayable(loan: Mapping[str, Any], loan_reference: str) -> None:
@@ -369,8 +397,9 @@ def disburse_loan(
     accounts: Accounts,
     today: date | None = None,
 ) -> Answer:
-    """Pays out the loan's full approved principal, once."""
-    on = check_transaction_date(request.transaction_date, today or kigali_today())
+    """Pays out the loan's full approved principal (from Fineract's template), once."""
+    today = today or kigali_today()
+    check_transaction_date(request.transaction_date, today)
     loan = _our_loan_or_404(engine, loan_reference)
     started = begin(
         engine,
@@ -385,11 +414,22 @@ def disburse_loan(
     if not isinstance(started, New):
         return answer_for_begin(started, request.external_reference)
     op = started.operation
+    form = _template_or_fail(
+        engine,
+        op,
+        lambda: fetch_disbursement_form(fineract, loan_reference, correlation_id),
+        "disbursement",
+        correlation_id,
+    )
+    try:
+        on, amount = disbursement_terms(form, request.transaction_date, today)
+    except ApiError as exc:
+        fail(engine, op, exc, correlation_id)
     call = write_call(
         fineract,
         loan_path(loan_reference),
         {"command": "disburse"},
-        build_disbursement_body(on, loan.principal, op.op_key),
+        build_disbursement_body(on, amount, op.op_key),
         correlation_id,
     )
 
@@ -412,7 +452,8 @@ def record_repayment(
     today: date | None = None,
 ) -> Answer:
     """Records one repayment. Fineract decides the split; we report it as it is."""
-    on = check_transaction_date(request.transaction_date, today or kigali_today())
+    today = today or kigali_today()
+    on = check_transaction_date(request.transaction_date, today)
     loan = _our_loan_or_404(engine, loan_reference)
     started = begin(
         engine,
@@ -427,32 +468,19 @@ def record_repayment(
     if not isinstance(started, New):
         return answer_for_begin(started, request.external_reference)
     op = started.operation
-
-    payment_type = None
-    if request.payment_type is not None:
-        template = read_or_fail(
-            engine,
-            op,
-            lambda: fineract.get(
-                f"{loan_path(loan_reference)}/transactions/template",
-                params={"command": "repayment"},
-                correlation_id=correlation_id,
-            ),
-            "the repayment template",
-            correlation_id,
+    form = _template_or_fail(
+        engine,
+        op,
+        lambda: fetch_repayment_form(fineract, loan_reference, correlation_id),
+        "repayment",
+        correlation_id,
+    )
+    try:
+        payment_type = repayment_payment_type(
+            form, request.amount, request.transaction_date, request.payment_type, today
         )
-        payment_type = payment_type_id(template, request.payment_type)
-        if payment_type is None:
-            fail(
-                engine,
-                op,
-                ApiError(
-                    ErrorCode.VALIDATION_ERROR,
-                    f"Unknown payment_type {request.payment_type}.",
-                    422,
-                ),
-                correlation_id,
-            )
+    except ApiError as exc:
+        fail(engine, op, exc, correlation_id)
 
     def still_active() -> None:
         try:
@@ -513,6 +541,40 @@ def _our_loan_or_404(engine: Engine, loan_reference: str) -> OurLoan:
     if loan is None:
         raise ApiError(ErrorCode.LOAN_NOT_FOUND, f"No loan {loan_reference}.", 404)
     return loan
+
+
+def _template_or_fail[T](
+    engine: Engine,
+    op: Operation,
+    read: Callable[[], T],
+    what: str,
+    correlation_id: str | None,
+) -> T:
+    """Fineract's template, read before the write. Whatever went wrong (no answer, an error,
+    an answer we cannot read), nothing was sent: FAILED and 503, so the partner sends the
+    same request again."""
+    try:
+        return read()
+    except FineractError as exc:
+        log_event(
+            f"could not read the {what} template from Fineract",
+            level=logging.WARNING,
+            correlation_id=correlation_id,
+            external_reference=op.external_reference,
+            loan_reference=op.loan_reference,
+            problem=type(exc).__name__,
+        )
+        fail(
+            engine,
+            op,
+            ApiError(
+                ErrorCode.FINERACT_UNAVAILABLE,
+                f"Could not read Fineract's {what} template. Nothing was sent. Send the "
+                "same request again.",
+                503,
+            ),
+            correlation_id,
+        )
 
 
 def _write_and_finish(

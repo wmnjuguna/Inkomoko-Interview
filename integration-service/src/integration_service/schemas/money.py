@@ -22,8 +22,9 @@ class DisbursementRequest(BaseModel):
     )
     transaction_date: date | None = Field(
         default=None,
-        description="YYYY-MM-DD, not in the future (Kigali time). Default: today. The full "
-        "approved principal is paid out.",
+        description="YYYY-MM-DD, not in the future (Kigali time). Default: the loan's "
+        "expected disbursement date, or today if that is later. The full approved principal "
+        "(from Fineract's disbursement template) is paid out.",
     )
 
 
@@ -39,7 +40,9 @@ class RepaymentRequest(BaseModel):
     )
     payment_type: PaymentType | None = Field(
         default=None,
-        description="A Fineract payment type name, e.g. Money Transfer. Optional.",
+        description="Optional. One of the partner payment types Fineract lists, by name "
+        "(any case), e.g. Money Transfer. Fineract's system-defined types are refused. "
+        "GET /api/loans/{loan_reference}/template?step=repayment lists them.",
     )
 
 
