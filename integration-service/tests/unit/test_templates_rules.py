@@ -115,7 +115,7 @@ def test_loan_application_form_needs_the_product_part() -> None:
         t.parse_loan_application_form(fixture("loan_template_individual_no_product.json"))
 
 
-def test_approval_form() -> None:
+def test_approval_form_takes_date_amount_and_expected_date_from_the_template() -> None:
     form = t.parse_approval_form(fixture("loan_approval_template.json"))
     assert form.approved_on == TODAY
     assert form.approved_amount == 2_500_000
@@ -123,7 +123,7 @@ def test_approval_form() -> None:
     assert form.currency.code == "RWF"
 
 
-def test_disbursement_form() -> None:
+def test_disbursement_form_takes_expected_date_and_approved_amount_from_the_template() -> None:
     form = t.parse_disbursement_form(fixture("loan_disburse_template.json"))
     assert form.expected_date == date(2026, 10, 20)
     assert form.amount == 2_000_000
@@ -143,7 +143,7 @@ def test_repayment_form_is_the_next_installment() -> None:
     assert [p.name for p in form.partner_payment_types] == ["Money Transfer"]
 
 
-def test_payoff_form() -> None:
+def test_payoff_form_takes_fineract_payoff_figure_and_split() -> None:
     form = t.parse_payoff_form(fixture("loan_prepay_template.json"))
     assert form.on_date == TODAY
     assert form.amount == 1_270_195
@@ -213,7 +213,7 @@ def test_amount_must_be_a_multiple_of_the_currency_step() -> None:
     assert problems == [t.FieldProblem("principal", "must be a multiple of 100 RWF")]
 
 
-def test_approval_checks() -> None:
+def test_approval_refuses_a_future_date_or_one_after_the_expected_disbursement() -> None:
     form = t.parse_approval_form(fixture("loan_approval_template.json"))
     assert t.check_approval(form, None, TODAY) == []
     assert t.check_approval(form, TODAY, TODAY) == []
@@ -223,14 +223,14 @@ def test_approval_checks() -> None:
     assert [p.field for p in t.check_approval(form, later, later)] == ["approved_on"]
 
 
-def test_disbursement_checks() -> None:
+def test_disbursement_refuses_a_future_date() -> None:
     assert t.check_disbursement(None, TODAY) == []
     assert [p.field for p in t.check_disbursement(date(2026, 10, 14), TODAY)] == [
         "transaction_date"
     ]
 
 
-def test_repayment_checks() -> None:
+def test_repayment_lists_every_problem_with_amount_date_and_payment_type() -> None:
     form = t.parse_repayment_form(fixture("loan_repayment_template.json"))
     assert t.check_repayment(form, 60016, None, None, TODAY) == []
     assert t.check_repayment(form, 1, TODAY, "Money Transfer", TODAY) == []
@@ -378,7 +378,7 @@ def test_loan_application_form_view_without_a_client() -> None:
     assert field(view, "client_uid")["default"] is None
 
 
-def test_approval_view() -> None:
+def test_approval_view_shows_template_defaults_without_fineract_ids() -> None:
     form = t.parse_approval_form(fixture("loan_approval_template.json"))
     view = t.step_form_view(
         t.Step.APPROVAL,
@@ -400,7 +400,7 @@ def test_approval_view() -> None:
     assert view["values"]["expected_disbursement_date"] == "2026-10-20"
 
 
-def test_disbursement_view() -> None:
+def test_disbursement_view_defaults_to_today_and_the_approved_amount() -> None:
     form = t.parse_disbursement_form(fixture("loan_disburse_template.json"))
     view = t.step_form_view(t.Step.DISBURSEMENT, form, "LN-2026-000123", "X", "APPROVED", TODAY)
     no_ids(view)
@@ -439,7 +439,7 @@ def test_repayment_view_lists_partner_payment_types_only() -> None:
     }
 
 
-def test_payoff_view() -> None:
+def test_payoff_view_submits_to_repayments_with_the_payoff_amount() -> None:
     form = t.parse_payoff_form(fixture("loan_prepay_template.json"))
     view = t.step_form_view(t.Step.PAYOFF, form, "LN-2026-000123", "X", "ACTIVE", TODAY)
     no_ids(view)

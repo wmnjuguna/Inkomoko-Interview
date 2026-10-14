@@ -193,7 +193,7 @@ def test_application_accepts_an_iso_date() -> None:
     assert request.expected_disbursement_date == date(2026, 10, 20)
 
 
-def test_approval_request() -> None:
+def test_approval_request_needs_a_reference_and_refuses_extra_fields() -> None:
     assert ApprovalRequest.model_validate({"external_reference": "APR-1"}).approved_on is None
     request = ApprovalRequest.model_validate(
         {"external_reference": "APR-1", "approved_on": "2026-10-13"}
@@ -360,7 +360,7 @@ def test_payoff_amount_is_best_effort(answer: Any) -> None:
     assert payoff_amount(FakeFineract({PAYOFF_PATH: answer}), "LN-2026-000123", None) is None
 
 
-def test_approval_body() -> None:
+def test_approval_body_sends_the_date_and_amount_in_fineract_format() -> None:
     assert build_approval_body(date(2026, 10, 13), 1200000) == {
         "approvedOnDate": "2026-10-13",
         "approvedLoanAmount": 1200000,
@@ -376,11 +376,11 @@ def test_approval_body() -> None:
     ("value", "expected"),
     [(82000.0, 82000), (0, 0), ("1320195", 1320195), (None, None), (1000.6, 1001)],
 )
-def test_whole_rwf(value: Any, expected: int | None) -> None:
+def test_whole_rwf_rounds_amounts_to_whole_francs(value: Any, expected: int | None) -> None:
     assert whole_rwf(value) == expected
 
 
-def test_fineract_dates() -> None:
+def test_fineract_dates_are_read_from_date_arrays_only() -> None:
     assert fineract_date([2026, 10, 13]) == date(2026, 10, 13)
     assert fineract_date(None) is None
     assert fineract_date("2026-10-13") is None

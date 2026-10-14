@@ -261,7 +261,9 @@ def test_search_text_matches_reference_or_description(
     assert search(client, auth, "q=fin-c") == ["FIN-C"]
 
 
-def test_search_limit(client: FlaskClient, auth: dict[str, str]) -> None:
+def test_search_limit_returns_only_the_newest_entries(
+    client: FlaskClient, auth: dict[str, str]
+) -> None:
     seed_three(client, auth)
     assert search(client, auth, "limit=2") == ["FIN-C", "FIN-B"]
 

@@ -1,3 +1,5 @@
+"""Request hashing: the same body always gives the same hash, and any change gives a new one."""
+
 from __future__ import annotations
 
 from mock_erp.hashing import canonical_json, request_hash

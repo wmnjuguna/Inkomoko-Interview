@@ -210,7 +210,9 @@ def _balance(client: FlaskClient, auth: dict[str, str], code: str) -> dict[str, 
     return body
 
 
-def test_detail_balance(client: FlaskClient, auth: dict[str, str], db: Engine) -> None:
+def test_detail_account_balance_sums_debits_and_credits_on_its_normal_side(
+    client: FlaskClient, auth: dict[str, str], db: Engine
+) -> None:
     _sample_journal(db)
     assert _balance(client, auth, "1200") == {
         "code": "1200",
