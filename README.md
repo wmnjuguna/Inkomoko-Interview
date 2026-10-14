@@ -183,7 +183,6 @@ uv run --project integration-service python scripts/simulate_j5.py      # J-5: t
 
 ## Use of AI
 
-<!-- author: please review this section -->
 
 I used AI assistance (Claude) while building this. The things I used it for include:
 
