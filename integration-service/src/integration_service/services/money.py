@@ -42,6 +42,7 @@ from urllib.parse import quote
 
 from sqlalchemy import Engine
 
+from integration_service import faults
 from integration_service.clients.errors import (
     FineractError,
     FineractNotFound,
@@ -625,7 +626,12 @@ def _write_and_finish(
             txn = settled.result if settled.found_by_lookup else _read_back(lookup)
             if txn is None:
                 return _still_finishing(engine, op, correlation_id)
-            return _finish(engine, fineract, op, txn, accounts, correlation_id, "Fineract said yes")
+            answer = _finish(
+                engine, fineract, op, txn, accounts, correlation_id, "Fineract said yes"
+            )
+            # J-5 only: off unless FAULT_CRASH_AFTER_FINERACT_DONE names this reference.
+            faults.crash_after_fineract_done(op.external_reference)
+            return answer
     except LoanLockTimeoutError:
         fail(
             engine,
