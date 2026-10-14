@@ -1,6 +1,6 @@
 # API
 
-Three APIs live here: a small plugin inside Fineract, the Integration Service that the client system calls, and a Mock ERP behind it. The rules that apply everywhere come first. After that, each endpoint gets one line on what it is for and the smallest request and answer that show its shape. In the examples `...` marks fields I cut, and the names and numbers are made up.
+I built three APIs: a small Fineract plugin, the Integration Service the client system calls, and a Mock ERP behind it. Shared rules come first, then every endpoint with its smallest request and answer. In the examples `...` marks fields I cut, and all data is made up.
 
 | API | On the local stack | Spec served at | Copy in the repo |
 |---|---|---|---|
@@ -8,14 +8,14 @@ Three APIs live here: a small plugin inside Fineract, the Integration Service th
 | Integration Service | http://localhost:8091 | `/openapi/openapi.json`, Swagger UI at `/openapi/swagger` | `docs/openapi/integration-service.yaml` |
 | Mock ERP | http://localhost:8090 | the same two paths | `docs/openapi/mock-erp.yaml` |
 
-The specs are generated from the code. ARCHITECTURE.md shows how the pieces fit, DECISIONS.md explains why, and SIMULATIONS.md walks through the scripted scenarios.
+The specs are generated from the code. ARCHITECTURE.md, DECISIONS.md and SIMULATIONS.md cover the design, the reasons and the scenarios.
 
 ## General rules
 
-- **Auth.** The Integration Service and the Mock ERP want an `X-API-Key` header on every `/api` and `/admin` call. A missing or wrong key gets `401`; `/health` and `/openapi` are open. Client system keys are set in `PARTNER_API_KEYS` as `name:key`, so locally `demo-partner:change-me-partner-key` means you send `change-me-partner-key`. The plugin takes Fineract's Basic auth plus `Fineract-Platform-TenantId: default`.
-- **Tracing.** Send `X-Correlation-ID` if you have one, or I make one (`c-` plus hex). It comes back on every response and tags every log line. It is only for finding things and plays no part in idempotency.
-- **Dates and money.** Dates are `YYYY-MM-DD`, and "today" means today in Kigali. Money is whole Rwandan francs as JSON integers, so `1000.5` or `"1000"` gets `422`.
-- **Your ids, not Fineract's.** You work with `client_uid` (`SME-000001`), `loan_reference` (`LN-2026-000001`, which I issue) and your own `external_reference`. Fineract's numeric ids never show up.
+- **Auth.** The Integration Service and the Mock ERP need `X-API-Key` on every `/api` and `/admin` call, or answer `401`; `/health` and `/openapi` are open. Integration Service keys live in `PARTNER_API_KEYS` as `name:key`; locally that is `demo-partner:change-me-partner-key`, so you send `change-me-partner-key`. The plugin takes Fineract's Basic auth and `Fineract-Platform-TenantId: default`.
+- **Tracing.** Send `X-Correlation-ID`, or I make one (`c-` plus hex). It comes back on every response and tags every log line; idempotency ignores it.
+- **Dates and money.** Dates are `YYYY-MM-DD`, and "today" is Kigali time. Money is whole Rwandan francs as JSON integers, so `1000.5` or `"1000"` gets `422`.
+- **Your ids, not Fineract's.** You use `client_uid` (`SME-000001`), `loan_reference` (`LN-2026-000001`, which I issue) and your own `external_reference`. Fineract's numeric ids never show up.
 
 ## Errors
 
@@ -27,7 +27,7 @@ Both Python services answer every failure in one shape:
              "correlation_id": "c-3f9a...", "details": {} } }
 ```
 
-Branch on `code`; `message` is for people. A `422 VALIDATION_ERROR` lists every problem in `details.problems` as `{"field", "problem"}`. The plugin keeps Fineract's own error shape, with the code in `userMessageGlobalisationCode`.
+Branch on `code`; `message` is for people. A `422 VALIDATION_ERROR` lists every problem in `details.problems` as `{"field", "problem"}`. The plugin keeps Fineract's error shape, with the code in `userMessageGlobalisationCode`.
 
 | HTTP | Code | When |
 |---|---|---|
@@ -46,7 +46,7 @@ Branch on `code`; `message` is for people. A `422 VALIDATION_ERROR` lists every 
 
 ## Idempotency contract
 
-Every write carries an `external_reference`: 1 to 40 letters, digits, `.`, `_`, `:` or `-`. Create it once, when you decide on the business action, and send the same value on every retry. Two real repayments of the same amount on the same day need two references. I store each request in Postgres under its type and reference (`DSB:DEMO-DSB-0001`), with a hash of the body and of your API key.
+Every write carries an `external_reference`: 1 to 40 letters, digits, `.`, `_`, `:` or `-`. Make one per business action and resend it on every retry. I store each request in Postgres under its type and reference (`DSB:DEMO-DSB-0001`) with a hash of the body and of your API key.
 
 | You send | You get |
 |---|---|
@@ -57,6 +57,7 @@ Every write carries an `external_reference`: 1 to 40 letters, digits, `.`, `_`, 
 | Same reference under another caller's key | `409 IDEMPOTENCY_CONFLICT`. You never see another caller's answer. |
 | Same reference after it ended `FAILED` | It runs again under the same reference with the next attempt number. Fineract is asked first whether the earlier attempt landed late. |
 | Same reference while it waits for a manual check (`NEEDS_RECONCILIATION` with no saved answer) | `409 NEEDS_RECONCILIATION` with `details.status` and `details.type`. It will not run again by itself. |
+| A new reference for a client, approval or payout that another reference already holds | `409 CLIENT_UID_TAKEN`, `LOAN_ALREADY_APPROVED` or `LOAN_ALREADY_DISBURSED` with `details.holder_status`, even while the first still runs. The new reference is not saved, so you can reuse it if the first ends `FAILED`. |
 
 ```mermaid
 flowchart TD
@@ -71,13 +72,11 @@ flowchart TD
     F -- "NEEDS_RECONCILIATION, no answer" --> J["409 NEEDS_RECONCILIATION"]
 ```
 
-"Finished" means Fineract is done. A disbursement or repayment answers `200` while its journal entry may still be on its way to the ERP, and `erp_status` says where it is: `PENDING` (in my outbox), `SENT`, or `NEEDS_RECONCILIATION` (the ERP refused it, it failed 8 times, or the entry could not be built without guessing). The saved body never changes; the live status is at `GET /api/transactions/{external_reference}`.
-
-Some things are unique beyond the reference: a `client_uid` is created once, and a loan is approved once and paid out once. A second reference for the same thing gets `409 CLIENT_UID_TAKEN`, `LOAN_ALREADY_APPROVED` or `LOAN_ALREADY_DISBURSED`, even while the first is still running, and `details.holder_status` shows where the first one is. The second reference is not saved, so you can use it again if the first ends `FAILED`.
+"Finished" means Fineract is done. A disbursement or repayment answers `200` before its journal entry reaches the ERP, and `erp_status` tracks it: `PENDING` (in my outbox), `SENT`, or `NEEDS_RECONCILIATION` (refused, failed 8 times, or not buildable without guessing). The saved body never changes; `GET /api/transactions/{external_reference}` has the live status.
 
 ## When Fineract fails or gives no clear answer
 
-I never resend a write to Fineract without first looking it up by its `externalId`. What you see depends on what I know:
+Before resending any write, I look it up in Fineract by its `externalId`. Here is what you see:
 
 | What happened | Status | Answer | What you do |
 |---|---|---|---|
@@ -90,15 +89,15 @@ I never resend a write to Fineract without first looking it up by its `externalI
 | Fineract clearly refused (a `4xx`) | `FAILED` | `409` or `422` in my words | Fix the request |
 | Fineract refused my own login or permissions | `FAILED` | `502 FINERACT_UNAVAILABLE` | Nothing. That one is on me. |
 
-I never pass Fineract's error text through, because it can hold internal ids. A refusal I have not mapped becomes `422 VALIDATION_ERROR` with Fineract's codes in `details.fineract_codes`. A disbursement or repayment never fails because of the ERP; that part runs later, from the outbox.
+Fineract's error text never passes through, because it can hold internal ids. The ERP never fails a disbursement or repayment; that part runs later from the outbox.
 
 ## Fineract plugin
 
-Two endpoints inside Fineract, both at `/fineract-provider/api/v1/erp-integration/accounts/{erpReference}`. Only the Integration Service calls them, and they are the only way a GL account gets created here. One prefix means a gateway can allow them by path (DECISIONS.md).
+Only the Integration Service calls these two endpoints, and they are the only way to create a GL account here. One prefix lets a gateway allow them by path (DECISIONS.md).
 
 ### `PUT /fineract-provider/api/v1/erp-integration/accounts/{erpReference}`
 
-Creates the GL account for one ERP account, or returns the one already there; sync parents first. It needs `SYNC_GLACCOUNT` and takes the fields of Fineract's own `POST /glaccounts`, plus `parentAccount`.
+Creates the GL account for one ERP account, or returns the existing one; parents go first. Needs `SYNC_GLACCOUNT`.
 
 | Field | Rule |
 |---|---|
@@ -131,7 +130,7 @@ PUT /fineract-provider/api/v1/erp-integration/accounts/GL-1200
 
 ### `GET /fineract-provider/api/v1/erp-integration/accounts/{erpReference}`
 
-Tells you which GL account an ERP account became, so after a timeout you check before you resend. It needs `READ_GLACCOUNT`, and `404 error.msg.erpaccount.not.found` means it is not synced yet.
+Shows which GL account an ERP account became; after a timeout, check before resending. Needs `READ_GLACCOUNT`; `404 error.msg.erpaccount.not.found` means not synced yet.
 
 ```json
 200 { "erpReference": "GL-1200", "glAccountId": 7, "glCode": "1200", "name": "Loan Receivable",
@@ -143,11 +142,11 @@ Tells you which GL account an ERP account became, so after a timeout you check b
 
 ### GL sync
 
-These read the ERP chart and create each account in Fineract through the plugin. They take no body, and each account gets its own `Idempotency-Key` (`GLS:<reference>:<attempt>:<hash>`). They use the same API key as the rest of `/api`; in production I would move them to an operator route.
+These copy the ERP chart into Fineract through the plugin, with one `Idempotency-Key` per account (`GLS:<reference>:<attempt>:<hash>`). They take no body; in production they belong on an operator route.
 
 #### `POST /api/accounts/sync`
 
-Syncs the whole chart, parents first, and reports every account. It is safe to repeat: only pending and failed accounts are sent again.
+Syncs the whole chart, parents first, and reports every account. A repeat resends only pending and failed accounts.
 
 ```json
 200 { "accounts": [
@@ -158,15 +157,15 @@ Syncs the whole chart, parents first, and reports every account. It is safe to r
       "writes": 13, "in_progress": false }
 ```
 
-`status` is `SYNCED`, `SYNC_PENDING` (Fineract unreachable or unclear) or `FAILED` (refused, with the reason in `last_error`, such as `GL_CODE_TAKEN: ...`). `writes` counts the accounts this call sent. If a sync is already running you get `202` with `"in_progress": true`, and nothing is sent. Fineract trouble shows on the account and never fails the call. ERP trouble does: `503 ERP_UNAVAILABLE`, `504 ERP_TIMEOUT`, or `502 ERP_UNAVAILABLE` for anything else.
+`SYNC_PENDING` means Fineract was unreachable or unclear; `FAILED` means it refused, with the reason in `last_error`. While another sync runs you get `202` with `"in_progress": true`. Fineract trouble shows per account; ERP trouble fails the call (`502`, `503` or `504`).
 
 #### `GET /api/accounts/sync`
 
-The same report from my database. It calls nothing, and `writes` is `0`.
+The same report from my database, with `writes` at `0`.
 
 #### `POST /api/accounts/{erp_reference}/sync`
 
-One account, same rules: `200 {"account": {...}, "in_progress": false}`, `404 NOT_FOUND` when the ERP has no such account, and `202` with its current state (or `null`) while another sync runs.
+One account, same rules: `200 {"account": {...}, "in_progress": false}`, `404 NOT_FOUND` if the ERP lacks it, or `202` with its current state (or `null`) during another sync.
 
 ### Clients
 
@@ -191,7 +190,7 @@ POST /api/clients
 
 #### `GET /api/clients/{client_uid}`
 
-Reads the client live from Fineract and saves nothing. Add `?name=` to check the name you expect, ignoring case and spacing.
+Reads the client live from Fineract. `?name=` checks the name you expect, ignoring case and spacing.
 
 ```json
 GET /api/clients/SME-000001?name=jane example
@@ -199,17 +198,17 @@ GET /api/clients/SME-000001?name=jane example
       "matches_our_record": true, "name_matches": true }
 ```
 
-`matches_our_record` means I created the client, Fineract holds the same name, and it is active. `name_matches` is `null` without `?name=`.
+`matches_our_record` means I created it, the names agree and it is active. `name_matches` is `null` without `?name=`.
 
 ### Loans
 
 #### The forms: what to send at each step
 
-Three reads tell you what a write will accept before you send it. They read Fineract's templates live and save nothing, and the write reads the same templates, so both follow one set of rules. Each form lists `fields` with `name`, `type`, `required`, `read_only`, `default`, limits, `options` and `description`. Do not send `read_only` fields; they show what Fineract or the product decided. Option values are names or codes, never Fineract ids.
+Three reads show what a write will accept, straight from the Fineract templates the write itself uses. Each lists `fields` with type, limits, default and `options` (names, never Fineract ids). Leave out `read_only` fields.
 
-- `GET /api/clients/template`: the fields of `POST /api/clients`, plus the `office` and `activation_date` a new client gets.
-- `GET /api/loans/template`: the fields of `POST /api/loans` with the product's range and terms. Add `?client_uid=` for a client I created (`404 CLIENT_NOT_FOUND` otherwise).
-- `GET /api/loans/{loan_reference}/template?step=`: one step of one loan, `approval`, `disbursement`, `repayment` or `payoff`. `available` says whether the step can run now, `message` says why not, and `values` holds Fineract's figures for the step.
+- `GET /api/clients/template`: client fields, plus the `office` and `activation_date` a new client gets.
+- `GET /api/loans/template`: application fields and the product's terms. An optional `?client_uid=` must be a client I created.
+- `GET /api/loans/{loan_reference}/template?step=`: `approval`, `disbursement`, `repayment` or `payoff` for one loan, with `available`, a `message` saying why not, and Fineract's figures in `values`.
 
 ```json
 GET /api/loans/LN-2026-000001/template?step=payoff
@@ -223,11 +222,11 @@ GET /api/loans/LN-2026-000001/template?step=payoff
                   ... ] }
 ```
 
-Paying exactly `payoff_amount` as a repayment closes the loan. Fineract hands out a template in any loan state, so I check the state myself: before approval, only `approval` is available.
+Paying exactly `payoff_amount` closes the loan.
 
 #### `POST /api/loans`
 
-Applies for a loan on the SME Asset Finance product. The product's template sets the range, term, rate and schedule, so you choose only the principal. I issue the `loan_reference`, and it becomes the loan's `externalId` in Fineract.
+Applies for a loan on the SME Asset Finance product; you pick only the principal. I issue the `loan_reference`, which becomes the loan's `externalId`.
 
 | Field | Rule |
 |---|---|
@@ -247,7 +246,7 @@ POST /api/loans
 
 #### `POST /api/loans/{loan_reference}/approve`
 
-Approves the applied principal, as Fineract's approval template proposes; there is no partial approval, so you send no amount. `approved_on` is optional: default today, not in the future, and not after the expected disbursement date.
+Approves the full applied principal from Fineract's approval template, so you send no amount. `approved_on` is optional: default today, not in the future, not after the expected disbursement date.
 
 ```json
 POST /api/loans/LN-2026-000001/approve
@@ -259,7 +258,7 @@ POST /api/loans/LN-2026-000001/approve
 
 #### `GET /api/loans/{loan_reference}`
 
-The loan as Fineract shows it now. `balances` stays `null` until payout, and `payoff_amount`, Fineract's figure for clearing the loan today, is set only while the loan is active.
+The loan as Fineract shows it now. `balances` is `null` until payout, and `payoff_amount` is set only while the loan is active.
 
 ```json
 200 { "loan_reference": "LN-2026-000001", "client_uid": "SME-000001",
@@ -274,7 +273,7 @@ The loan as Fineract shows it now. `balances` stays `null` until payout, and `pa
 
 #### `POST /api/loans/{loan_reference}/disburse`
 
-Pays out the approved amount once, taken from Fineract's disbursement template, under the Fineract `externalId` `DSB:<external_reference>`. `transaction_date` is optional: default today, not in the future, and paying out early is fine.
+Pays out the approved amount once, under the Fineract `externalId` `DSB:<external_reference>`. `transaction_date` is optional: default today, not in the future; paying out early is fine.
 
 ```json
 POST /api/loans/LN-2026-000001/disburse
@@ -285,11 +284,11 @@ POST /api/loans/LN-2026-000001/disburse
       "amount": 5000000, "transaction_date": "2026-10-13", "loan_status": "ACTIVE" }
 ```
 
-`amount` and `transaction_date` are read back from Fineract. A loan not yet approved gets `422`; one already paid out, through me or straight in Fineract, gets `409 LOAN_ALREADY_DISBURSED`.
+An unapproved loan gets `422`; one already paid out, even straight in Fineract, gets `409 LOAN_ALREADY_DISBURSED`.
 
 #### `POST /api/loans/{loan_reference}/repayments`
 
-Records one repayment. Fineract decides the split between principal and interest, and I show it as it is.
+Records one repayment and shows Fineract's own split.
 
 | Field | Rule |
 |---|---|
@@ -309,13 +308,13 @@ POST /api/loans/LN-2026-000001/repayments
       "penalties_portion": 0, "overpayment_portion": 0, "outstanding_after": 4616600 }
 ```
 
-`outstanding_after` is the principal still owed. I take a repayment only while the loan is `ACTIVE`, because Fineract would book a payment on a closed loan as pure overpayment. Paying too much on an active loan is allowed: the extra lands in `overpayment_portion` and the loan becomes `OVERPAID`.
+Only an `ACTIVE` loan takes repayments, since Fineract would book money on a closed loan as pure overpayment. Extra money on an active loan lands in `overpayment_portion` and makes it `OVERPAID`.
 
 ### Transactions
 
 #### `GET /api/transactions/{external_reference}`
 
-Answers "what happened to X?" from my database: every request under that reference, with its status history and live `erp_status`. Another caller's key gets `404` for the same reference.
+Answers "what happened to X?" from my database: every request under that reference, with its history and live `erp_status`. Other callers get `404`.
 
 ```json
 200 { "external_reference": "DEMO-DSB-0001",
@@ -331,20 +330,20 @@ Answers "what happened to X?" from my database: every request under that referen
           { "from": "ERP_PENDING", "to": "COMPLETED", "at": "...", "detail": "the ERP saved the journal entry" } ] } ] }
 ```
 
-A failed send to the ERP shows as an `ERP_PENDING` to `ERP_PENDING` line with the reason. `type` is one of `CLIENT_CREATION`, `LOAN_APPLICATION`, `APPROVAL`, `DISBURSEMENT` and `REPAYMENT`.
+A failed ERP send shows as an `ERP_PENDING` to `ERP_PENDING` line with the reason.
 
 ### Reconciliation
 
 #### `POST /api/reconciliation`
 
-Compares Fineract's loan transactions with the ERP's journal entries and lists where they differ. It writes nothing and keeps no report, so every call reads both sides fresh. Send a date range or a list of references, never both.
+Compares Fineract's loan transactions with the ERP's journal and lists the differences. It writes and keeps nothing. Send a date range or references, not both.
 
 | Field | Rule |
 |---|---|
 | `from`, `to` | Dates, both needed, `to` included, at most 31 days. The date is the transaction date on both sides. |
 | `references` | 1 to 100 values. An op key (`DSB:DEMO-DSB-0001`), a client system reference (`DEMO-DSB-0001`, which selects both `DSB:` and `RPY:`) or a foreign Fineract `externalId`. Each also selects its `:REV` reversal. |
 
-Each `DISBURSEMENT` and `REPAYMENT` of a loan I know is matched to the ERP entry whose `external_reference` equals the transaction's `externalId`, and gets one `outcome`:
+Each `DISBURSEMENT` and `REPAYMENT` of a loan I know is matched to the ERP entry whose `external_reference` equals its `externalId`:
 
 | `outcome` | Meaning |
 |---|---|
@@ -379,13 +378,13 @@ POST /api/reconciliation
         { "key": "DSB:DEMO-DSB-0001", "outcome": "MATCHED", "reasons": [], ... } ] }
 ```
 
-`not_compared` counts what was skipped: Fineract types such as accruals, and ERP entries whose reference is not one of my op keys. `ours` is `null` for a transaction that did not go through this service. A bad scope gets `422`, and so does a day on which the ERP holds 1000 or more entries; send references instead. If either side cannot be read you get `502`, `503` or `504` and no report, because half the data would show false gaps.
+`not_compared` counts what was skipped, such as accruals. A bad scope gets `422`, as does a day with 1000 or more ERP entries. If either side cannot be read you get `502`, `503` or `504` and no report, because half the data would show false gaps.
 
 ### Admin
 
 #### `POST /admin/recover`
 
-Runs one recovery pass now, the same pass that runs by itself every 5 seconds. Requests stuck in `FINERACT_PENDING` are looked up in Fineract and finished or marked `FAILED`, then due outbox rows go to the ERP. It takes the same API key for now; in production it would get an operator key.
+Runs one recovery pass now; it also runs every 5 seconds. It settles requests stuck in `FINERACT_PENDING`, then sends due outbox rows to the ERP. It takes the usual API key for now; production would give it an operator key.
 
 ```json
 200 { "operations": { "checked": 1, "completed": 1, "failed": 0, "needs_reconciliation": 0,
@@ -395,9 +394,14 @@ Runs one recovery pass now, the same pass that runs by itself every 5 seconds. R
 
 ## Mock ERP
 
-The ERP owns the chart of accounts and the journal, and only the Integration Service calls it. The `X-API-Key`, correlation id and whole-RWF rules are the same, with its key in `ERP_API_KEY`. A reference here is 1 to 64 letters, digits, `.`, `_`, `:` or `-`, starting with a letter or a digit.
+The ERP owns the chart of accounts and the journal, and only the Integration Service calls it. Auth (key in `ERP_API_KEY`), tracing and money follow the shared rules. References are 1 to 64 letters, digits, `.`, `_`, `:` or `-`, starting with a letter or digit. Repeats work alike for accounts and journal entries, ignoring line and key order:
 
-Repeats work the same for accounts and journal entries. A new reference gets `201` with `"status": "CREATED"`. The same data again gets `200` with the stored record and `"status": "ALREADY_EXISTS"`. Different data gets `409 reference_conflict`, and nothing is saved. The order of lines and keys does not matter, and validation runs first, so a broken retry still gets `422`.
+| You send | You get |
+|---|---|
+| A new reference | `201` with `"status": "CREATED"` |
+| Same reference, same data | `200` with the stored record and `"status": "ALREADY_EXISTS"` |
+| Same reference, different data | `409 reference_conflict`, nothing saved |
+| A body that breaks a rule | `422`, even when the reference is already stored (rules run first) |
 
 Errors use the same `{"error": {...}}` shape, with lower-case codes:
 
@@ -415,11 +419,12 @@ Errors use the same `{"error": {...}}` shape, with lower-case codes:
 
 #### `POST /api/accounts`
 
-Adds an account to the chart. The starting chart has four HEADER accounts (`1000` Assets, `2000` Liabilities, `4000` Income, `5000` Expenses) and nine DETAIL accounts under them, each with the reference `GL-<code>`.
+Adds an account. The chart starts with four HEADERs (`1000` Assets, `2000` Liabilities, `4000` Income, `5000` Expenses) and nine DETAIL accounts, each referenced `GL-<code>`.
 
 | Field | Rule |
 |---|---|
 | `code` | 4 to 10 digits |
+| `external_reference`, `name` | Required. `name` is 1 to 200 characters. |
 | `type` | `ASSET`, `LIABILITY`, `EQUITY`, `INCOME` or `EXPENSE` |
 | `usage` | `HEADER` or `DETAIL` |
 | `parent_code` | A HEADER of the same type. Required for a DETAIL account. |
@@ -437,11 +442,11 @@ POST /api/accounts
 
 #### `GET /api/accounts`
 
-Lists accounts as `{"items": [...]}`, each HEADER followed by its children; `?usage=HEADER` or `?usage=DETAIL` filters.
+Lists accounts as `{"items": [...]}`, each HEADER followed by its children. Filter with `?usage=HEADER` or `?usage=DETAIL`.
 
 #### `GET /api/accounts/{code}/balance`
 
-Debit total, credit total and balance, where a HEADER adds up everything under it. `balance` is the normal side minus the other: debit for ASSET and EXPENSE, credit for the rest.
+Totals and balance, rolled up for a HEADER. ASSET and EXPENSE balances are debit minus credit; the rest the other way round.
 
 ```json
 200 { "code": "1000", "name": "Assets", "type": "ASSET", "usage": "HEADER",
@@ -456,9 +461,9 @@ Saves a balanced entry.
 
 | Field | Rule |
 |---|---|
-| `entry_date` | Required |
+| `external_reference`, `entry_date` | Required |
 | `source` | Required: `DISBURSEMENT`, `REPAYMENT`, `REVERSAL` or `MANUAL` |
-| `description` | Optional |
+| `description` | Optional, up to 500 characters |
 | `reverses` | Required for a `REVERSAL`, refused otherwise |
 | `lines` | 2 to 50, each with an `account_code` on a DETAIL account and exactly one of `debit` or `credit` above zero |
 
@@ -479,19 +484,19 @@ POST /api/journal-entries
       "created_at": "2026-10-13T10:02:56Z", "correlation_id": "c-3f9a...", "status": "CREATED" }
 ```
 
-`erp_transaction_id` is the ERP's own id and `total` is the sum of the debits. `correlation_id` comes from the call that first saved the entry.
+`total` is the sum of the debits, and `correlation_id` comes from the first save.
 
 #### `GET /api/journal-entries/{external_reference}`
 
-One entry: the same body without `status`.
+One entry, without `status`.
 
 #### `GET /api/journal-entries`
 
-Searches, newest first, as `{"items": [...]}`. All filters are optional and must all match: `from` and `to` on `entry_date`, `reference` (exact; repeat it to fetch up to 1000 at once, as reconciliation does), `source`, `q` (text in the reference or description) and `limit` (1 to 1000, default 500).
+Searches newest first, as `{"items": [...]}`. Optional filters, all combined: `from` and `to` on `entry_date`, `reference` (exact, repeatable up to 1000), `source`, `q` (text in reference or description) and `limit` (1 to 1000, default 500).
 
 ### The fault switch
 
-`/admin/faults` makes the ERP fail on purpose, so I can watch how the Integration Service copes. `GET` shows the setting, `PUT` turns a fault on and replaces any earlier one, and `DELETE` turns it off; all three return the current setting.
+`/admin/faults` makes the ERP fail on purpose, so I can watch the Integration Service cope. `GET` shows the setting, `PUT` replaces it and `DELETE` clears it; each returns the current setting.
 
 | Field | Rule |
 |---|---|
@@ -509,4 +514,4 @@ PUT /admin/faults
       "remaining": 1, "retry_after": 5, "active": true }
 ```
 
-The key is checked before the switch, so a call without a key gets `401` and does not use up a fault. `/health`, `/admin`, `/ui` and `/openapi` never fail. ARCHITECTURE.md says what each mode is for.
+The key is checked first, so a keyless `401` does not use up a fault. `/health`, `/admin`, `/ui` and `/openapi` never fail. ARCHITECTURE.md explains each mode.
