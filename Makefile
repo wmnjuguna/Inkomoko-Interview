@@ -7,7 +7,7 @@ MOCK_ERP_IMAGE := mock-erp-inkomoko:0.1.0
 INTEGRATION_IMAGE := integration-service-inkomoko:0.1.0
 COMPOSE_NETWORK := inkomoko-fineract_default
 
-.PHONY: help build up down reset test-java test-python demo-gl-sync simulate-gl-sync-4x demo-identity demo-lifecycle simulate-duplicates simulate-recon
+.PHONY: help build up down reset test-java test-python postman demo-gl-sync simulate-gl-sync-4x demo-identity demo-lifecycle simulate-duplicates simulate-recon
 
 help:
 	@echo "build        build the Fineract image from source (runs the Java unit tests), the integration test image, the Mock ERP and Integration Service images, and refresh the OpenAPI specs"
@@ -16,6 +16,7 @@ help:
 	@echo "reset        stop containers and delete all data"
 	@echo "test-java    Java unit tests (image build) + integration tests against the running stack"
 	@echo "test-python  Mock ERP and Integration Service: ruff, mypy and pytest (needs the running stack and the test databases)"
+	@echo "postman      run the Postman collection against the running stack with newman (needs Node)"
 	@echo "demo-gl-sync         Part A behaviours 1-4 on the running stack, in the evidence format"
 	@echo "simulate-gl-sync-4x  a new ERP account sent 4 times at once (service and plugin); every count must be 1"
 	@echo "demo-identity        C-1: create a client, find it by client_uid, check it, replay, conflict"
@@ -67,6 +68,10 @@ test-java: build up
 test-python:
 	cd mock-erp && uv run ruff check . && uv run ruff format --check . && uv run mypy && uv run pytest -q
 	cd integration-service && uv run ruff check . && uv run ruff format --check . && uv run mypy && uv run pytest -q
+
+# The same requests a reviewer clicks through in Postman, run from the terminal (run setup first: make up).
+postman: .env
+	npx --yes newman@6.2.1 run postman/collection.json -e postman/local.postman_environment.json --delay-request 400
 
 # Part A evidence on the running stack (run setup first: make up). Uses the Integration Service venv.
 demo-gl-sync: .env
