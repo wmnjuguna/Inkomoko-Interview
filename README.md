@@ -55,20 +55,16 @@ Everything is pinned.
 
 ## Run it
 
-Two commands bring up the whole stack. The first one is slow because it builds Fineract from source.
+Everything runs in Docker. One command builds the images and starts the stack; the first run is slow because it builds Fineract from source.
 
 ```bash
 git clone --recurse-submodules https://github.com/wmnjuguna/Inkomoko-Interview.git
 cd Inkomoko-Interview
-# or, if you already cloned without submodules:
-git submodule update --init --depth 1
-
-cp .env.example .env
-docker compose build           # Fineract from source (runs the Java unit tests), then the Mock ERP, fault proxy and Integration Service
-docker compose up -d --wait    # Postgres, Fineract, the fault proxy, the Mock ERP, the setup step once, then the Integration Service
+cp .env.example .env                   # placeholder passwords and keys, nothing secret
+docker compose up -d --build --wait    # builds, then starts Postgres, Fineract, the fault proxy, the Mock ERP, the setup step once, and the Integration Service
 ```
 
-A clean start took me about two minutes, most of it Fineract.
+Everything starts empty. The database volume is created on first start, Fineract builds its own schema, and the setup step adds the office, currency, role, API user and loan product. The Mock ERP seeds its own chart of accounts, because the ERP owns the chart. A clean start took me about two minutes, most of it Fineract. If you cloned without submodules, run `git submodule update --init --depth 1` first.
 
 `fineract-customization/fineract` is the untouched Fineract 1.15.0 source. My plugin sits beside it in `fineract-customization/custom/`. [fineract-customization/patch/glsync.diff](fineract-customization/patch/glsync.diff) shows the same change as one diff.
 
@@ -84,7 +80,7 @@ docker compose run --rm setup
 
 Five steps take you from a cold start to a reconciled loan. Ports bind to this computer only, and every credential is a placeholder from `.env.example`.
 
-**1. Start the stack.** `docker compose build` builds the images and `docker compose up -d --wait` starts everything and waits until each service is healthy. Open any of these to see a service answer: [Fineract](http://127.0.0.1:8080/fineract-provider/actuator/health), [Mock ERP](http://127.0.0.1:8090/health), [Integration Service](http://127.0.0.1:8091/health), [fault proxy](http://127.0.0.1:8092/health).
+**1. Start the stack.** `docker compose up -d --build --wait` builds the images, starts everything and waits until each service is healthy. Open any of these to see a service answer: [Fineract](http://127.0.0.1:8080/fineract-provider/actuator/health), [Mock ERP](http://127.0.0.1:8090/health), [Integration Service](http://127.0.0.1:8091/health), [fault proxy](http://127.0.0.1:8092/health).
 
 **2. Open the Mock ERP at http://127.0.0.1:8090/.** This is the accounting side, and its chart is what setup synced into Fineract.
 
@@ -135,8 +131,7 @@ Both languages pass.
 **Java.** 51 unit tests run inside the image build. The 10 integration tests run against the started stack; details in [fineract-customization/BUILD.md](fineract-customization/BUILD.md).
 
 ```bash
-docker build --target integration-test -t fineract-inkomoko-it:1.15.0 fineract-customization
-docker run --rm --network inkomoko-fineract_default -e FINERACT_URL=http://fineract:8080 fineract-inkomoko-it:1.15.0
+docker compose --profile test run --rm java-tests
 ```
 
 **Python.** Needs [uv](https://docs.astral.sh/uv/). On 2026-10-14: Mock ERP 216 passed, Integration Service 925 passed, ruff and mypy clean.
@@ -168,7 +163,6 @@ uv run --project integration-service python scripts/simulate_j5.py      # J-5: t
 
 ```
 ├── README.md  ARCHITECTURE.md  API.md  SIMULATIONS.md  DECISIONS.md
-├── Makefile                       my own shortcuts for the commands above; not needed
 ├── docker-compose.yml
 ├── docs/openapi/                  OpenAPI specs
 ├── docs/images/                   the screenshots above

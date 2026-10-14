@@ -12,7 +12,7 @@ The plugin runs inside Fineract, not around it. Its one write, `PUT /v1/erp-inte
 
 Flask 3 with flask-openapi3 and Pydantic, twice. Pydantic validates every request, bad input gets `422` in one shape, and the OpenAPI spec is generated from the same models. One stack for both the Integration Service and the Mock ERP means one way to validate, log, migrate and test. Gunicorn runs two workers with four threads each, so a slow ERP ties up a thread, not the service.
 
-Everything runs with plain `docker compose` commands. The Makefile in the repo is only my own shortcut for the same commands; nothing depends on it.
+Everything runs with plain `docker compose` commands.
 
 ## One key per operation
 
