@@ -1,0 +1,5 @@
+# reliability tests only, on the live stack, 2026-10-14T13:22:33+03:00
+$ uv run pytest -q tests/unit/test_faults_hook.py tests/unit/test_reconciliation_rules.py tests/integration/test_concurrency_sims.py tests/integration/test_faults_live.py tests/integration/test_reconciliation_api.py
+....................................................                     [100%]
+52 passed in 49.36s
+# exit code: 0

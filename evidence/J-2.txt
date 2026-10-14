@@ -1,0 +1,17 @@
+uv run --project integration-service python scripts/simulate_j2.py
+J-2 run 7986CA: loan_reference LN-2026-000018, reference J2-DSB-7986CA-957e
+
+=== J-2 Fineract is down [PASS] ===
+1. What things looked like before: Fineract: status 200 'Approved'; no summary yet (not disbursed); disbursement transactions 0; commands with Idempotency-Key DSB:J2-DSB-7986CA-957e:<attempt>: 0; ERP: journal entries with reference DSB:J2-DSB-7986CA-957e: 0; no operation
+2. The request: fault proxy down; POST /api/loans/LN-2026-000018/disburse {"external_reference": "J2-DSB-7986CA-957e"}; then fault off and the same request again
+3. The response: while down: HTTP 503 {"error": {"code": "FINERACT_UNAVAILABLE", "correlation_id": "c-demo-7986ca-005", "details": {}, "message": "Could not read Fineract's disbursement template. Nothing was sent. Send the same request again."}} || after: HTTP 200 {"amount": 300000, "client_uid": "DEMO-473486", "erp_status": "PENDING", "external_reference": "J2-DSB-7986CA-957e", "loan_reference": "LN-2026-000018", "loan_status": "ACTIVE", "status": "ERP_PENDING", "transaction_date": "2026-10-14", "type": "DISBURSEMENT"}
+4. What Fineract shows: during: status 200 'Approved'; no summary yet (not disbursed); disbursement transactions 0; commands with Idempotency-Key DSB:J2-DSB-7986CA-957e:<attempt>: 0 || after: status 300 'Active'; principalDisbursed 300000, principalPaid 0, principalOutstanding 300000, interestCharged 30046, interestPaid 0, interestOutstanding 30046, totalOutstanding 330046; disbursement transactions 1; commands with Idempotency-Key DSB:J2-DSB-7986CA-957e:<attempt>: 1
+5. What the ERP shows: during: journal entries with reference DSB:J2-DSB-7986CA-957e: 0 || after: journal entries with reference DSB:J2-DSB-7986CA-957e: 1
+6. What the Integration Service shows: during: operation FAILED, attempts 1, erp_status -; events ->RECEIVED, RECEIVED->FINERACT_PENDING, FINERACT_PENDING->FAILED; outbox no row || after: operation COMPLETED, attempts 2, erp_status SENT; events ->RECEIVED, RECEIVED->FINERACT_PENDING, FINERACT_PENDING->FAILED, FAILED->FINERACT_PENDING, FINERACT_PENDING->FINERACT_DONE, FINERACT_DONE->ERP_PENDING, ERP_PENDING->COMPLETED; outbox SENT, attempts 1, last_error -
+7. What should happen: while down: 503 FINERACT_UNAVAILABLE, operation FAILED, nothing in Fineract, no outbox row, no ERP entry. Retry with the same reference: 200, 1 disbursement, 1 ERP entry, attempts 2
+8. What did happen: while down: 503 FINERACT_UNAVAILABLE, checks held: True; retry: 200, completed True; Fineract disbursements 1; ERP entries 1
+9. Why: the first Fineract call (the disbursement template read, before the write) got a refused connection, which proves nothing reached Fineract, so the operation is FAILED (the only thing saved is the operation and its events, for the record). FAILED may be retried on the same row (attempts + 1): the retry first looks up the earlier attempt by externalId, finds nothing, and sends once.
+
+Result: PASS
+
+Faults reset: proxy fault off, ERP fault active False

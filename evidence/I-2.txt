@@ -1,0 +1,31 @@
+uv run --project integration-service python scripts/simulate_concurrent_disburse.py
+
+I-2a run 9A4F16: loan_reference LN-2026-000013, reference I2A-DSB-9A4F16-930d
+
+=== I-2a 10 disbursements at the same time, same reference [PASS] ===
+1. What things looked like before: Fineract: status 200 'Approved'; no summary yet (not disbursed), disbursements 0; ERP DISBURSEMENT entries 0; ours: operations rows DSB: none; outbox rows: 0 (none)
+2. The request: POST /api/loans/LN-2026-000013/disburse {"external_reference": "I2A-DSB-9A4F16-930d"}, 10 at once (one barrier)
+3. The response: 1 x HTTP 200, 9 x HTTP 202; the 200 bodies are identical: True; first: {"amount": 1000000, "client_uid": "DEMO-760704", "erp_status": "PENDING", "external_reference": "I2A-DSB-9A4F16-930d", "loan_reference": "LN-2026-000013", "loan_status": "ACTIVE", "status": "ERP_PENDING", "transaction_date": "2026-10-14", "type": "DISBURSEMENT"}
+4. What Fineract shows: status 300 'Active'; principalDisbursed 1000000, principalPaid 0, principalOutstanding 1000000, interestCharged 100161, interestPaid 0, interestOutstanding 100161, totalOutstanding 1100161; disbursement transactions: 1; commands run with Idempotency-Key DSB:I2A-DSB-9A4F16-930d:<attempt>: 1
+5. What the ERP shows: 1 DISBURSEMENT entry for LN-2026-000013: DSB:I2A-DSB-9A4F16-930d DISBURSEMENT 2026-10-14: DR 1200 1,000,000 / CR 1100 1,000,000
+6. What the Integration Service shows: right after the burst: operations rows DSB: I2A-DSB-9A4F16-930d=ERP_PENDING; outbox rows: 1 (PENDING); after the outbox: operations rows DSB: I2A-DSB-9A4F16-930d=COMPLETED; outbox rows: 1 (SENT); DISBURSEMENT status COMPLETED, erp_status SENT, attempts 1, history RECEIVED -> FINERACT_PENDING -> FINERACT_DONE -> ERP_PENDING -> COMPLETED
+7. What should happen: every answer 200 with one body, or 202 while running; Fineract 1, commands 1, operations 1, outbox 1, ERP 1
+8. What did happen: Requests sent: 10; Fineract disbursements: 1; Fineract commands for DSB:I2A-DSB-9A4F16-930d: 1; Integration operations: 1; outbox rows: 1; ERP journal entries: 1
+9. Why: the first insert of (DSB, reference) wins (ON CONFLICT DO NOTHING on the unique key, L1); the other 9 find that row: 202 while it runs, its saved answer once it is done. Only the winner calls Fineract, and it writes one outbox row in the same transaction as FINERACT_DONE, so the ERP gets one entry.
+Result I-2a: PASS
+
+I-2b run 9A4F16: loan_reference LN-2026-000014, references I2B-DSB-9A4F16-a361 ... I2B-DSB-9A4F16-7775
+
+=== I-2b 10 disbursements at the same time, different references [PASS] ===
+1. What things looked like before: Fineract: status 200 'Approved'; no summary yet (not disbursed), disbursements 0; ERP DISBURSEMENT entries 0; ours: operations rows DSB: none; outbox rows: 0 (none)
+2. The request: POST /api/loans/LN-2026-000014/disburse, 10 at once (one barrier), each with its own external_reference
+3. The response: 1 x HTTP 200, 9 x HTTP 409 LOAN_ALREADY_DISBURSED; winner I2B-DSB-9A4F16-7775; a refusal: {"error": {"code": "LOAN_ALREADY_DISBURSED", "correlation_id": "c-demo-9a4f1600-001", "details": {"holder_status": "FINERACT_PENDING"}, "message": "This loan is already paid out, or being paid out, under another external_reference."}}
+4. What Fineract shows: status 300 'Active'; principalDisbursed 1000000, principalPaid 0, principalOutstanding 1000000, interestCharged 100161, interestPaid 0, interestOutstanding 100161, totalOutstanding 1100161; disbursement transactions: 1; commands run for the winner: 1, for the 9 others: 0
+5. What the ERP shows: 1 DISBURSEMENT entry for LN-2026-000014: DSB:I2B-DSB-9A4F16-7775 DISBURSEMENT 2026-10-14: DR 1200 1,000,000 / CR 1100 1,000,000
+6. What the Integration Service shows: right after the burst: operations rows DSB: I2B-DSB-9A4F16-7775=ERP_PENDING; outbox rows: 1 (PENDING); after the outbox: operations rows DSB: I2B-DSB-9A4F16-7775=COMPLETED; outbox rows: 1 (SENT); operations rows for the 9 refused references: 0; winner: DISBURSEMENT status COMPLETED, erp_status SENT, attempts 1, history RECEIVED -> FINERACT_PENDING -> FINERACT_DONE -> ERP_PENDING -> COMPLETED
+7. What should happen: one 200, nine 409 LOAN_ALREADY_DISBURSED; Fineract 1; no command and no row for any refused reference; outbox 1; ERP 1
+8. What did happen: Requests sent: 10; Fineract disbursements: 1; Fineract commands for the winner: 1, for the 9 others: 0; Integration operations: 1 (rows for the 9 others: 0); outbox rows: 1; ERP journal entries: 1
+9. Why: each reference is new, so L1 does not stop them. The partial unique index operations_one_live_disbursement (L2) lets one live DSB row exist per loan: the 9 other inserts fail, nothing is saved for them, Fineract is never called, and they get 409. Behind it: the per-loan lock (L3), Fineract's unique transaction externalId and Idempotency-Key (L4), and Fineract's loan state, the last line of defence (L5).
+Result I-2b: PASS
+
+Result: PASS (I-2a True, I-2b True)
