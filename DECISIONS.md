@@ -112,6 +112,7 @@ Time went to the required tiers, so I left out:
 - Reversals, though reconciliation already understands their shape.
 - A repair call for requests stuck at `NEEDS_RECONCILIATION`.
 - The other Part L items: fees, metrics, scheduled reconciliation, signed webhooks.
+- Prometheus, Grafana and OpenTelemetry, which the brief lists as optional. They would have cost a day I spent on the failure and concurrency work instead. The structured JSON logs carry every field the brief asks for, and one `grep` on a correlation id already tells the story of a request across both services.
 - Redis and Kafka, for the reasons above.
 - A run on another machine or on macOS. A fresh clone on this machine starts clean.
 
