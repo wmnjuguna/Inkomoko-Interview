@@ -157,8 +157,10 @@ services:
     image: integration-service-inkomoko:0.1.0
     # A small init as PID 1, so a crash of gunicorn stops the container, and compose
     # starts it again (J-5: the start-up sweep then finishes what the crash left).
+    # on-failure, not unless-stopped: after a machine restart Docker would start only this
+    # service, without its database, and it would crash-loop.
     init: true
-    restart: unless-stopped
+    restart: on-failure:5
     # Starts only after setup has made the Fineract API user it logs in as.
     depends_on:
       setup:
