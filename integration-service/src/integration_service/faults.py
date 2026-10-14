@@ -8,7 +8,7 @@ is never hit. Nothing in .env.example sets it; the J-5 script sets it for one ru
 
 The crash is a hard stop, like a power cut: no cleanup, no answer to the partner. Under
 gunicorn it also kills the gunicorn master, so the whole container stops and compose
-restarts it (restart: unless-stopped). Otherwise gunicorn would just start a new worker."""
+restarts it (restart: on-failure). Otherwise gunicorn would just start a new worker."""
 
 from __future__ import annotations
 
