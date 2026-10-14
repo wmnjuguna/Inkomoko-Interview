@@ -8,7 +8,7 @@ I built three APIs: a small Fineract plugin, the Integration Service the client 
 | Integration Service | http://localhost:8091 | `/openapi/openapi.json`, Swagger UI at `/openapi/swagger` | `docs/openapi/integration-service.yaml` |
 | Mock ERP | http://localhost:8090 | the same two paths | `docs/openapi/mock-erp.yaml` |
 
-The specs are generated from the code. ARCHITECTURE.md, DECISIONS.md and SIMULATIONS.md cover the design, the reasons and the scenarios.
+The specs are generated from the code, and all three import straight into Postman. To make the calls rather than read them, import [postman/collection.json](postman/collection.json) with its environment file: it walks through every endpoint below in order, with a test on each answer. ARCHITECTURE.md, DECISIONS.md and SIMULATIONS.md cover the design, the reasons and the scenarios.
 
 ## General rules
 
