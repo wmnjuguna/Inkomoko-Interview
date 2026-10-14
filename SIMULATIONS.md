@@ -21,22 +21,24 @@ flowchart LR
 
 ## The runs at a glance
 
+Each script runs with `uv run --project integration-service python scripts/<file>` while the stack is up.
+
 | ID | Proves | Command | Result |
 |---|---|---|---|
-| A-1 | Plugin: 1 mapping, same data accepted, different data refused, no permission refused | `make demo-gl-sync` | `4 of 4 behaviours matched`, twice |
-| A-2 | New ERP account sent 4 times at once: 1 account everywhere | `make simulate-gl-sync-4x` | `round 1: PASS, round 2: PASS` |
-| C-1 | Client created once, found by `client_uid`, never duplicated | `make demo-identity` | `5 of 5 steps matched` |
-| D-1 | Loan from application to Closed, ERP = Fineract after every stage | `make demo-lifecycle` | `8 of 8 checks matched` |
-| I-1 | Same disbursement 4 times in a row: 1 payout | `make simulate-duplicates` | Requests 4, Fineract 1, ERP 1, operations 1. `PASS` |
-| I-2a | 10 disbursements at once, same reference: 1 wins, 9 wait | `make simulate-concurrent-disburse` | `Result I-2a: PASS` |
-| I-2b | 10 disbursements at once, different references: 1 wins, 9 refused | `make simulate-concurrent-disburse` | `Result I-2b: PASS` |
-| I-3 | 10 repayments at once, 6 references plus copies: each applied once | `make simulate-concurrent-repay` | Fineract repayments 6, operations 6, outbox 6, ERP 6. `PASS` |
-| J-1 | ERP down after Fineract succeeds: entry waits, sent once | `make simulate-j1` | `PASS` |
-| J-2 | Fineract down: clean failure, safe retry | `make simulate-j2` | `PASS` |
-| J-3 | Fineract times out after the write: recovery finds it, no second write | `make simulate-j3` | `PASS` |
-| J-4 | ERP times out after it saved: resend does not double post | `make simulate-j4` | `PASS` |
-| J-5 | Crash between Fineract and the ERP: nothing lost | `make simulate-j5` | `PASS` |
-| K-1 | Reconciliation names all four outcomes | `make simulate-recon` | 2 `MATCHED`, 1 of each other outcome. `PASS` |
+| A-1 | Plugin: 1 mapping, same data accepted, different data refused, no permission refused | `scripts/demo_gl_sync.py` | `4 of 4 behaviours matched`, twice |
+| A-2 | New ERP account sent 4 times at once: 1 account everywhere | `scripts/simulate_gl_sync_4x.py` | `round 1: PASS, round 2: PASS` |
+| C-1 | Client created once, found by `client_uid`, never duplicated | `scripts/demo_identity.py` | `5 of 5 steps matched` |
+| D-1 | Loan from application to Closed, ERP = Fineract after every stage | `scripts/demo_lifecycle.py` | `8 of 8 checks matched` |
+| I-1 | Same disbursement 4 times in a row: 1 payout | `scripts/simulate_duplicates.py` | Requests 4, Fineract 1, ERP 1, operations 1. `PASS` |
+| I-2a | 10 disbursements at once, same reference: 1 wins, 9 wait | `scripts/simulate_concurrent_disburse.py` | `Result I-2a: PASS` |
+| I-2b | 10 disbursements at once, different references: 1 wins, 9 refused | `scripts/simulate_concurrent_disburse.py` | `Result I-2b: PASS` |
+| I-3 | 10 repayments at once, 6 references plus copies: each applied once | `scripts/simulate_concurrent_repay.py` | Fineract repayments 6, operations 6, outbox 6, ERP 6. `PASS` |
+| J-1 | ERP down after Fineract succeeds: entry waits, sent once | `scripts/simulate_j1.py` | `PASS` |
+| J-2 | Fineract down: clean failure, safe retry | `scripts/simulate_j2.py` | `PASS` |
+| J-3 | Fineract times out after the write: recovery finds it, no second write | `scripts/simulate_j3.py` | `PASS` |
+| J-4 | ERP times out after it saved: resend does not double post | `scripts/simulate_j4.py` | `PASS` |
+| J-5 | Crash between Fineract and the ERP: nothing lost | `scripts/simulate_j5.py` | `PASS` |
+| K-1 | Reconciliation names all four outcomes | `scripts/simulate_recon.py` | 2 `MATCHED`, 1 of each other outcome. `PASS` |
 
 ## A-1: the plugin's four rules
 

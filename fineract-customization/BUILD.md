@@ -25,7 +25,7 @@ custom/inkomoko/glsync/
 
 ## Commands
 
-`make test-java` builds, starts the stack and runs the integration tests. Underneath it runs:
+From the repo root: build the two images, start the stack, then run the tests against it.
 
 ```bash
 docker buildx build --load -t fineract-inkomoko:1.15.0 fineract-customization

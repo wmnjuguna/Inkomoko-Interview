@@ -27,17 +27,17 @@ Every part has tests, and most have a `make` command that shows it live. [SIMULA
 
 | Part | What | Shown by |
 |---|---|---|
-| A | Fineract plugin: GL accounts from the ERP, once | `make demo-gl-sync` |
+| A | Fineract plugin: GL accounts from the ERP, once | `scripts/demo_gl_sync.py` |
 | B | Fineract setup | the `setup` service |
-| C | Clients | `make demo-identity` |
-| D | Loan lifecycle, application to Closed | `make demo-lifecycle` |
+| C | Clients | `scripts/demo_identity.py` |
+| D | Loan lifecycle, application to Closed | `scripts/demo_lifecycle.py` |
 | E | The Integration Service API | [API.md](API.md) |
-| F | Duplicate requests | `make simulate-duplicates` |
+| F | Duplicate requests | `scripts/simulate_duplicates.py` |
 | G | Mock ERP, with fault switches | [API.md](API.md) |
-| H | Journal entries, through an outbox | `make demo-lifecycle` |
-| I | Concurrency, I-1 to I-3 | `make simulate-concurrent-disburse`, `make simulate-concurrent-repay` |
-| J | Failures J-1 to J-5, with recovery | `make simulate-j1` to `make simulate-j5` |
-| K | Reconciliation, all four outcomes | `make simulate-recon` |
+| H | Journal entries, through an outbox | `scripts/demo_lifecycle.py` |
+| I | Concurrency, I-1 to I-3 | `scripts/simulate_concurrent_disburse.py`, `scripts/simulate_concurrent_repay.py` |
+| J | Failures J-1 to J-5, with recovery | `scripts/simulate_j1.py` to `scripts/simulate_j5.py` |
+| K | Reconciliation, all four outcomes | `scripts/simulate_recon.py` |
 | L | Stretch | not built |
 
 ## Versions
@@ -63,11 +63,12 @@ cd Inkomoko-Interview
 # or, if you already cloned without submodules:
 git submodule update --init --depth 1
 
-make build    # Fineract from source (runs the Java unit tests), then the Mock ERP, fault proxy and Integration Service images
-make up       # Postgres, Fineract, the fault proxy, the Mock ERP, the setup step once, then the Integration Service
+cp .env.example .env
+docker compose build           # Fineract from source (runs the Java unit tests), then the Mock ERP, fault proxy and Integration Service
+docker compose up -d --wait    # Postgres, Fineract, the fault proxy, the Mock ERP, the setup step once, then the Integration Service
 ```
 
-The Makefile only wraps plain docker and compose commands. Without make, copy `.env.example` to `.env` and run `docker compose up -d --no-build --wait`. A clean start took me about two minutes.
+A clean start took me about two minutes, most of it Fineract.
 
 `fineract-customization/fineract` is the untouched Fineract 1.15.0 source. My plugin sits beside it in `fineract-customization/custom/`. [fineract-customization/patch/glsync.diff](fineract-customization/patch/glsync.diff) shows the same change as one diff.
 
@@ -83,7 +84,7 @@ docker compose run --rm setup
 
 Five steps take you from a cold start to a reconciled loan. Ports bind to this computer only, and every credential is a placeholder from `.env.example`.
 
-**1. Start the stack.** `make build` builds the images and `make up` waits until every service is healthy. If `make` is not an option, copy `.env.example` to `.env` and run `docker compose up -d --no-build --wait`. Open any of these to see a service answer: [Fineract](http://127.0.0.1:8080/fineract-provider/actuator/health), [Mock ERP](http://127.0.0.1:8090/health), [Integration Service](http://127.0.0.1:8091/health), [fault proxy](http://127.0.0.1:8092/health).
+**1. Start the stack.** `docker compose build` builds the images and `docker compose up -d --wait` starts everything and waits until each service is healthy. Open any of these to see a service answer: [Fineract](http://127.0.0.1:8080/fineract-provider/actuator/health), [Mock ERP](http://127.0.0.1:8090/health), [Integration Service](http://127.0.0.1:8091/health), [fault proxy](http://127.0.0.1:8092/health).
 
 **2. Open the Mock ERP at http://127.0.0.1:8090/.** This is the accounting side, and its chart is what setup synced into Fineract.
 
@@ -123,18 +124,27 @@ Five steps take you from a cold start to a reconciled loan. Ports bind to this c
 | 6 Break things on purpose | The ERP goes down and the repayment still succeeds, with the journal entry waiting in the outbox. Then Fineract goes down: nothing is sent, you get `503`, and the same reference succeeds once it is back. |
 | 7 Mock ERP | The chart, a balance, the payout's journal entry with Fineract's own split, and one manual entry. |
 
-From a terminal, `make postman` runs the same collection with newman (needs Node). The three OpenAPI files in [docs/openapi](docs/openapi) also import straight into Postman if you want to build your own requests.
+From a terminal, `npx newman run postman/collection.json -e postman/local.postman_environment.json` runs the same collection (needs Node). The three OpenAPI files in [docs/openapi](docs/openapi) also import straight into Postman if you want to build your own requests.
 
 **5. Watch the ERP catch up.** After folder 3, refresh the journal: the payout and the repayment are there, each with the split Fineract reported. Then run the scripted failure scenarios in [SIMULATIONS.md](SIMULATIONS.md).
 
 ## Tests
 
-Each language has one command, and both pass.
+Both languages pass.
 
-| Language | Command | Last result |
-|---|---|---|
-| Java | `make test-java` | 51 unit tests run in the build, then 10 integration tests passed. See [fineract-customization/BUILD.md](fineract-customization/BUILD.md). |
-| Python | `make test-python` | ruff, strict mypy and pytest. On 2026-10-14: Mock ERP 216 passed, Integration Service 925 passed, ruff and mypy clean. |
+**Java.** 51 unit tests run inside the image build. The 10 integration tests run against the started stack; details in [fineract-customization/BUILD.md](fineract-customization/BUILD.md).
+
+```bash
+docker build --target integration-test -t fineract-inkomoko-it:1.15.0 fineract-customization
+docker run --rm --network inkomoko-fineract_default -e FINERACT_URL=http://fineract:8080 fineract-inkomoko-it:1.15.0
+```
+
+**Python.** Needs [uv](https://docs.astral.sh/uv/). On 2026-10-14: Mock ERP 216 passed, Integration Service 925 passed, ruff and mypy clean.
+
+```bash
+cd mock-erp && uv run pytest -q
+cd ../integration-service && uv run pytest -q
+```
 
 The Python tests need two empty databases, `erp_test` and `integration_test`. A new data volume creates them; on an older one:
 
@@ -143,22 +153,22 @@ docker compose exec db createdb -U postgres -O erp erp_test
 docker compose exec db createdb -U postgres -O integration integration_test
 ```
 
-`make down` stops everything, `make reset` also deletes the data, and `make help` lists every command.
+`docker compose stop` stops everything, and `docker compose down -v` also deletes the data.
 
 ## Simulations
 
-Each scenario is a `make` command that calls the Integration Service as the client system would. [SIMULATIONS.md](SIMULATIONS.md) lists every scenario with its recorded result. Two to start with:
+Each scenario is a script in `scripts/` that calls the Integration Service as the client system would, run with uv while the stack is up. [SIMULATIONS.md](SIMULATIONS.md) lists every scenario with its recorded result. Two to start with:
 
 ```bash
-make demo-lifecycle            # D-1: a 5,000,000 RWF loan from application to Closed
-make simulate-j5               # J-5: the service crashes between Fineract and the ERP, then recovers
+uv run --project integration-service python scripts/demo_lifecycle.py   # D-1: a 5,000,000 RWF loan from application to Closed
+uv run --project integration-service python scripts/simulate_j5.py      # J-5: the service crashes between Fineract and the ERP, then recovers
 ```
 
 ## Folders
 
 ```
 ├── README.md  ARCHITECTURE.md  API.md  SIMULATIONS.md  DECISIONS.md
-├── Makefile
+├── Makefile                       my own shortcuts for the commands above; not needed
 ├── docker-compose.yml
 ├── docs/openapi/                  OpenAPI specs
 ├── docs/images/                   the screenshots above
