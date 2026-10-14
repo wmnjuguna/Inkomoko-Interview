@@ -63,7 +63,7 @@ Before each write I read Fineract's own template for that step and take the amou
 
 ## Journal entries come from Fineract's split
 
-After Fineract says yes I read the transaction back and build the ERP entry from Fineract's own principal, interest and overpayment portions, never from the caller's amount or from interest maths of my own. The GL codes come from the loan product. Anything the mapping would have to guess goes to `NEEDS_RECONCILIATION` instead. In the full lifecycle run, the ERP's totals per account matched Fineract's ledger after every step.
+After Fineract says yes I read the transaction back and build the ERP entry from Fineract's own principal, interest and overpayment portions, never from the caller's amount or from interest maths of my own. The GL codes come from the loan product. Anything the mapping would have to guess goes to `NEEDS_RECONCILIATION` instead. The loan product uses cash-based accounting, so Fineract posts to its ledger only when money moves, at payout and at each repayment, and every one of those postings maps one-to-one to an ERP entry under the same reference. Accrual accounting would also post interest as it builds up, which the ERP has no counterpart for. In the full lifecycle run, the ERP's totals per account matched Fineract's ledger after every step.
 
 ## Reconciliation is a live report
 
