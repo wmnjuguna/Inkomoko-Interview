@@ -113,7 +113,7 @@ Time went to the required tiers, so I left out:
 - A repair call for requests stuck at `NEEDS_RECONCILIATION`.
 - The other Part L items: fees, metrics, scheduled reconciliation, signed webhooks.
 - Redis and Kafka, for the reasons above.
-- A run from a fresh clone on another machine.
+- A run on another machine or on macOS. A fresh clone on this machine starts clean.
 
 ## Known weaknesses
 

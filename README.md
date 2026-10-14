@@ -196,4 +196,4 @@ I reviewed the output, made the decisions, and can explain and change any part o
 ## Not done
 
 - Part L (stretch). [DECISIONS.md](DECISIONS.md) lists what I chose not to build, and why.
-- I have not rehearsed a fresh `git clone` on another machine. Each part ran on a clean stack, but only on mine.
+- I have not tried it on another machine or on macOS. On this one, a fresh `git clone` on 2026-10-15 went from nothing to healthy in two minutes with the commands above, and the Postman collection, the Java tests and the D-1 script all passed against it.
