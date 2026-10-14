@@ -2,7 +2,7 @@
 
 Every scenario below has a `make` command. Each one calls the Integration Service like a partner, then reads Fineract, the ERP and the databases to show the state before and after. Each run uses new ids, so it can run again. Run them after `make up`.
 
-Each result below is copied from a real run. The full output of each run is in `evidence/<id>.txt`. [evidence/README.md](evidence/README.md) lists every file.
+This file is the record of results. Each result below is copied from a real run. The results were captured on 2026-10-13 and 2026-10-14, on the local stack. Each one can be reproduced with the `make` command listed next to it. The raw output is not kept in the repo. A new run makes new ids and loan numbers, but the counts and the result line should be the same.
 
 ## What each result records
 
@@ -20,22 +20,22 @@ This is the brief's evidence template. Every script prints these nine points.
 
 ## The list
 
-| ID | Part | What it tests | Command | Result (from the run) | Evidence |
-|---|---|---|---|---|---|
-| A-1 | A | The plugin's four rules: one mapping, same data, different data, no permission | `make demo-gl-sync` | `4 of 4 behaviours matched`, twice | [A-1.txt](evidence/A-1.txt) |
-| A-2 | A | A new ERP account sent 4 times at once | `make simulate-gl-sync-4x` | `round 1: PASS, round 2: PASS` | [A-2.txt](evidence/A-2.txt) |
-| C-1 | C | Create a client, find it by `client_uid`, check it | `make demo-identity` | `5 of 5 steps matched` | [C-1.txt](evidence/C-1.txt) |
-| D-1 | D | A loan from application to Closed | `make demo-lifecycle` | `8 of 8 checks matched` | [D-1.txt](evidence/D-1.txt) |
-| I-1 | I | The same disbursement sent 4 times, one after another | `make simulate-duplicates` | Requests 4, Fineract 1, ERP 1, operations 1. `PASS` | [I-1.txt](evidence/I-1.txt) |
-| I-2a | I | 10 disbursements at once, same reference | `make simulate-concurrent-disburse` | `Result I-2a: PASS` | [I-2.txt](evidence/I-2.txt) |
-| I-2b | I | 10 disbursements at once, different references | `make simulate-concurrent-disburse` | `Result I-2b: PASS` | [I-2.txt](evidence/I-2.txt) |
-| I-3 | I | 10 repayments at once: 6 references plus copies | `make simulate-concurrent-repay` | Fineract repayments 6, operations 6, outbox 6, ERP 6. `PASS` | [I-3.txt](evidence/I-3.txt) |
-| J-1 | J | The ERP is down after Fineract succeeds | `make simulate-j1` | `PASS` | [J-1.txt](evidence/J-1.txt) |
-| J-2 | J | Fineract is down | `make simulate-j2` | `PASS` | [J-2.txt](evidence/J-2.txt) |
-| J-3 | J | Fineract times out after the request was sent | `make simulate-j3` | `PASS` | [J-3.txt](evidence/J-3.txt) |
-| J-4 | J | The ERP times out after it saved the entry | `make simulate-j4` | `PASS` | [J-4.txt](evidence/J-4.txt) |
-| J-5 | J | A crash between Fineract succeeding and the ERP call | `make simulate-j5` | `PASS` | [J-5.txt](evidence/J-5.txt) |
-| K-1 | K | Reconciliation, with all four outcomes planted | `make simulate-recon` | 2 `MATCHED`, 1 of each other outcome. `PASS` | [K-1.txt](evidence/K-1.txt) |
+| ID | Part | What it tests | Command | Result (from the run) |
+|---|---|---|---|---|
+| A-1 | A | The plugin's four rules: one mapping, same data, different data, no permission | `make demo-gl-sync` | `4 of 4 behaviours matched`, twice |
+| A-2 | A | A new ERP account sent 4 times at once | `make simulate-gl-sync-4x` | `round 1: PASS, round 2: PASS` |
+| C-1 | C | Create a client, find it by `client_uid`, check it | `make demo-identity` | `5 of 5 steps matched` |
+| D-1 | D | A loan from application to Closed | `make demo-lifecycle` | `8 of 8 checks matched` |
+| I-1 | I | The same disbursement sent 4 times, one after another | `make simulate-duplicates` | Requests 4, Fineract 1, ERP 1, operations 1. `PASS` |
+| I-2a | I | 10 disbursements at once, same reference | `make simulate-concurrent-disburse` | `Result I-2a: PASS` |
+| I-2b | I | 10 disbursements at once, different references | `make simulate-concurrent-disburse` | `Result I-2b: PASS` |
+| I-3 | I | 10 repayments at once: 6 references plus copies | `make simulate-concurrent-repay` | Fineract repayments 6, operations 6, outbox 6, ERP 6. `PASS` |
+| J-1 | J | The ERP is down after Fineract succeeds | `make simulate-j1` | `PASS` |
+| J-2 | J | Fineract is down | `make simulate-j2` | `PASS` |
+| J-3 | J | Fineract times out after the request was sent | `make simulate-j3` | `PASS` |
+| J-4 | J | The ERP times out after it saved the entry | `make simulate-j4` | `PASS` |
+| J-5 | J | A crash between Fineract succeeding and the ERP call | `make simulate-j5` | `PASS` |
+| K-1 | K | Reconciliation, with all four outcomes planted | `make simulate-recon` | 2 `MATCHED`, 1 of each other outcome. `PASS` |
 
 A-1, A-2, C-1, D-1 and I-1 were run on 2026-10-13, each on a clean stack. I-2 to K-1 were run on 2026-10-14, one after another, on the running stack, with every fault off at the start and at the end.
 
@@ -43,7 +43,7 @@ A-1, A-2, C-1, D-1 and I-1 were run on 2026-10-13, each on a clean stack. I-2 to
 
 ### A-1: the plugin's four rules
 
-Run on 2026-10-13, on a clean stack (`docker compose down -v`, then `make up`). Setup had synced the ERP chart. Full output of both runs: [evidence/A-1.txt](evidence/A-1.txt).
+Run on 2026-10-13, on a clean stack (`docker compose down -v`, then `make up`). Setup had synced the ERP chart. Command: `make demo-gl-sync`, run twice.
 
 The demo works on `GL-1200` (Loan Receivable). For rule 4 it uses a user `demo-no-sync` whose role only has `READ_GLACCOUNT`. The first run created that user. The second run found it and reused it. Both runs printed `4 of 4 behaviours matched` and exited 0.
 
@@ -60,7 +60,7 @@ The Integration Service showed `GL-1200` as `SYNCED`, 1 attempt, during all four
 
 ### A-2: a new ERP account sent 4 times at once
 
-Run on 2026-10-13, on the same clean stack, right after A-1. Full output: [evidence/A-2.txt](evidence/A-2.txt).
+Run on 2026-10-13, on the same clean stack, right after A-1. Command: `make simulate-gl-sync-4x`.
 
 Each run adds two new accounts to the Mock ERP (EXPENSE, DETAIL, under 5000), with new 8-digit codes starting with 7. So the first create really races. This run used `GL-71114743` and `GL-77402790`.
 
@@ -96,7 +96,7 @@ Result: `PASS`, exit 0.
 
 ### C-1: a client, found and checked
 
-Run on 2026-10-13, on a clean stack. Command: `make demo-identity`. Full output: [evidence/C-1.txt](evidence/C-1.txt). Run `54E587`, `client_uid` `DEMO-797009`. It printed `5 of 5 steps matched` and exited 0.
+Run on 2026-10-13, on a clean stack. Command: `make demo-identity`. Run `54E587`, `client_uid` `DEMO-797009`. It printed `5 of 5 steps matched` and exited 0.
 
 | Step | Request | What happened |
 |---|---|---|
@@ -110,7 +110,7 @@ Run on 2026-10-13, on a clean stack. Command: `make demo-identity`. Full output:
 
 ### D-1: a loan from application to Closed
 
-Run on 2026-10-13, on a clean stack (`docker compose down -v`, then `docker compose up -d --no-build --wait`). Command: `make demo-lifecycle`. Full output: [evidence/D-1.txt](evidence/D-1.txt). Run `B63B2F`, client `DEMO-371457`, loan `LN-2026-000001`. It printed `8 of 8 checks matched` and exited 0.
+Run on 2026-10-13, on a clean stack (`docker compose down -v`, then `docker compose up -d --no-build --wait`). Command: `make demo-lifecycle`. Run `B63B2F`, client `DEMO-371457`, loan `LN-2026-000001`. It printed `8 of 8 checks matched` and exited 0.
 
 Fineract's status and balances after each stage, as Fineract reported them:
 
@@ -141,27 +141,30 @@ The ERP got one entry per money movement, built from Fineract's own split:
 
 ### I-1: the same disbursement 4 times
 
-Run on 2026-10-13, on the same clean stack as D-1, right after it. Command: `make simulate-duplicates`. Full output: [evidence/I-1.txt](evidence/I-1.txt). Run `37ED48`, loan `LN-2026-000002` (1,000,000 RWF, approved), reference `I1-DSB-37ED48-b597`.
+Run on 2026-10-13, on the same clean stack as D-1, right after it. Command: `make simulate-duplicates`. Run `37ED48`, loan `LN-2026-000002` (1,000,000 RWF, approved), reference `I1-DSB-37ED48-b597`.
 
-```
-Requests received:        4
-Fineract disbursements:   1
-ERP journal entries:      1
-Integration transactions: 1
-```
+1. **Before:** Fineract `200 Approved`, 0 disbursements. No ERP disbursement entry. No disbursement operation.
+2. **Request:** `POST /api/loans/LN-2026-000002/disburse {"external_reference": "I1-DSB-37ED48-b597"}`, 4 times in a row.
+3. **Response:** 4 x `200`. Calls 2 to 4 had the identical body of call 1: `status` `ERP_PENDING`, `erp_status` `PENDING`, `amount` 1000000.
+4. **Fineract:** `300 Active`, principal disbursed 1,000,000, total outstanding 1,100,161. 1 disbursement. 1 command ran with the key `DSB:I1-DSB-37ED48-b597:<attempt>`.
+5. **ERP:** 1 entry, `DSB:I1-DSB-37ED48-b597`: DR 1200 1,000,000 / CR 1100 1,000,000.
+6. **Integration Service:** 1 operation, `COMPLETED`, `erp_status` `SENT`, 1 attempt, history `RECEIVED -> FINERACT_PENDING -> FINERACT_DONE -> ERP_PENDING -> COMPLETED`. 5 `operation_events` rows.
+7. **Expected:** 4 requests received, 1 Fineract disbursement, 1 ERP journal entry, 1 integration transaction. Every answer `200` with the same body.
+8. **Actual:**
 
-- All 4 answers were `200` with identical bodies.
-- Fineract ran 1 command with the key `DSB:I1-DSB-37ED48-b597:<attempt>`.
-- The one ERP entry is DR 1200 1,000,000 / CR 1100 1,000,000.
-- "Requests received" is counted from the service's request log lines for the script's 4 correlation ids.
+   ```
+   Requests received:        4
+   Fineract disbursements:   1
+   ERP journal entries:      1
+   Integration transactions: 1
+   ```
 
-Result: `PASS`, exit 0.
-
-**Why:** the first call saves `DSB:<reference>` and pays out once. Calls 2 to 4 find the finished request with the same hash and get its saved answer, so Fineract is not called again. The outbox has one row, so the ERP gets one entry.
+   `Result: PASS`, exit 0. "Requests received" is counted from the service's request log lines for the script's 4 correlation ids.
+9. **Why:** the first call saves `DSB:<reference>` and pays out once. Calls 2 to 4 find the finished request with the same hash and get its saved answer, so Fineract is not called again. The outbox has one row, so the ERP gets one entry.
 
 ### I-2a: 10 disbursements at once, same reference
 
-Run on 2026-10-14. Command: `make simulate-concurrent-disburse`. Full output: [evidence/I-2.txt](evidence/I-2.txt). Run `9A4F16`, loan `LN-2026-000013` (1,000,000 RWF, approved), reference `I2A-DSB-9A4F16-930d`.
+Run on 2026-10-14. Command: `make simulate-concurrent-disburse`. Run `9A4F16`, loan `LN-2026-000013` (1,000,000 RWF, approved), reference `I2A-DSB-9A4F16-930d`.
 
 1. **Before:** Fineract `200 Approved`, 0 disbursements. No ERP entry. No operation.
 2. **Request:** `POST /api/loans/LN-2026-000013/disburse`, the same body 10 times, released together by one barrier.
@@ -189,7 +192,7 @@ Same run, loan `LN-2026-000014`, 10 different references.
 
 ### I-3: 10 repayments at once
 
-Run on 2026-10-14. Command: `make simulate-concurrent-repay`. Full output: [evidence/I-3.txt](evidence/I-3.txt). Run `58D3DE`, loan `LN-2026-000015` (1,000,000 RWF, paid out).
+Run on 2026-10-14. Command: `make simulate-concurrent-repay`. Run `58D3DE`, loan `LN-2026-000015` (1,000,000 RWF, paid out).
 
 1. **Before:** Fineract `300 Active`, principal outstanding 1,000,000, total 1,100,161. 0 repayments. No ERP repayment entry.
 2. **Request:** 10 repayments at once, by one barrier: 6 references of 15,000, 25,000, 35,000, 45,000, 55,000 and 65,000 RWF. The first two were sent 3 times each.
@@ -203,7 +206,7 @@ Run on 2026-10-14. Command: `make simulate-concurrent-repay`. Full output: [evid
 
 ### J-1: the ERP is down after Fineract succeeds
 
-Run on 2026-10-14. Command: `make simulate-j1`. Full output: [evidence/J-1.txt](evidence/J-1.txt). Run `E10DAF`, loan `LN-2026-000017`, reference `J1-DSB-E10DAF-17b6`.
+Run on 2026-10-14. Command: `make simulate-j1`. Run `E10DAF`, loan `LN-2026-000017`, reference `J1-DSB-E10DAF-17b6`.
 
 1. **Before:** Fineract `200 Approved`, 0 disbursements. No ERP entry. No operation.
 2. **Request:** the Mock ERP fault `down` on `/api/journal-entries`. Then `POST /api/loans/LN-2026-000017/disburse`. After the outbox had retried, the fault was switched off. Then the same request again.
@@ -217,7 +220,7 @@ Run on 2026-10-14. Command: `make simulate-j1`. Full output: [evidence/J-1.txt](
 
 ### J-2: Fineract is down
 
-Run on 2026-10-14. Command: `make simulate-j2`. Full output: [evidence/J-2.txt](evidence/J-2.txt). Run `7986CA`, loan `LN-2026-000018`, reference `J2-DSB-7986CA-957e`.
+Run on 2026-10-14. Command: `make simulate-j2`. Run `7986CA`, loan `LN-2026-000018`, reference `J2-DSB-7986CA-957e`.
 
 1. **Before:** Fineract `200 Approved`, 0 disbursements. No ERP entry. No operation.
 2. **Request:** the fault proxy `down`. Then `POST /api/loans/LN-2026-000018/disburse`. Then the fault off and the same request again.
@@ -231,7 +234,7 @@ Run on 2026-10-14. Command: `make simulate-j2`. Full output: [evidence/J-2.txt](
 
 ### J-3: Fineract times out after the request was sent
 
-Run on 2026-10-14. Command: `make simulate-j3`. It takes about 4 minutes. Full output: [evidence/J-3.txt](evidence/J-3.txt). Run `6881A6`, loan `LN-2026-000019`, reference `J3-DSB-6881A6-ed85`.
+Run on 2026-10-14. Command: `make simulate-j3`. It takes about 4 minutes. Run `6881A6`, loan `LN-2026-000019`, reference `J3-DSB-6881A6-ed85`.
 
 1. **Before:** Fineract `200 Approved`, 0 disbursements. No ERP entry. No operation.
 2. **Request:** the fault proxy `timeout_after_send` for this loan's disburse call: the write reaches Fineract, the answer is thrown away, then the proxy goes down. `POST /api/loans/LN-2026-000019/disburse`. Then the fault off, the same request again, a wait for recovery, and the same request again.
@@ -245,7 +248,7 @@ Run on 2026-10-14. Command: `make simulate-j3`. It takes about 4 minutes. Full o
 
 ### J-4: the ERP times out after it saved the entry
 
-Run on 2026-10-14. Command: `make simulate-j4`. Full output: [evidence/J-4.txt](evidence/J-4.txt). Run `9A06A3`, loan `LN-2026-000020`, reference `J4-DSB-9A06A3-f3d2`.
+Run on 2026-10-14. Command: `make simulate-j4`. Run `9A06A3`, loan `LN-2026-000020`, reference `J4-DSB-9A06A3-f3d2`.
 
 1. **Before:** Fineract `200 Approved`, 0 disbursements. No ERP entry. No operation.
 2. **Request:** the Mock ERP fault `timeout_after_write` (hold 12 s, next journal call only). Then `POST /api/loans/LN-2026-000020/disburse`.
@@ -259,7 +262,7 @@ Run on 2026-10-14. Command: `make simulate-j4`. Full output: [evidence/J-4.txt](
 
 ### J-5: a crash between Fineract and the ERP call
 
-Run on 2026-10-14. Command: `make simulate-j5`. It restarts the Integration Service container. Full output: [evidence/J-5.txt](evidence/J-5.txt). Run `DB3195`, loan `LN-2026-000021`, reference `J5-DB3195-DSB`.
+Run on 2026-10-14. Command: `make simulate-j5`. It restarts the Integration Service container. Run `DB3195`, loan `LN-2026-000021`, reference `J5-DB3195-DSB`.
 
 1. **Before:** Fineract `200 Approved`, 0 disbursements. No ERP entry. No operation. The container running, 0 restarts, with the crash hook on for `J5-DB3195-`.
 2. **Request:** `POST /api/loans/LN-2026-000021/disburse`. After the restart, the same request again.
@@ -275,7 +278,7 @@ At the end the script started the service again without the crash flag: `healthy
 
 ### K-1: reconciliation with all four outcomes
 
-Run on 2026-10-14, against the live service. Command: `make simulate-recon`. Full output: [evidence/K-1.txt](evidence/K-1.txt). Run `FC9343`, loan `LN-2026-000016` (1,000,000 RWF).
+Run on 2026-10-14, against the live service. Command: `make simulate-recon`. Run `FC9343`, loan `LN-2026-000016` (1,000,000 RWF).
 
 1. **Before:** a new client and loan. Planted on purpose:
    - `DSB:K1-DSB-FC9343-8aca` and `RPY:K1-RPY-FC9343-a98a`: a normal payout and repayment, so `MATCHED`.
