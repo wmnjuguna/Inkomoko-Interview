@@ -81,18 +81,9 @@ docker compose run --rm setup
 
 ## How to use it
 
-Six steps take you from a cold start to a reconciled loan. Ports bind to this computer only, and every credential is a placeholder from `.env.example`.
+Five steps take you from a cold start to a reconciled loan. Ports bind to this computer only, and every credential is a placeholder from `.env.example`.
 
-**1. Start the stack.** `make up` waits until every service is healthy.
-
-```bash
-make build
-make up
-curl http://127.0.0.1:8080/fineract-provider/actuator/health   # Fineract, answers "UP"
-curl http://127.0.0.1:8090/health                               # Mock ERP
-curl http://127.0.0.1:8091/health                               # Integration Service
-curl http://127.0.0.1:8092/health                               # fault proxy, admin port
-```
+**1. Start the stack.** `make build` builds the images and `make up` waits until every service is healthy. If `make` is not an option, copy `.env.example` to `.env` and run `docker compose up -d --no-build --wait`. Open any of these to see a service answer: [Fineract](http://127.0.0.1:8080/fineract-provider/actuator/health), [Mock ERP](http://127.0.0.1:8090/health), [Integration Service](http://127.0.0.1:8091/health), [fault proxy](http://127.0.0.1:8092/health).
 
 **2. Open the Mock ERP at http://127.0.0.1:8090/.** This is the accounting side, and its chart is what setup synced into Fineract.
 
@@ -108,12 +99,11 @@ curl http://127.0.0.1:8092/health                               # fault proxy, a
 ![The fault switches](docs/images/erp-faults.png)
 *Fault switches (`/ui/faults`).*
 
-**3. Explore the APIs.** Each service has a Swagger UI; click **Authorize** and paste its key.
+**3. Read the APIs in Swagger.** Each service has a Swagger UI; click **Authorize** and paste its key.
 
 - Integration Service: http://127.0.0.1:8091/openapi/swagger, key `change-me-partner-key` (from `PARTNER_API_KEYS`, `demo-partner:change-me-partner-key`).
 - Mock ERP: http://127.0.0.1:8090/openapi/swagger, key `change-me-erp-key` (`ERP_API_KEY`).
 - Fineract: http://127.0.0.1:8080/fineract-provider/swagger-ui/index.html. Pick **ERP integration (glsync plugin)** under **Select a definition**, then use `mifos` / `password` and `tenantid` `default`.
-- Postman: import [postman/collection.json](postman/collection.json).
 
 ![Integration Service Swagger](docs/images/integration-swagger.png)
 *The Integration Service in Swagger.*
@@ -121,46 +111,21 @@ curl http://127.0.0.1:8092/health                               # fault proxy, a
 ![Mock ERP Swagger](docs/images/erp-swagger.png)
 *The Mock ERP in Swagger.*
 
-**4. Sync the chart of accounts.** Setup already did it, so a second sync writes nothing.
+**4. Call the APIs from Postman.** I put every call a reviewer needs into one collection, in the order to make them, with a test on each response. Import [postman/collection.json](postman/collection.json) and [postman/local.postman_environment.json](postman/local.postman_environment.json), pick the **Local stack** environment, and run the folders top to bottom with the Collection Runner, or click through one request at a time. Each run makes up its own client and references, so you can run it as often as you like.
 
-```bash
-BASE=http://127.0.0.1:8091
-KEY="X-API-Key: change-me-partner-key"
-curl -s -X POST $BASE/api/accounts/sync -H "$KEY"
-```
+| Folder | What it shows |
+|---|---|
+| 1 Health | Every service answers. |
+| 2 GL sync | A repeat sync writes nothing: every account stays `SYNCED`. |
+| 3 One loan, start to finish | Client, loan form, application, approval, payout, repayment, balances, and the full history of the payout. |
+| 4 Idempotency, see for yourself | The same payout again returns the saved answer. A changed body, or a second reference for the same payout, is refused. |
+| 5 Reconciliation | Fineract and the ERP agree on the references you just created. |
+| 6 Break things on purpose | The ERP goes down and the repayment still succeeds, with the journal entry waiting in the outbox. Then Fineract goes down: nothing is sent, you get `503`, and the same reference succeeds once it is back. |
+| 7 Mock ERP | The chart, a balance, the payout's journal entry with Fineract's own split, and one manual entry. |
 
-**5. Run one loan.** Each write carries an `external_reference` you keep for retries, so a repeat gets the same answer and never a second payout.
+From a terminal, `make postman` runs the same collection with newman (needs Node). The three OpenAPI files in [docs/openapi](docs/openapi) also import straight into Postman if you want to build your own requests.
 
-```bash
-JSON="Content-Type: application/json"
-curl -s -X POST $BASE/api/clients -H "$KEY" -H "$JSON" \
-  -d '{"external_reference": "MAN-CLI-0001", "client_uid": "SME-000001", "first_name": "Test", "last_name": "Client"}'
-curl -s -X POST $BASE/api/loans -H "$KEY" -H "$JSON" \
-  -d '{"external_reference": "MAN-APP-0001", "client_uid": "SME-000001", "principal": 5000000}'
-LOAN=LN-2026-000001    # the loan_reference you got back
-curl -s -X POST $BASE/api/loans/$LOAN/approve -H "$KEY" -H "$JSON" -d '{"external_reference": "MAN-APR-0001"}'
-curl -s -X POST $BASE/api/loans/$LOAN/disburse -H "$KEY" -H "$JSON" -d '{"external_reference": "MAN-DSB-0001"}'
-curl -s -X POST $BASE/api/loans/$LOAN/repayments -H "$KEY" -H "$JSON" \
-  -d '{"external_reference": "MAN-RPY-0001", "amount": 500000}'
-```
-
-**6. Reconcile.** It compares Fineract with the ERP and gives each reference one outcome. A fresh write may show `IN_FLIGHT` for a few seconds, until the outbox sends its entry.
-
-```bash
-curl -s -X POST $BASE/api/reconciliation -H "$KEY" -H "$JSON" \
-  -d '{"references": ["MAN-DSB-0001", "MAN-RPY-0001"]}'
-```
-
-**Then break things.** Switch the ERP off and a repayment still succeeds with `erp_status` `PENDING`. The outbox retries the journal entry until the ERP is back.
-
-```bash
-ERP="X-API-Key: change-me-erp-key"
-curl -s -X PUT http://127.0.0.1:8090/admin/faults -H "$ERP" -H "$JSON" -d '{"mode": "down"}'
-curl -s -X POST $BASE/api/loans/$LOAN/repayments -H "$KEY" -H "$JSON" \
-  -d '{"external_reference": "MAN-RPY-0002", "amount": 100000}'          # 200, erp_status PENDING
-curl -s -X DELETE http://127.0.0.1:8090/admin/faults -H "$ERP"           # fault off
-curl -s $BASE/api/transactions/MAN-RPY-0002 -H "$KEY"                     # COMPLETED once the entry is sent
-```
+**5. Watch the ERP catch up.** After folder 3, refresh the journal: the payout and the repayment are there, each with the split Fineract reported. Then run the scripted failure scenarios in [SIMULATIONS.md](SIMULATIONS.md).
 
 ## Tests
 
@@ -209,7 +174,7 @@ make simulate-j5               # J-5: the service crashes between Fineract and t
 ├── mock-erp/                      Python: the Mock ERP (Flask, Postgres, small web UI)
 ├── fault-proxy/                   Python: the fault proxy in front of Fineract (failure simulations only)
 ├── scripts/                       demos and simulations
-└── postman/collection.json        every Integration Service endpoint, with fake data
+└── postman/                       the collection and its environment: every call, in order, with tests
 ```
 
 ## Use of AI
