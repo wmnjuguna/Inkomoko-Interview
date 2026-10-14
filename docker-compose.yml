@@ -128,10 +128,37 @@ services:
     volumes:
       - ./fineract/configuration:/app/fineract-configuration:ro
 
+  # Fault proxy in front of Fineract (Part J): the Integration Service talks to Fineract
+  # through it, so a simulation can make Fineract "down" or drop an answer after the write.
+  # Off by default: it just passes requests on. Fineract's own port 8080 is unchanged.
+  fault-proxy:
+    build:
+      context: ./fault-proxy
+    image: fault-proxy-inkomoko:0.1.0
+    depends_on:
+      fineract:
+        condition: service_healthy
+    environment:
+      FAULT_PROXY_UPSTREAM: fineract:8080
+      FAULT_PROXY_API_KEY: ${FAULT_PROXY_API_KEY:-change-me-fault-proxy-key}
+    ports:
+      - "127.0.0.1:8081:8081"
+      - "127.0.0.1:8092:8092"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8092/health > /dev/null"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 5s
+
   integration-service:
     build:
       context: ./integration-service
     image: integration-service-inkomoko:0.1.0
+    # A small init as PID 1, so a crash of gunicorn stops the container, and compose
+    # starts it again (J-5: the start-up sweep then finishes what the crash left).
+    init: true
+    restart: unless-stopped
     # Starts only after setup has made the Fineract API user it logs in as.
     depends_on:
       setup:
@@ -142,14 +169,17 @@ services:
         condition: service_healthy
       mock-erp:
         condition: service_healthy
+      fault-proxy:
+        condition: service_healthy
     environment:
       # The entrypoint runs alembic upgrade head against this database before gunicorn starts
       INTEGRATION_DATABASE_URL: postgresql+psycopg://${INTEGRATION_DB_USER}:${INTEGRATION_DB_PASSWORD}@db:5432/integration_db
       # name:key pairs, comma separated, one per partner
       PARTNER_API_KEYS: ${PARTNER_API_KEYS}
       LOG_LEVEL: ${INTEGRATION_LOG_LEVEL}
-      # Least-privilege Fineract API user, never the admin
-      FINERACT_BASE_URL: http://fineract:8080/fineract-provider/api/v1
+      # Least-privilege Fineract API user, never the admin. Through the fault proxy
+      # (it passes everything on unless a simulation switches a fault on).
+      FINERACT_BASE_URL: http://fault-proxy:8081/fineract-provider/api/v1
       FINERACT_TENANT: default
       FINERACT_USERNAME: ${FINERACT_API_USERNAME}
       FINERACT_PASSWORD: ${FINERACT_API_PASSWORD}
@@ -162,6 +192,9 @@ services:
       OUTBOX_ENABLED: ${INTEGRATION_OUTBOX_ENABLED:-true}
       OUTBOX_POLL_SECONDS: ${INTEGRATION_OUTBOX_POLL_SECONDS:-5}
       OUTBOX_MAX_ATTEMPTS: ${INTEGRATION_OUTBOX_MAX_ATTEMPTS:-8}
+      # J-5 only: a reference prefix whose disbursements crash the service right after
+      # FINERACT_DONE. Empty (off) unless the J-5 script sets it for one run.
+      FAULT_CRASH_AFTER_FINERACT_DONE: ${FAULT_CRASH_AFTER_FINERACT_DONE:-}
     volumes:
       - ./fineract/configuration:/app/fineract-configuration:ro
     ports:
