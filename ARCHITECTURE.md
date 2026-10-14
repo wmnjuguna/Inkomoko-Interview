@@ -1,6 +1,6 @@
 # Architecture
 
-> **Status:** everything below is built and tested: the Fineract plugin, the Mock ERP, the setup step, the Integration Service (GL sync, clients, loans, payouts, repayments, duplicate protection, journal entries through an outbox, recovery and reconciliation) and the fault proxy used by the failure simulations. Each simulation was run on the live stack. The output is in [evidence/](evidence/README.md).
+> **Status:** everything below is built and tested: the Fineract plugin, the Mock ERP, the setup step, the Integration Service (GL sync, clients, loans, payouts, repayments, duplicate protection, journal entries through an outbox, recovery and reconciliation) and the fault proxy used by the failure simulations. Each simulation was run on the live stack. The results are in [SIMULATIONS.md](SIMULATIONS.md), with the `make` command that reproduces each one.
 
 ## The parts
 
@@ -93,7 +93,7 @@ It is built the same way as the Mock ERP: Flask 3 and flask-openapi3 with Pydant
 4. The work is done. Every error, even a crash, comes back as `{"error": {"code", "message", "correlation_id", "details"}}`.
 5. One JSON log line is written, with the correlation id, the partner, the status and the time taken.
 
-Every status change of a request also writes a JSON log line with `correlation_id`, `external_reference`, `client_uid`, `loan_reference`, `fineract_transaction_id`, `erp_transaction_id`, `status` and `timestamp`. Fineract's transaction id is only in the logs, never in a response. The outbox keeps the request's correlation id, so the ERP send seconds later carries it too (`evidence/FIN-2026-000001.txt`).
+Every status change of a request also writes a JSON log line with `correlation_id`, `external_reference`, `client_uid`, `loan_reference`, `fineract_transaction_id`, `erp_transaction_id`, `status` and `timestamp`. Fineract's transaction id is only in the logs, never in a response. The outbox keeps the request's correlation id, so the ERP send seconds later carries it too. The real log lines of one disbursement are in [DECISIONS.md](DECISIONS.md), under "What happened to FIN-2026-000001?".
 
 The service logs in to Fineract as `integration-api`, a user with only the permissions it needs. It never uses the admin user.
 
@@ -196,11 +196,11 @@ The entry date is Fineract's transaction date. The ERP reference is the op key, 
 
 The function does not guess. It gives no entry, and the operation goes to `NEEDS_RECONCILIATION`, when the transaction has fees, penalties or unrecognized income, is reversed, has portions that do not add up to the amount, has the wrong type or `externalId`, is not in RWF, or has a fraction of a franc. The Fineract success is still saved, and the outbox row is kept with the reason but never sent.
 
-In D-1 the ERP totals for each account equalled Fineract's own GL entries for the loan after every stage (`evidence/D-1.txt`).
+In D-1 the ERP totals for each account equalled Fineract's own GL entries for the loan after every stage. Run `make demo-lifecycle` to reproduce it.
 
 ## A disbursement, step by step
 
-This is what `services/money.py` does. The log lines of one real disbursement are in `evidence/FIN-2026-000001.txt`.
+This is what `services/money.py` does. The log lines of one real disbursement are in [DECISIONS.md](DECISIONS.md), under "What happened to FIN-2026-000001?".
 
 ```mermaid
 sequenceDiagram
@@ -335,7 +335,7 @@ stateDiagram-v2
   NEEDS_RECONCILIATION --> COMPLETED: fixed by an explicit repair (no repair call is built yet)
 ```
 
-The real history of a disbursement, from `GET /api/transactions/DSB-B63B2F-0d4d` in D-1 (`evidence/D-1.txt`): `RECEIVED -> FINERACT_PENDING -> FINERACT_DONE -> ERP_PENDING -> COMPLETED`.
+The real history of a disbursement, from `GET /api/transactions/DSB-B63B2F-0d4d` in D-1 (`make demo-lifecycle`): `RECEIVED -> FINERACT_PENDING -> FINERACT_DONE -> ERP_PENDING -> COMPLETED`.
 
 GL sync has its own simple status: `SYNC_PENDING`, then `SYNCED` or `FAILED`. A `FAILED` account is tried again on the next sync, with a new attempt number.
 
@@ -345,9 +345,9 @@ GL sync has its own simple status: `SYNC_PENDING`, then `SYNCED` or `FAILED`. A 
 
 | Layer | How | Where | Shown by |
 |---|---|---|---|
-| L1 | Same reference: the saved answer is returned, a running one gets `202` | Unique (`op_type`, `external_reference`) in `operations`, `begin()` in `services/operations.py` | I-1: 4 requests, 1 Fineract disbursement, 1 ERP entry, 1 operation (`evidence/I-1.txt`). I-2a: 10 at once, 1 of each (`evidence/I-2.txt`). Test `test_ten_requests_with_one_reference_pay_out_once`. |
-| L2 | Only one live disbursement per loan. Another reference gets `409 LOAN_ALREADY_DISBURSED`. | Partial unique index `operations_one_live_disbursement` | I-2b: 10 references at once, one `200` and nine `409`, no row saved for the nine (`evidence/I-2.txt`). Tests `test_ten_references_for_one_loan_pay_out_once` and `test_another_reference_for_the_same_loan_is_409` |
-| L3 | A Postgres advisory lock per loan around every Fineract write to it (approve, disburse, repay, and recovery of them). Waits up to 30 s. | `services/loan_locks.py` | I-3: 10 repayments at once, each of the 6 references applied once (`evidence/I-3.txt`). Test `test_parallel_repayments_each_land_once`. It fails when the lock is removed, because Fineract then loses parallel writes to its own `409`. |
+| L1 | Same reference: the saved answer is returned, a running one gets `202` | Unique (`op_type`, `external_reference`) in `operations`, `begin()` in `services/operations.py` | I-1: 4 requests, 1 Fineract disbursement, 1 ERP entry, 1 operation (`make simulate-duplicates`). I-2a: 10 at once, 1 of each (`make simulate-concurrent-disburse`). Test `test_ten_requests_with_one_reference_pay_out_once`. |
+| L2 | Only one live disbursement per loan. Another reference gets `409 LOAN_ALREADY_DISBURSED`. | Partial unique index `operations_one_live_disbursement` | I-2b: 10 references at once, one `200` and nine `409`, no row saved for the nine (`make simulate-concurrent-disburse`). Tests `test_ten_references_for_one_loan_pay_out_once` and `test_another_reference_for_the_same_loan_is_409` |
+| L3 | A Postgres advisory lock per loan around every Fineract write to it (approve, disburse, repay, and recovery of them). Waits up to 30 s. | `services/loan_locks.py` | I-3: 10 repayments at once, each of the 6 references applied once (`make simulate-concurrent-repay`). Test `test_parallel_repayments_each_land_once`. It fails when the lock is removed, because Fineract then loses parallel writes to its own `409`. |
 | L4 | Fineract's unique transaction `externalId` (`DSB:<ref>`), plus the `Idempotency-Key` per attempt | Fineract | The probe: a second transaction with the same `externalId` gets `400 value.must.be.unique` and nothing is created |
 | L5 | Fineract's loan state: a single-tranche loan is paid out once | Fineract | The probe: 5 disbursements at once with different keys gave 1 success and 4 `403`. Test `test_fineract_refuses_a_loan_paid_out_elsewhere_and_we_say_409`: a loan paid out outside the service is refused by Fineract, and we answer `409 LOAN_ALREADY_DISBURSED`. |
 
@@ -405,4 +405,4 @@ J-5 needs the service to die at one exact moment: right after it saved `FINERACT
 
 **All or nothing.** If Fineract or the ERP cannot be read, the call fails with `502`, `503` or `504`. A half-read report would show false `MISSING` items. A loan in our table that Fineract does not know is only a warning.
 
-The report is not stored. Each call reads the sources again. K-1 planted all four outcomes and got them (`evidence/K-1.txt`).
+The report is not stored. Each call reads the sources again. K-1 planted all four outcomes and got them. Run `make simulate-recon` to reproduce it.
