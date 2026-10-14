@@ -1,60 +1,44 @@
 # Decisions
 
-What I chose, why, and what I gave up. How the parts fit is in [ARCHITECTURE.md](ARCHITECTURE.md), the endpoints are in [API.md](API.md), and the runs behind each claim are in [SIMULATIONS.md](SIMULATIONS.md).
+What I chose and why, in the order the questions usually come. The diagrams are in [ARCHITECTURE.md](ARCHITECTURE.md), the endpoints in [API.md](API.md), and the runs behind each claim in [SIMULATIONS.md](SIMULATIONS.md).
 
-## 1. A plugin beside Fineract, never a change to its core
+## I extended Fineract with a plugin, not a patch
 
-I extended Fineract with a plugin and never touched its core. Fineract is built to accommodate plugins and custom modules that run inside it, so my code sits in its `custom/` folder, beside a submodule pinned to the 1.15.0 commit. Fineract 1.15 has no external reference on GL accounts, so the plugin holds the ERP's reference and refuses a second account for it. Patching the core would make every upgrade a merge, and data tables cannot attach to GL accounts in 1.15.
+Fineract is built to be extended: custom modules live in its `custom/` folder and are compiled in with the rest. Mine does one thing. Fineract 1.15 has nowhere to keep the ERP's reference on a GL account, so the plugin keeps it, and it refuses to create a second account for the same reference. Patching Fineract's own code would have been a smaller diff, but every upgrade would then be a merge. The upstream source stays a submodule pinned to 1.15.0, untouched.
 
-The plugin never calls Fineract's REST API. `PUT /v1/erp-integration/accounts/{erpReference}` runs through Fineract's command pipeline, which brings the permission check and the audit row. Its handler calls Fineract's own `GLAccountWritePlatformService` in the same transaction, so the GL account, my reference row and the audit record commit together. The reference lives in one Liquibase table, `glsync_external_ref`. The same body again gives `UNCHANGED`; other data for the same reference gives `409`. The migration creates the `SYNC_GLACCOUNT` permission, and the API user's role holds 11 permissions and nothing else. A transaction-scoped advisory lock on the reference and GL code stops two parallel requests from both seeing "no row yet". Ten at once give one `CREATED`, nine `UNCHANGED` and one GL account. The price is a tie to Postgres, and the plugin only creates accounts.
+The plugin runs inside Fineract, not around it. Its one write, `PUT /v1/erp-integration/accounts/{erpReference}`, takes the same path as Fineract's own commands, so Fineract checks the permission and writes its audit record, and then my handler calls Fineract's own GL service in the same transaction. The account, my reference row and the audit record commit together or not at all. The same data again answers `UNCHANGED`; different data for a known reference answers `409`. A database lock on the reference and the GL code stops two parallel requests from both seeing an empty table: ten at once give one `CREATED`, nine `UNCHANGED` and one account. That lock ties the plugin to Postgres, which this project runs on anyway.
 
-## 2. Flask for both Python services, and a Makefile
+## Flask for both Python services
 
-I chose Flask 3 with flask-openapi3 and Pydantic for both the Integration Service and the Mock ERP. Pydantic checks every request, bad input gets `422` in one error shape, and the OpenAPI spec comes from the same models. One stack twice means one way to validate, log, migrate and test. Gunicorn runs 2 workers with 4 threads, so a slow ERP blocks one thread, not the service.
+Flask 3 with flask-openapi3 and Pydantic, twice. Pydantic validates every request, bad input gets `422` in one shape, and the OpenAPI spec is generated from the same models. One stack for both the Integration Service and the Mock ERP means one way to validate, log, migrate and test. Gunicorn runs two workers with four threads each, so a slow ERP ties up a thread, not the service.
 
-### The Makefile
+Everything runs with plain `docker compose` commands. The Makefile in the repo is only my own shortcut for the same commands; nothing depends on it.
 
-Every task is one `make` word, such as `make up` or `make test-python`, over plain `docker`, `docker compose` and `uv`. It should work on macOS with Docker Desktop, Xcode's `make` and `uv`. macOS's old `make` ignores `.SHELLFLAGS`, so the two targets that pipe through `tee` set `pipefail` themselves. I have not run it on a Mac. The fallback is `docker compose up -d --no-build --wait`.
+## One key per operation
 
-## 3. The reference names the operation
+Every request gets a key like `DSB:FIN-2026-000001`: the operation (`CLI`, `APP`, `APR`, `DSB` or `RPY`) and the client system's own reference. That one string is my row key, the `externalId` I give Fineract and the `external_reference` I give the ERP, so reconciliation matches all three systems on a single value. A reversal would add `:REV`. The weak spot is a reference that itself ends in `:REV`; I do not refuse it yet.
 
-Every request gets a key `<operation>:<reference>`, such as `DSB:FIN-2026-000001` for one disbursement. The codes are `CLI`, `APP`, `APR`, `DSB` and `RPY`, plus `:REV` for a reversal. The same string is our row key, Fineract's `externalId` and the ERP's `external_reference`, so reconciliation matches three systems on one value. The cost: a reference ending in `:REV` would be misread. Loan references are ours too (`LN-<year>-<6 digits>`).
+## Idempotency lives in Postgres
 
-## 4. Idempotency lives in the database
+Each request is a row in `operations`, unique on type and reference. It holds a hash of the caller and the body and, once done, Fineract's exact answer. Send the same thing again and you get that answer back as `200`, or `202` while the first one is still running. Send different data under the same reference and you get `409`. The database refuses a second row for the same key, so ten identical requests at once run exactly once.
 
-Every request is a row in `operations`, unique on (type, reference). It holds a hash of the caller and body and, later, Fineract's exact answer.
+Fineract's own `Idempotency-Key` only replays answers; it is not a guard. It replays the first answer even if the amount changed, replays errors too, and answers `425` while the first call is still running. The real guard on Fineract's side is the unique `externalId` on loan transactions. I send both, with a fresh key on every attempt so a cached failure is never replayed. Neither covers the ERP; my row does.
 
-| Repeat of a request | Answer |
-|---|---|
-| Same data, first one finished | The saved answer as `200`, even for a create |
-| Same data, first one still running | `202` |
-| Other data, or another caller | `409 IDEMPOTENCY_CONFLICT` |
+## The database refuses the second payout
 
-The insert uses `ON CONFLICT DO NOTHING`, and `begin()` reads again when the loser trips the second unique rule (`test_ten_identical_requests_at_once_run_once`).
+A database rule allows one live client creation per `client_uid`, and one live approval and one live payout per loan, where live means anything but `FAILED`. A second reference for a loan that is already being paid out fails at the insert: nothing is saved, nothing is sent, and the caller gets `409 LOAN_ALREADY_DISBURSED` at once. The brief expected those to end as `FAILED`. I left them with no row at all, because `FAILED` means "I tried, send it again", and these were never tried.
 
-Fineract 1.15's own `Idempotency-Key` is a replay cache, not a guarantee. It replays the first answer even for another amount, answers `425` while the first call runs, and replays errors too. The real guard is the unique `externalId` on loan transactions: a second one gets `400 validation.msg.loan.transaction.externalId.value.must.be.unique`, even on another loan. I send both, with a fresh key per attempt, so a cached failure is never replayed. Neither covers the ERP; our row does.
+Writes to one loan also wait their turn on a lock held in the database. Without it, ten parallel repayments lost five to Fineract's own `409` concurrency error. With it, all ten land.
 
-## 5. Database constraints
+## Synchronous to Fineract, asynchronous to the ERP
 
-Partial unique indexes allow one live client creation per `client_uid`, and one live approval and one live disbursement per loan, where live means `status <> 'FAILED'`. A second reference for a loan already being paid out fails the insert. Nothing is saved or sent, and the client system gets `409 LOAN_ALREADY_DISBURSED` at once. The brief's I-2b expects these to end `FAILED`. I chose no row, because `FAILED` means "we tried, send it again", and these were never tried. I-2b shows one `200`, nine `409` and zero rows.
+The caller waits for Fineract, because once Fineract says yes the money has moved and they need to know. The ERP entry goes into an `outbox` table in the same transaction that marks the request done, and each worker sends due rows every five seconds. An ERP outage therefore blocks nobody. The price is a poll every five seconds, even when nothing is waiting.
 
-Writes to one loan also queue on a per-loan advisory lock. Without it, ten parallel repayments lost five to Fineract's own `409 error.msg.platform.service.query.conflict`. With it they all land (`test_parallel_repayments_each_land_once`).
+**Why no Redis and no Kafka.** Neither adds correctness here. Fineract keeps its cache in its own memory, and its shared-cache mode is not supported in 1.15, so Redis would serve only my services. Their shared state, the idempotency rows, the per-loan lock and the outbox, has to be durable and commit with the operation. Postgres does that; Redis cannot. Fineract can publish events to Kafka, but they are off by default and go out after the write, at least once, from its `m_external_event` table. They cannot stop a duplicate, and every consumer would need its own deduplication. So I enforce idempotency at the write, over REST, with the key above and a lookup before any retry, and for GL accounts the plugin enforces it inside Fineract's own transaction. The ERP leg keeps the asynchronous pattern through the outbox, without the broker.
 
-## 6. Sync or async
+## Never retry blind
 
-The call is synchronous up to Fineract and asynchronous to the ERP. The client system waits for Fineract's answer, because once Fineract says yes the money has moved. The ERP entry goes into an `outbox` table in the same transaction that marks the request `FINERACT_DONE`. Each worker sends due rows every 5 seconds, claimed with `FOR UPDATE SKIP LOCKED`. An ERP outage blocks nobody. The cost is polling even when idle.
-
-### No Redis, no Kafka
-
-I left out Redis and Kafka because neither adds correctness to this flow.
-
-**Redis.** Fineract caches inside its own JVM: version 1.15 uses Ehcache through JCache, and its multi-node cache mode is not supported. Redis would therefore serve only my own services, and their shared state (idempotency records, the per-loan lock and the outbox) must be durable and commit in the same transaction as the operation. Postgres gives me that; Redis would not.
-
-**Kafka.** Fineract can publish external events to Kafka, but they are off by default and are sent after the business write, at least once, from its `m_external_event` table. They cannot stop a duplicate write, and every consumer would need its own deduplication. Instead I enforce idempotency at the write over REST, with the operation key as Fineract's `externalId` and `Idempotency-Key` and a lookup before any retry. For GL accounts, the plugin calls Fineract's own accounting service inside the command transaction, so the rule holds before anything is written, with no topics or streams in between. The ERP leg still runs asynchronously, through a Postgres outbox.
-
-## 7. Retries and partial failure
-
-One rule: never send a Fineract write again until a lookup by `externalId` shows it did not happen. An unclear answer (a 30-second timeout, a `5xx` or a `425`) triggers that lookup at once. If the transaction is missing, Fineract may still be working, so the request stays `FINERACT_PENDING`. Recovery looks again after 180 seconds, and only that lookup may decide `FAILED`.
+A Fineract write is never sent again until a lookup by `externalId` shows it did not happen. A timeout, a `5xx` or a `425` triggers that lookup at once. If the transaction is not there, Fineract may still be working on it, so the request stays `FINERACT_PENDING`: the caller gets `504` now and `202` on repeats. Recovery looks again after 180 seconds, and only that second look may mark it `FAILED`.
 
 ```mermaid
 flowchart TD
@@ -69,48 +53,23 @@ flowchart TD
     R -->|lookup failed 8 times| N["NEEDS_RECONCILIATION"]
 ```
 
-The cost: after J-3's cut the client system waits about three minutes for a final answer. ERP retries are always safe, because the ERP answers `200` for an entry it already holds. The outbox backs off up to 60 seconds with jitter and stops after 8 attempts at `NEEDS_RECONCILIATION`.
+The cost is that after a real network cut the caller waits about three minutes for a final answer. ERP retries are always safe, because the ERP answers `200` for an entry it already holds. The outbox backs off up to 60 seconds and gives up after eight tries at `NEEDS_RECONCILIATION`, where a person looks.
 
-**A fault proxy, not toxiproxy.** Toxiproxy works on TCP and cannot tell one HTTP request from another, which J-3 needs. So I wrote `fault-proxy/`, about 250 lines, used only in tests.
+To test these paths I wrote a small fault proxy rather than use toxiproxy, which works on TCP and cannot drop the answer to one specific HTTP request. A crash hook, on only when `FAULT_CRASH_AFTER_FINERACT_DONE` names a reference prefix, kills the process right after the commit, so I can watch start-up recovery finish the job.
 
-**A crash hook.** J-5 needs the service to die right after `FINERACT_DONE` commits, which killing the container from outside cannot hit reliably. `faults.py` sends `SIGKILL` to the Gunicorn master only for references matching `FAULT_CRASH_AFTER_FINERACT_DONE`, and start-up recovery finishes the job.
+## Fineract's templates are the rulebook
 
-## 8. Fineract's templates are the source of the rules
+Before each write I read Fineract's own template for that step and take the amounts and rules from it: the principal range for an application, the approved amount for a payout, the payment types for a repayment, the figure that clears a loan today. It costs one extra read per write, and it saves me a copy of Fineract's rules that would drift. A few things I learned from Fineract 1.15 along the way became checks. Templates ignore the loan's status, so the forms check it. An approval dated after the expected payout date is refused, and paying out before that date is fine. A repayment on a closed loan becomes overpayment, so I accept repayments on active loans only. A fraction of a franc is rounded silently, so I take whole francs.
 
-Before each write, the service reads Fineract's own template for that step and takes the amounts and rules from it, under the loan's lock. Deriving them from the loan product would be my guess at Fineract's rules. The cost is one extra read per write. In return there is no copy of Fineract's rules to keep in step.
+## Journal entries come from Fineract's split
 
-| Step | Template | What we take |
-|---|---|---|
-| Application | `GET /loans/template?templateType=individual&productId=…` | Principal range and default, term, rate, schedule, currency |
-| Approval | `…/template?templateType=approval` | The amount and the expected disbursement date |
-| Disbursement | `…/transactions/template?command=disburse` | The amount (the approved principal) |
-| Repayment | `…/transactions/template?command=repayment` | The currency step and the payment types |
-| Payoff | `…/transactions/template?command=prepayLoan` | What clears the loan today |
+After Fineract says yes I read the transaction back and build the ERP entry from Fineract's own principal, interest and overpayment portions, never from the caller's amount or from interest maths of my own. The GL codes come from the loan product. Anything the mapping would have to guess goes to `NEEDS_RECONCILIATION` instead. In the full lifecycle run, the ERP's totals per account matched Fineract's ledger after every step.
 
-Fineract 1.15 facts that became checks:
+## Reconciliation is a live report
 
-- Templates ignore the loan's status, so the forms check it.
-- An approval after the expected disbursement date is refused, though the template proposes today. We answer `422` first.
-- A payout before the expected date is allowed, so we default to today.
-- A repayment on a closed loan becomes overpayment, so we accept repayments only on `ACTIVE` loans.
-- `1000.6` RWF is rounded to `1001` silently, so we take whole francs.
-- Two system-defined payment types are for Fineract's own adjustments, so we refuse them.
-- 1.15 wants `allowPartialPeriodInterestCalculation` and `canDefineInstallmentAmount`.
+It reads Fineract, the ERP and my tables on every call, keyed on the operation key, and stores nothing. I added a fifth outcome, `IN_FLIGHT`, so an entry still waiting in my outbox is not reported as missing. `AMOUNT_MISMATCH` compares the split, not just the total; in the K-1 run it caught a wrong split where both totals were 50,000. If either side cannot be read, the whole call fails rather than show false gaps.
 
-## 9. Journal entries come from Fineract's own split
-
-After Fineract says yes, the service reads the transaction back and builds the ERP entry from Fineract's own `principalPortion`, `interestPortion` and `overpaymentPortion`. It never uses the client system's amount or its own interest maths. The GL codes come from the loan product, and in D-1 the ERP totals per account equalled Fineract's GL after every stage. Anything the mapping would have to guess goes to `NEEDS_RECONCILIATION`.
-
-| Payment | Debit | Credit |
-|---|---|---|
-| Payout | 1200 Loan Receivable | 1100 Bank |
-| Repayment | 1100 Bank | 1200 principal, 4100 Interest Income, 2100 Overpayment Liability |
-
-## 10. Reconciliation
-
-The report is built live from Fineract, the ERP and our tables, keyed on the op key, and never stored. I added `IN_FLIGHT`, so an entry still in our outbox is not a false `MISSING_IN_ERP`. `AMOUNT_MISMATCH` compares the split, not just totals: K-1 caught a wrong split when both totals were 50,000. If either side cannot be read, the whole call fails rather than report false gaps.
-
-## 11. What happened to FIN-2026-000001?
+## What happened to FIN-2026-000001?
 
 One call answers it, on a real run with fake data:
 
@@ -120,7 +79,7 @@ GET /api/transactions/FIN-2026-000001
    history: RECEIVED -> FINERACT_PENDING -> FINERACT_DONE (Fineract said yes) -> ERP_PENDING -> COMPLETED (the ERP saved the journal entry)
 ```
 
-Loan `LN-2026-000022` was paid out once, at the first attempt. The logs carry the correlation id across both services (trimmed to the lines that tell the story):
+The loan was paid out once, at the first attempt. The same correlation id runs through both services' logs, trimmed here to the lines that tell the story:
 
 ```
 $ docker compose logs --no-log-prefix integration-service | grep -E "FIN-2026-000001|c-fin-2026-000001"
@@ -132,35 +91,37 @@ $ docker compose logs --no-log-prefix mock-erp | grep c-fin-2026-000001
 {"timestamp": "2026-10-14T10:22:12.098378+00:00", "level": "INFO", "message": "request", "correlation_id": "c-fin-2026-000001", "method": "POST", "path": "/api/journal-entries", "status": 201, "duration_ms": 8.8, "external_reference": "DSB:FIN-2026-000001", "erp_transaction_id": "646fbfe7-dedd-482f-bcca-6430d72ad731"}
 ```
 
-Fineract said yes with transaction `319`, the client system had `200` in 549 ms, and the ERP saved the entry two seconds later. Had it stuck at `NEEDS_RECONCILIATION`, `last_error` says why and `POST /api/reconciliation` shows both sides.
+Fineract said yes with transaction `319`, the caller had its `200` in 549 ms, and the ERP saved the entry two seconds later. Had it stuck at `NEEDS_RECONCILIATION`, `last_error` would say why, and `POST /api/reconciliation` would show both sides.
 
-## 12. Assumptions
+## Assumptions
 
-- A plugin in `custom/` counts as extending Fineract.
-- A payout answers `200` while the ERP entry is pending.
+Where the brief left room, I took these readings:
+
+- A module in Fineract's `custom/` folder counts as extending Fineract.
+- A payout may answer `200` while its ERP entry is still pending.
 - Each client system has its own API key.
 - `FIN-2026-000001` is the client system's `external_reference`.
-- Reconciliation matches reversed payments to their opposite entries.
-- In I-2b, "nothing saved or sent" matters more than the word `FAILED`.
-- `Kigali Main Office` sits under Head Office with the API user in it, because Fineract shows users only their own office and below.
+- Reconciliation matches a reversed payment to its opposite entry.
+- For the ten-at-once payout, "nothing saved or sent" matters more than the word `FAILED`.
+- The Kigali office sits under Head Office, with the API user in it, because Fineract shows users only their own office and below.
 
-## 13. What I chose not to build
+## What I chose not to build
 
-Time went to the required tiers:
+Time went to the required tiers, so I left out:
 
-- Reversals, though reconciliation already knows their shape.
-- A repair call for `NEEDS_RECONCILIATION`.
+- Reversals, though reconciliation already understands their shape.
+- A repair call for requests stuck at `NEEDS_RECONCILIATION`.
 - The other Part L items: fees, metrics, scheduled reconciliation, signed webhooks.
-- A message queue, Redis and OAuth (sections 6 and 12).
-- A run from a fresh `git clone` on another machine.
+- Redis and Kafka, for the reasons above.
+- A run from a fresh clone on another machine.
 
-## 14. Known weaknesses
+## Known weaknesses
 
-- Reconciliation reads every loan. Fine for hundreds, not thousands.
-- Test ERP entries show as `MISSING_IN_FINERACT` in a whole-day report (72 in K-1's).
+- Reconciliation reads every loan I know. Fine for hundreds, not thousands.
+- Test entries in the ERP show as `MISSING_IN_FINERACT` in a whole-day report; the K-1 run had 72 of them.
 - A reference ending in `:REV` is not refused yet.
 - Reversals are unit-tested only.
-- GL sync only creates. An ERP rename is warned about, not applied.
-- Operator routes accept any client-system key. They need an operator key.
+- GL sync only creates. A renamed ERP account is warned about, not applied.
+- Operator routes accept any client-system key. They need an operator key of their own.
 - Any client-system key can read or pay into any loan.
-- A repayment finished by recovery can report a later `outstanding_after`.
+- A repayment finished by recovery can report a later `outstanding_after` than the one at the time.
