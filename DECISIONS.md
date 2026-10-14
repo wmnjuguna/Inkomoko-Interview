@@ -191,7 +191,7 @@ Rules of one run:
 
 ### The partner API (Parts C to E)
 
-- **Our ids only.** Partners use `client_uid`, `loan_reference` and `external_reference`. Fineract's numeric ids are kept in our tables for our own use and appear in logs, never in a response. I checked the OpenAPI spec and every answer of the runs for Fineract ids, including the form endpoints, whose Fineract templates are full of ids (office, product, payment types). None was found: every option value in a form is a name or a code. The output of that check was not kept, but the answers in `evidence/` can be read the same way.
+- **Our ids only.** Partners use `client_uid`, `loan_reference` and `external_reference`. Fineract's numeric ids are kept in our tables for our own use and appear in logs, never in a response. I checked the OpenAPI spec and every answer of the runs for Fineract ids, including the form endpoints, whose Fineract templates are full of ids (office, product, payment types). None was found: every option value in a form is a name or a code. The output of that check was not kept. The real answers in [API.md](API.md) and [SIMULATIONS.md](SIMULATIONS.md) can be read the same way.
 - **`loan_reference` is ours.** We issue `LN-<year>-<6 digits>` from a Postgres sequence, with the year from the database's date. It is the loan's `externalId` in Fineract. If Fineract already holds that reference (for example after `integration_db` was rebuilt but Fineract was not), a new one is issued, up to 3 times.
 - **The office** is found by name through `GET /clients/template`. The API user has no permission to read `/offices`, and I did not want to add one only for this.
 - **Approval and payout amounts come from Fineract.** The approval is for the amount in Fineract's approval template (the applied principal). There is no partial approval. The payout is for the amount in Fineract's disbursement template (the approved amount). The partner sends neither. See "Fineract templates are the source of the rules" below.
@@ -220,8 +220,8 @@ What each step reads:
 What I learned about the templates on Fineract 1.15.0:
 
 - **Templates ignore the loan's status.** An approval template answers `200` for a loan that is already approved. A disbursement template answers for a loan that is not approved yet. So the forms check the status themselves and say `available: false` with a reason. The writes still rely on our own status checks and on Fineract's refusal.
-- **Fineract refuses an approval after the expected disbursement date** (`error.msg.loan.expecteddisbursal.should.be.on.or.after.approval.date`). The approval template still proposes today as the approval date, even when that is too late. So we check `approved_on` ourselves and answer `422` before we send anything. Shown on the live Fineract in `evidence/templates.txt`, part 12.
-- **A payout before the expected disbursement date is allowed.** A loan expected on 2026-10-20 was paid out on 2026-10-13 (part 10 of the same file).
+- **Fineract refuses an approval after the expected disbursement date** (`error.msg.loan.expecteddisbursal.should.be.on.or.after.approval.date`). The approval template still proposes today as the approval date, even when that is too late. So we check `approved_on` ourselves and answer `422` before we send anything. I tried it straight on Fineract on 2026-10-13, as the admin: a loan expected on 2026-10-12, approved on 2026-10-13, got `403` with that code. The same approval dated 2026-10-12 was accepted. Our own check is covered by `test_an_approval_after_the_expected_disbursement_date_is_a_field_problem` in `integration-service/tests/unit/test_loans_rules.py`.
+- **A payout before the expected disbursement date is allowed.** A loan expected on 2026-10-20 was paid out on 2026-10-13 through the partner API. [API.md](API.md) shows the answer.
 - **The default payout date is today, not the template's date.** The disbursement template proposes the loan's expected disbursement date. Once that date has passed, using it would backdate the payout to a day when no money moved. So the default is today, the day the money really moves. A partner can still send an earlier `transaction_date`.
 - **Payment types include Fineract's own.** The repayment template lists `Money Transfer` and also two system-defined types used for Fineract's own adjustments (refund and chargeback). We accept only the partner types. The others get `422`.
 
@@ -263,7 +263,7 @@ The strategy, the currency and every GL account are checked against the template
 - **Fineract does not check an office's opening date.** Fineract 1.15 accepts an opening date in the future, or one before the parent office opened. *(Read in the source, `OfficeCommandFromApiJsonDeserializer` and `Office.fromJson`, not tried.)* Fineract does refuse a client activated before its office opened, so a wrong date would only fail later, on a client, far from its cause. *(Also read in the source.)* So setup refuses both before it creates the office. On a re-run, an office with our external id but another name, parent or opening date stops setup.
 - **`/currencies` splits its answer in two.** `selectedCurrencyOptions` has the currencies already in use. `currencyOptions` has only the others. On the clean stack, 2 were selected and 162 offered, with no code in both. So a code is valid if it is in either list, and the error message lists both.
 
-Shown on a clean stack: the first run created every step (`evidence/setup-first-run.txt`), the second run said `exists` for each and wrote nothing (`evidence/setup-second-run.txt`), and the office and product read back from Fineract match (`evidence/office-and-product.txt`).
+Shown on a clean stack on 2026-10-13. The first run printed `created` for every step. The second run printed `exists` for each, and Fineract's command log (`m_portfolio_command_source`) held 18 rows before and after it. Read back from Fineract as the admin, the office sat under Head Office, and the product's term, rate, schedule, accounting and strategy matched the values in the table under "Fineract settings".
 
 ## Sync or async
 
@@ -342,13 +342,13 @@ The partial unique index `operations_one_live_disbursement` allows one live disb
 
 - **Why not save them as `FAILED`:** `FAILED` means "we tried and nothing happened, you may send it again". These were never tried. Saving them would also need a second write after the index refused the first, which only adds noise.
 - **What the partner can still do:** `GET /api/transactions/{reference}` answers `404` for a refused reference. If the winning request ends `FAILED`, the loan is free again, and the same refused reference can be sent.
-- I-2b shows it: one `200`, nine `409`, and `operations rows for the 9 refused references: 0` (`evidence/I-2.txt`).
+- I-2b shows it: one `200`, nine `409`, and `operations rows for the 9 refused references: 0`. Run `make simulate-concurrent-disburse` to reproduce it.
 
 ### Recovery waits about 180 s before it looks at `FINERACT_PENDING`
 
 After an unclear Fineract answer, the request looks itself up at once. If the lookup also fails, the request stays `FINERACT_PENDING`. Recovery only looks at it again once it is 180 s old. That is longer than our 30 s Fineract timeout plus Fineract's own internal retries, so a slow Fineract has finished by then, one way or the other. A lookup earlier than that could find nothing while Fineract is still working, and wrongly mark the request `FAILED`.
 
-The cost: the partner waits about 3 minutes for the final answer, and gets `202` on repeats until then. J-3 shows it (`evidence/J-3.txt`). An earlier lookup, for example when Fineract is reachable again, is possible. I did not build it.
+The cost: the partner waits about 3 minutes for the final answer, and gets `202` on repeats until then. J-3 shows it. Run `make simulate-j3` to reproduce it. An earlier lookup, for example when Fineract is reachable again, is possible. I did not build it.
 
 ### Failure simulations: a fault proxy in this repo, not toxiproxy
 
@@ -386,13 +386,13 @@ J-5 needs the service to die at one exact moment: after `FINERACT_DONE` and its 
 
 ## Fineract settings (Part B)
 
-All of these are made by the setup step (`python -m integration_service.setup`, the compose service `setup`). The settings are in `fineract/configuration/`. Each row was checked on a clean stack: see `evidence/setup-first-run.txt`, `evidence/office-and-product.txt` and `evidence/least-privilege.txt`.
+All of these are made by the setup step (`python -m integration_service.setup`, the compose service `setup`). The settings are in `fineract/configuration/`. Each row was checked on a clean stack on 2026-10-13, by reading Fineract back after setup.
 
 | Setting | Choice | Why |
 |---|---|---|
 | Office | `Kigali Main Office` (external id `OFF-KGL-MAIN`), under the default Head Office *(assumption)* | Keeps Fineract's top office as it is. Fineract only shows a user the clients and loans in its own office and below, so the API user sits in this office too. |
 | Currency | RWF, no decimals | RWF has no cents. Fineract already knows RWF with 0 decimals. Setup adds it to the organisation's list and keeps the others, because `PUT /currencies` replaces the whole list. The product sets 0 decimals too. |
-| Loan product | "SME Asset Finance" (`SMEA`, external id `PRD-SME-ASSET-FINANCE`): 18% a year, 12 monthly payments, declining balance, equal payments, paid out once, RWF. Default amount 5,000,000 RWF (100,000 to 50,000,000). Strategy `mifos-standard-strategy`. | The values the brief suggests. Read back from Fineract in `evidence/office-and-product.txt`. |
+| Loan product | "SME Asset Finance" (`SMEA`, external id `PRD-SME-ASSET-FINANCE`): 18% a year, 12 monthly payments, declining balance, equal payments, paid out once, RWF. Default amount 5,000,000 RWF (100,000 to 50,000,000). Strategy `mifos-standard-strategy`. | The values the brief suggests. Read back from Fineract after setup: term, rate, schedule, amortization, interest type, accounting, strategy and default amount all matched this row. |
 | Accounting | Cash-based (`CASH` in the product template) | Journal entries only on payout and repayment, which matches Part H. Reconciliation is one entry per payment. It is less realistic, because no interest is booked between payments. |
 | GL accounts | All owned by the ERP and synced. Codes follow the usual pattern: 1xxx assets, 2xxx liabilities, 4xxx income, 5xxx expenses. | In 1.15.0, cash-based accounting needs 9 GL roles. The ERP seed has a DETAIL account of the right type for each one (table below). The optional charge-off and goodwill roles are left out, because the brief does not use them. |
 | API user | `integration-api`, with its own role `Integration Service` (11 permissions, below) | Least privilege. The admin user is only used by the setup step. |
@@ -426,11 +426,11 @@ The role `Integration Service` has exactly these 11 permissions, and setup remov
 | `READ_LOAN` | Find loans and their transactions by external id. In 1.15.0 this also covers loan transactions. There is no separate `READ_LOANTRANSACTION`. |
 | `READ_LOANPRODUCT` | Find the loan product by its external id |
 
-Checked on the clean stack (`evidence/least-privilege.txt`): the user can read a GL mapping and the loan product, and gets `403` when it tries to create a GL account, create a user, change role permissions or create a loan product. The probe (2026-10-13) showed these 11 are enough for everything Parts C to H do: clients, loans, payouts, repayments, lookups by external id and the repayment and payoff templates. Two codes are missing on purpose: `ADJUST_LOAN`, only needed for reversals, which are not built, and `READ_JOURNALENTRY`, which nothing uses yet.
+Checked on the clean stack on 2026-10-13, with a small local script that is not in the repo: the role held exactly these 11 codes. The user could read a GL mapping and the loan product, and got `403` when it tried to create a GL account, create a user, change role permissions or create a loan product. `integration-service/tests/integration/test_least_privilege_live.py` checks the same role on every test run: it can sync a GL account, and gets `403` for admin reads and for creating a GL account outside the plugin. The probe (2026-10-13) showed these 11 are enough for everything Parts C to H do: clients, loans, payouts, repayments, lookups by external id and the repayment and payoff templates. Two codes are missing on purpose: `ADJUST_LOAN`, only needed for reversals, which are not built, and `READ_JOURNALENTRY`, which nothing uses yet.
 
 ### Re-running setup
 
-Each step looks first, then creates only what is missing. A second run on the clean stack printed `exists` for every step and sent nothing to Fineract (`evidence/setup-second-run.txt`). Some rules:
+Each step looks first, then creates only what is missing. A second run on the clean stack printed `exists` for every step and sent nothing to Fineract: its command log held 18 rows before and after. `integration-service/tests/unit/test_setup_run.py` checks this too. Some rules:
 
 - The office is found by its external id, `OFF-KGL-MAIN`. If it has another name, parent or opening date, setup stops. An office with our name but another external id also stops setup.
 - The role's permissions are set back to exactly the list in `role.json`. An unknown permission code stops setup before anything is written.
@@ -461,7 +461,7 @@ Each step looks first, then creates only what is missing. A second run on the cl
 
 ## What happened to FIN-2026-000001?
 
-This is how an engineer answers it: one API call, then the logs. The run below is real, on fake data (`evidence/FIN-2026-000001.txt`).
+This is how an engineer answers it: one API call, then the logs. The run below is real, on fake data. It was made on 2026-10-14: a client, a loan and its approval, then one disbursement with `external_reference` `FIN-2026-000001` and the header `X-Correlation-ID: c-fin-2026-000001`.
 
 **1. One API call.**
 
@@ -471,19 +471,36 @@ GET /api/transactions/FIN-2026-000001
    history: RECEIVED -> FINERACT_PENDING -> FINERACT_DONE (Fineract said yes) -> ERP_PENDING -> COMPLETED (the ERP saved the journal entry)
 ```
 
+The full answer is in [API.md](API.md), under `GET /api/transactions/{external_reference}`.
+
 **The answer:** it was a disbursement of loan `LN-2026-000022`. Fineract paid it out once, at the first attempt, at 10:22:10 UTC. The journal entry reached the ERP 2 seconds later, through the outbox. Nothing is left to do.
 
-**2. The logs, for the details.** `docker compose logs integration-service | grep FIN-2026-000001` gives every line for the reference. Each line has `correlation_id`, `external_reference`, `client_uid`, `loan_reference`, `fineract_transaction_id`, `erp_transaction_id`, `status` and `timestamp`. Shortened:
+**2. The logs, for the details.** Each line has `correlation_id`, `external_reference`, `client_uid`, `loan_reference`, `fineract_transaction_id`, `erp_transaction_id`, `status` and `timestamp`. These are the real lines from that run:
 
 ```
-10:22:09.737  c-fin-2026-000001  status FINERACT_PENDING  (saved and claimed)
-10:22:10.249  c-fin-2026-000001  status FINERACT_DONE     fineract_transaction_id 319
-10:22:10.260  c-fin-2026-000001  status ERP_PENDING       (journal entry waiting for the ERP)
-10:22:10.265  c-fin-2026-000001  POST /api/loans/LN-2026-000022/disburse -> 200 in 549.5 ms
-10:22:12.107  c-fin-2026-000001  status COMPLETED         erp_transaction_id 646fbfe7-dedd-482f-bcca-6430d72ad731
+$ docker compose logs --no-log-prefix integration-service | grep -E "FIN-2026-000001|c-fin-2026-000001"
+{"timestamp": "2026-10-14T10:21:56.242667+00:00", "level": "INFO", "message": "request", "correlation_id": "c-faf006a9da8a424dab37d57d9da088f0", "method": "GET", "path": "/api/transactions/FIN-2026-000001", "status": 404, "http_status": 404, "duration_ms": 9.5, "partner": "demo-partner", "external_reference": "FIN-2026-000001"}
+{"timestamp": "2026-10-14T10:22:09.737883+00:00", "level": "INFO", "message": "operation status", "correlation_id": "c-fin-2026-000001", "op_key": "DSB:FIN-2026-000001", "external_reference": "FIN-2026-000001", "client_uid": "SME-064407", "loan_reference": "LN-2026-000022", "fineract_transaction_id": null, "erp_transaction_id": null, "status": "FINERACT_PENDING", "previous_status": "RECEIVED", "detail": "saved and claimed"}
+{"timestamp": "2026-10-14T10:22:09.739479+00:00", "level": "INFO", "message": "operation begin", "correlation_id": "c-fin-2026-000001", "op_key": "DSB:FIN-2026-000001", "external_reference": "FIN-2026-000001", "client_uid": "SME-064407", "loan_reference": "LN-2026-000022", "result": "New", "status": "FINERACT_PENDING"}
+{"timestamp": "2026-10-14T10:22:10.249384+00:00", "level": "INFO", "message": "operation status", "correlation_id": "c-fin-2026-000001", "op_key": "DSB:FIN-2026-000001", "external_reference": "FIN-2026-000001", "client_uid": "SME-064407", "loan_reference": "LN-2026-000022", "fineract_transaction_id": 319, "erp_transaction_id": null, "status": "FINERACT_DONE", "previous_status": "FINERACT_PENDING", "detail": "Fineract said yes"}
+{"timestamp": "2026-10-14T10:22:10.260441+00:00", "level": "INFO", "message": "operation status", "correlation_id": "c-fin-2026-000001", "op_key": "DSB:FIN-2026-000001", "external_reference": "FIN-2026-000001", "client_uid": "SME-064407", "loan_reference": "LN-2026-000022", "fineract_transaction_id": 319, "erp_transaction_id": null, "status": "ERP_PENDING", "previous_status": "FINERACT_DONE", "detail": "journal entry waiting for the ERP"}
+{"timestamp": "2026-10-14T10:22:10.263835+00:00", "level": "INFO", "message": "disbursement done in Fineract; journal entry PENDING", "correlation_id": "c-fin-2026-000001", "external_reference": "FIN-2026-000001", "client_uid": "SME-064407", "loan_reference": "LN-2026-000022", "fineract_transaction_id": 319, "erp_transaction_id": null, "status": "ERP_PENDING", "problem": null}
+{"timestamp": "2026-10-14T10:22:10.265811+00:00", "level": "INFO", "message": "request", "correlation_id": "c-fin-2026-000001", "method": "POST", "path": "/api/loans/LN-2026-000022/disburse", "status": "ERP_PENDING", "http_status": 200, "duration_ms": 549.5, "partner": "demo-partner", "external_reference": "FIN-2026-000001", "loan_reference": "LN-2026-000022", "client_uid": "SME-064407"}
+{"timestamp": "2026-10-14T10:22:12.107445+00:00", "level": "INFO", "message": "operation status", "correlation_id": "c-fin-2026-000001", "op_key": "DSB:FIN-2026-000001", "external_reference": "FIN-2026-000001", "client_uid": "SME-064407", "loan_reference": "LN-2026-000022", "fineract_transaction_id": 319, "erp_transaction_id": "646fbfe7-dedd-482f-bcca-6430d72ad731", "status": "COMPLETED", "previous_status": "ERP_PENDING", "detail": "the ERP saved the journal entry"}
+{"timestamp": "2026-10-14T10:22:12.107579+00:00", "level": "INFO", "message": "outbox sent: the ERP saved the journal entry", "correlation_id": "c-fin-2026-000001", "op_key": "DSB:FIN-2026-000001", "external_reference": "FIN-2026-000001", "client_uid": "SME-064407", "loan_reference": "LN-2026-000022", "fineract_transaction_id": 319, "erp_transaction_id": "646fbfe7-dedd-482f-bcca-6430d72ad731", "status": "COMPLETED", "attempts": 1}
+{"timestamp": "2026-10-14T10:22:22.580287+00:00", "level": "INFO", "message": "request", "correlation_id": "c-fin-lookup", "method": "GET", "path": "/api/transactions/FIN-2026-000001", "status": "COMPLETED", "http_status": 200, "duration_ms": 22.9, "partner": "demo-partner", "external_reference": "FIN-2026-000001", "client_uid": "SME-064407", "loan_reference": "LN-2026-000022"}
 ```
 
-The outbox keeps the request's correlation id. So the ERP's own log line for the journal entry carries it too (`docker compose logs mock-erp | grep c-fin-2026-000001`: `POST /api/journal-entries 201`, `DSB:FIN-2026-000001`). Fineract's transaction id is only in our logs, never in an API answer.
+The first line is a lookup made before the payout. It got `404`, because the reference did not exist yet. The last line is the lookup in step 1.
+
+The outbox keeps the request's correlation id. So the ERP's own log line for the journal entry carries it too:
+
+```
+$ docker compose logs --no-log-prefix mock-erp | grep c-fin-2026-000001
+{"timestamp": "2026-10-14T10:22:12.098378+00:00", "level": "INFO", "message": "request", "correlation_id": "c-fin-2026-000001", "method": "POST", "path": "/api/journal-entries", "status": 201, "duration_ms": 8.8, "external_reference": "DSB:FIN-2026-000001", "erp_transaction_id": "646fbfe7-dedd-482f-bcca-6430d72ad731"}
+```
+
+Fineract's transaction id (`319`) is only in our logs, never in an API answer.
 
 If the answer had been `FINERACT_PENDING`, the next step is to wait for recovery, or look up `DSB:FIN-2026-000001` in Fineract by `externalId`. If it had been `NEEDS_RECONCILIATION`, `last_error` says why, and `POST /api/reconciliation {"references": ["FIN-2026-000001"]}` shows both sides.
 
