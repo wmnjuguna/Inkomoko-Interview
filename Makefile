@@ -30,7 +30,7 @@ help:
 	cp .env.example .env
 
 build: .env
-	docker buildx build --load --progress=plain -t $(FINERACT_IMAGE) fineract-customization 2>&1 | tee fineract-customization/build.log
+	set -o pipefail; docker buildx build --load --progress=plain -t $(FINERACT_IMAGE) fineract-customization 2>&1 | tee fineract-customization/build.log
 	docker buildx build --load --target integration-test -t $(FINERACT_IT_IMAGE) fineract-customization
 	@# Copy the OpenAPI spec the build generated, straight from the plugin jar, so the repo copy always matches.
 	docker run --rm --entrypoint unzip $(FINERACT_IMAGE) -p /app/libs/inkomoko-fineract-glsync-service-1.15.0.jar static/glsync.yaml > docs/openapi/fineract-erp-integration.yaml
@@ -62,7 +62,7 @@ reset:
 	docker compose down -v
 
 test-java: build up
-	docker run --rm --network $(COMPOSE_NETWORK) -e FINERACT_URL=http://fineract:8080 $(FINERACT_IT_IMAGE) | tee fineract-customization/integration-test.log
+	set -o pipefail; docker run --rm --network $(COMPOSE_NETWORK) -e FINERACT_URL=http://fineract:8080 $(FINERACT_IT_IMAGE) | tee fineract-customization/integration-test.log
 
 test-python:
 	cd mock-erp && uv run ruff check . && uv run ruff format --check . && uv run mypy && uv run pytest -q
