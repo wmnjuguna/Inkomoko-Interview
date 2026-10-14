@@ -1,58 +1,223 @@
 {
   "info": {
-    "name": "Fineract integration: partner API",
-    "description": "The Integration Service partner API from https://github.com/wmnjuguna/Inkomoko-Interview.git. All data here is fake. Set base_url and api_key (PARTNER_API_KEYS in .env, the key part).",
+    "name": "Inkomoko Fineract integration",
+    "description": "Every call a reviewer needs, in the order to make them: health, GL sync, one loan from client to repayment, idempotency, reconciliation, failure switches and the Mock ERP. All data is made up. Import postman/local.postman_environment.json as well and pick it as the environment, or edit the collection variables. Repo: https://github.com/wmnjuguna/Inkomoko-Interview.git",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
     {
-      "key": "base_url",
-      "value": "http://localhost:8091"
+      "key": "integration_url",
+      "value": "http://127.0.0.1:8091"
     },
     {
-      "key": "api_key",
+      "key": "erp_url",
+      "value": "http://127.0.0.1:8090"
+    },
+    {
+      "key": "fault_proxy_url",
+      "value": "http://127.0.0.1:8092"
+    },
+    {
+      "key": "integration_key",
       "value": "change-me-partner-key"
     },
     {
+      "key": "erp_key",
+      "value": "change-me-erp-key"
+    },
+    {
+      "key": "fault_proxy_key",
+      "value": "change-me-fault-proxy-key"
+    },
+    {
+      "key": "run",
+      "value": ""
+    },
+    {
       "key": "client_uid",
-      "value": "SME-000001"
+      "value": ""
     },
     {
       "key": "loan_reference",
-      "value": "LN-2026-000001"
+      "value": ""
+    },
+    {
+      "key": "today",
+      "value": ""
+    }
+  ],
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// One fresh run id per collection run, so references and the client_uid never clash.",
+          "if (!pm.collectionVariables.get('run')) {",
+          "  const run = String(Date.now()).slice(-6);",
+          "  pm.collectionVariables.set('run', run);",
+          "  pm.collectionVariables.set('client_uid', 'SME-' + run);",
+          "}"
+        ]
+      }
+    },
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// After the last request, clear the run id so the next run starts fresh.",
+          "if (pm.info.requestName === 'Fault switch state') pm.collectionVariables.set('run', '');"
+        ]
+      }
     }
   ],
   "item": [
     {
-      "name": "GL sync",
+      "name": "1 Health",
+      "description": "Every service answers on 127.0.0.1 only. Run this first after `make up`.",
       "item": [
         {
-          "name": "Sync the whole ERP chart",
+          "name": "Integration Service",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{integration_url}}/health",
+              "host": [
+                "{{integration_url}}"
+              ],
+              "path": [
+                "health"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is one of [200]', () => pm.expect([200]).to.include(pm.response.code));",
+                  "pm.test(\"status is UP\", () => pm.expect(pm.response.json().status).to.eql('UP'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Mock ERP",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{erp_url}}/health",
+              "host": [
+                "{{erp_url}}"
+              ],
+              "path": [
+                "health"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is one of [200]', () => pm.expect([200]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Fault proxy (admin port)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{fault_proxy_url}}/health",
+              "host": [
+                "{{fault_proxy_url}}"
+              ],
+              "path": [
+                "health"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is one of [200]', () => pm.expect([200]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "2 GL sync",
+      "description": "Copies the ERP chart of accounts into Fineract through the plugin. Setup already did this once, so a repeat writes nothing: every account stays SYNCED and `writes` is 0.",
+      "item": [
+        {
+          "name": "Sync the whole chart",
           "request": {
             "method": "POST",
             "header": [
               {
-                "key": "X-API-Key",
-                "value": "{{api_key}}"
+                "key": "Accept",
+                "value": "application/json"
               },
               {
-                "key": "X-Correlation-ID",
-                "value": "c-postman-{{$randomUUID}}"
+                "key": "X-API-Key",
+                "value": "{{integration_key}}"
               }
             ],
             "url": {
-              "raw": "{{base_url}}/api/accounts/sync",
+              "raw": "{{integration_url}}/api/accounts/sync",
               "host": [
-                "{{base_url}}"
+                "{{integration_url}}"
               ],
               "path": [
                 "api",
                 "accounts",
                 "sync"
               ]
-            },
-            "description": "Reads the ERP chart and syncs each account to Fineract, parents first. 200, or 202 when another sync runs."
-          }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is one of [200, 202]', () => pm.expect([200, 202]).to.include(pm.response.code));",
+                  "if (pm.response.code === 200) pm.test('nothing left pending or failed', () => { const c = pm.response.json().counts; pm.expect(c.SYNC_PENDING).to.eql(0); pm.expect(c.FAILED).to.eql(0); });"
+                ]
+              }
+            }
+          ]
         },
         {
           "name": "Sync state of every account",
@@ -60,46 +225,57 @@
             "method": "GET",
             "header": [
               {
-                "key": "X-API-Key",
-                "value": "{{api_key}}"
+                "key": "Accept",
+                "value": "application/json"
               },
               {
-                "key": "X-Correlation-ID",
-                "value": "c-postman-{{$randomUUID}}"
+                "key": "X-API-Key",
+                "value": "{{integration_key}}"
               }
             ],
             "url": {
-              "raw": "{{base_url}}/api/accounts/sync",
+              "raw": "{{integration_url}}/api/accounts/sync",
               "host": [
-                "{{base_url}}"
+                "{{integration_url}}"
               ],
               "path": [
                 "api",
                 "accounts",
                 "sync"
               ]
-            },
-            "description": "Reads our database only."
-          }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is one of [200]', () => pm.expect([200]).to.include(pm.response.code));",
+                  "pm.test(\"a read writes nothing\", () => pm.expect(pm.response.json().writes).to.eql(0));"
+                ]
+              }
+            }
+          ]
         },
         {
-          "name": "Sync one ERP account",
+          "name": "Sync one account (GL-1200)",
           "request": {
             "method": "POST",
             "header": [
               {
-                "key": "X-API-Key",
-                "value": "{{api_key}}"
+                "key": "Accept",
+                "value": "application/json"
               },
               {
-                "key": "X-Correlation-ID",
-                "value": "c-postman-{{$randomUUID}}"
+                "key": "X-API-Key",
+                "value": "{{integration_key}}"
               }
             ],
             "url": {
-              "raw": "{{base_url}}/api/accounts/GL-1200/sync",
+              "raw": "{{integration_url}}/api/accounts/GL-1200/sync",
               "host": [
-                "{{base_url}}"
+                "{{integration_url}}"
               ],
               "path": [
                 "api",
@@ -107,14 +283,25 @@
                 "GL-1200",
                 "sync"
               ]
-            },
-            "description": "Syncs one account by its ERP reference."
-          }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is one of [200, 202]', () => pm.expect([200, 202]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ]
         }
       ]
     },
     {
-      "name": "Clients",
+      "name": "3 One loan, start to finish",
+      "description": "Run these in order. Each run gets fresh references from the `run` variable, so you can press Run as often as you like. Every write carries an `external_reference`; send the same one again and you get the same answer, never a second payout.",
       "item": [
         {
           "name": "Client form",
@@ -122,27 +309,38 @@
             "method": "GET",
             "header": [
               {
-                "key": "X-API-Key",
-                "value": "{{api_key}}"
+                "key": "Accept",
+                "value": "application/json"
               },
               {
-                "key": "X-Correlation-ID",
-                "value": "c-postman-{{$randomUUID}}"
+                "key": "X-API-Key",
+                "value": "{{integration_key}}"
               }
             ],
             "url": {
-              "raw": "{{base_url}}/api/clients/template",
+              "raw": "{{integration_url}}/api/clients/template",
               "host": [
-                "{{base_url}}"
+                "{{integration_url}}"
               ],
               "path": [
                 "api",
                 "clients",
                 "template"
               ]
-            },
-            "description": ""
-          }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is one of [200]', () => pm.expect([200]).to.include(pm.response.code));",
+                  "pm.test(\"it is the client form\", () => pm.expect(pm.response.json().form).to.eql('client'));"
+                ]
+              }
+            }
+          ]
         },
         {
           "name": "Create a client",
@@ -150,58 +348,70 @@
             "method": "POST",
             "header": [
               {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
                 "key": "X-API-Key",
-                "value": "{{api_key}}"
+                "value": "{{integration_key}}"
               },
               {
                 "key": "Content-Type",
                 "value": "application/json"
-              },
-              {
-                "key": "X-Correlation-ID",
-                "value": "c-postman-{{$randomUUID}}"
               }
             ],
             "url": {
-              "raw": "{{base_url}}/api/clients",
+              "raw": "{{integration_url}}/api/clients",
               "host": [
-                "{{base_url}}"
+                "{{integration_url}}"
               ],
               "path": [
                 "api",
                 "clients"
               ]
             },
-            "description": "201 the first time, 200 with the same body on a replay, 409 IDEMPOTENCY_CONFLICT with other data.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"external_reference\": \"PM-CLI-000001\",\n  \"client_uid\": \"{{client_uid}}\",\n  \"first_name\": \"Test\",\n  \"last_name\": \"Client One\"\n}",
+              "raw": "{\n  \"external_reference\": \"PM-CLI-{{run}}\",\n  \"client_uid\": \"{{client_uid}}\",\n  \"first_name\": \"Test\",\n  \"last_name\": \"Client\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
                 }
               }
             }
-          }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is one of [201, 200]', () => pm.expect([201, 200]).to.include(pm.response.code));",
+                  "pm.test(\"the client is active\", () => pm.expect(pm.response.json().status).to.eql('ACTIVE'));",
+                  "pm.test(\"it carries my client_uid\", () => pm.expect(pm.response.json().client_uid).to.eql(pm.variables.get('client_uid')));"
+                ]
+              }
+            }
+          ]
         },
         {
-          "name": "Check a client",
+          "name": "Check the client",
           "request": {
             "method": "GET",
             "header": [
               {
-                "key": "X-API-Key",
-                "value": "{{api_key}}"
+                "key": "Accept",
+                "value": "application/json"
               },
               {
-                "key": "X-Correlation-ID",
-                "value": "c-postman-{{$randomUUID}}"
+                "key": "X-API-Key",
+                "value": "{{integration_key}}"
               }
             ],
             "url": {
-              "raw": "{{base_url}}/api/clients/{{client_uid}}?name=Test Client One",
+              "raw": "{{integration_url}}/api/clients/{{client_uid}}?name=test client",
               "host": [
-                "{{base_url}}"
+                "{{integration_url}}"
               ],
               "path": [
                 "api",
@@ -211,36 +421,43 @@
               "query": [
                 {
                   "key": "name",
-                  "value": "Test Client One"
+                  "value": "test client"
                 }
               ]
-            },
-            "description": ""
-          }
-        }
-      ]
-    },
-    {
-      "name": "Loans",
-      "item": [
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is one of [200]', () => pm.expect([200]).to.include(pm.response.code));",
+                  "pm.test(\"Fineract agrees with my record\", () => pm.expect(pm.response.json().matches_our_record).to.eql(true));",
+                  "pm.test(\"the name matches\", () => pm.expect(pm.response.json().name_matches).to.eql(true));"
+                ]
+              }
+            }
+          ]
+        },
         {
           "name": "Loan application form",
           "request": {
             "method": "GET",
             "header": [
               {
-                "key": "X-API-Key",
-                "value": "{{api_key}}"
+                "key": "Accept",
+                "value": "application/json"
               },
               {
-                "key": "X-Correlation-ID",
-                "value": "c-postman-{{$randomUUID}}"
+                "key": "X-API-Key",
+                "value": "{{integration_key}}"
               }
             ],
             "url": {
-              "raw": "{{base_url}}/api/loans/template?client_uid={{client_uid}}",
+              "raw": "{{integration_url}}/api/loans/template?client_uid={{client_uid}}",
               "host": [
-                "{{base_url}}"
+                "{{integration_url}}"
               ],
               "path": [
                 "api",
@@ -253,9 +470,20 @@
                   "value": "{{client_uid}}"
                 }
               ]
-            },
-            "description": ""
-          }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is one of [200]', () => pm.expect([200]).to.include(pm.response.code));",
+                  "pm.test(\"principal is a field, with its range from Fineract\", () => pm.expect(pm.response.json().fields.map(f => f.name)).to.include('principal'));"
+                ]
+              }
+            }
+          ]
         },
         {
           "name": "Apply for a loan",
@@ -263,58 +491,70 @@
             "method": "POST",
             "header": [
               {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
                 "key": "X-API-Key",
-                "value": "{{api_key}}"
+                "value": "{{integration_key}}"
               },
               {
                 "key": "Content-Type",
                 "value": "application/json"
-              },
-              {
-                "key": "X-Correlation-ID",
-                "value": "c-postman-{{$randomUUID}}"
               }
             ],
             "url": {
-              "raw": "{{base_url}}/api/loans",
+              "raw": "{{integration_url}}/api/loans",
               "host": [
-                "{{base_url}}"
+                "{{integration_url}}"
               ],
               "path": [
                 "api",
                 "loans"
               ]
             },
-            "description": "Returns the new loan_reference. Put it in the loan_reference variable.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"external_reference\": \"PM-APP-000001\",\n  \"client_uid\": \"{{client_uid}}\",\n  \"principal\": 5000000\n}",
+              "raw": "{\n  \"external_reference\": \"PM-APP-{{run}}\",\n  \"client_uid\": \"{{client_uid}}\",\n  \"principal\": 5000000\n}",
               "options": {
                 "raw": {
                   "language": "json"
                 }
               }
             }
-          }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is one of [201, 200]', () => pm.expect([201, 200]).to.include(pm.response.code));",
+                  "pm.collectionVariables.set('loan_reference', pm.response.json().loan_reference);",
+                  "pm.test(\"the loan waits for approval\", () => pm.expect(pm.response.json().status).to.eql('SUBMITTED_AND_PENDING_APPROVAL'));"
+                ]
+              }
+            }
+          ]
         },
         {
-          "name": "Step form (approval, disbursement, repayment, payoff)",
+          "name": "Approval form",
           "request": {
             "method": "GET",
             "header": [
               {
-                "key": "X-API-Key",
-                "value": "{{api_key}}"
+                "key": "Accept",
+                "value": "application/json"
               },
               {
-                "key": "X-Correlation-ID",
-                "value": "c-postman-{{$randomUUID}}"
+                "key": "X-API-Key",
+                "value": "{{integration_key}}"
               }
             ],
             "url": {
-              "raw": "{{base_url}}/api/loans/{{loan_reference}}/template?step=approval",
+              "raw": "{{integration_url}}/api/loans/{{loan_reference}}/template?step=approval",
               "host": [
-                "{{base_url}}"
+                "{{integration_url}}"
               ],
               "path": [
                 "api",
@@ -328,9 +568,20 @@
                   "value": "approval"
                 }
               ]
-            },
-            "description": ""
-          }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is one of [200]', () => pm.expect([200]).to.include(pm.response.code));",
+                  "pm.test(\"approval is the next step\", () => pm.expect(pm.response.json().available).to.eql(true));"
+                ]
+              }
+            }
+          ]
         },
         {
           "name": "Approve",
@@ -338,22 +589,22 @@
             "method": "POST",
             "header": [
               {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
                 "key": "X-API-Key",
-                "value": "{{api_key}}"
+                "value": "{{integration_key}}"
               },
               {
                 "key": "Content-Type",
                 "value": "application/json"
-              },
-              {
-                "key": "X-Correlation-ID",
-                "value": "c-postman-{{$randomUUID}}"
               }
             ],
             "url": {
-              "raw": "{{base_url}}/api/loans/{{loan_reference}}/approve",
+              "raw": "{{integration_url}}/api/loans/{{loan_reference}}/approve",
               "host": [
-                "{{base_url}}"
+                "{{integration_url}}"
               ],
               "path": [
                 "api",
@@ -362,17 +613,29 @@
                 "approve"
               ]
             },
-            "description": "",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"external_reference\": \"PM-APR-000001\"\n}",
+              "raw": "{\n  \"external_reference\": \"PM-APR-{{run}}\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
                 }
               }
             }
-          }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is one of [200]', () => pm.expect([200]).to.include(pm.response.code));",
+                  "pm.test(\"approved\", () => pm.expect(pm.response.json().status).to.eql('APPROVED'));",
+                  "pm.test(\"the full principal, from Fineract's template\", () => pm.expect(pm.response.json().approved_principal).to.eql(5000000));"
+                ]
+              }
+            }
+          ]
         },
         {
           "name": "Disburse",
@@ -380,22 +643,22 @@
             "method": "POST",
             "header": [
               {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
                 "key": "X-API-Key",
-                "value": "{{api_key}}"
+                "value": "{{integration_key}}"
               },
               {
                 "key": "Content-Type",
                 "value": "application/json"
-              },
-              {
-                "key": "X-Correlation-ID",
-                "value": "c-postman-{{$randomUUID}}"
               }
             ],
             "url": {
-              "raw": "{{base_url}}/api/loans/{{loan_reference}}/disburse",
+              "raw": "{{integration_url}}/api/loans/{{loan_reference}}/disburse",
               "host": [
-                "{{base_url}}"
+                "{{integration_url}}"
               ],
               "path": [
                 "api",
@@ -404,17 +667,29 @@
                 "disburse"
               ]
             },
-            "description": "Pays out the approved amount once. Another reference for the same loan gets 409 LOAN_ALREADY_DISBURSED.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"external_reference\": \"FIN-2026-900001\"\n}",
+              "raw": "{\n  \"external_reference\": \"PM-DSB-{{run}}\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
                 }
               }
             }
-          }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is one of [200]', () => pm.expect([200]).to.include(pm.response.code));",
+                  "pm.test(\"the loan is active\", () => pm.expect(pm.response.json().loan_status).to.eql('ACTIVE'));",
+                  "pm.test(\"paid out once, in full\", () => pm.expect(pm.response.json().amount).to.eql(5000000));"
+                ]
+              }
+            }
+          ]
         },
         {
           "name": "Repay",
@@ -422,22 +697,22 @@
             "method": "POST",
             "header": [
               {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
                 "key": "X-API-Key",
-                "value": "{{api_key}}"
+                "value": "{{integration_key}}"
               },
               {
                 "key": "Content-Type",
                 "value": "application/json"
-              },
-              {
-                "key": "X-Correlation-ID",
-                "value": "c-postman-{{$randomUUID}}"
               }
             ],
             "url": {
-              "raw": "{{base_url}}/api/loans/{{loan_reference}}/repayments",
+              "raw": "{{integration_url}}/api/loans/{{loan_reference}}/repayments",
               "host": [
-                "{{base_url}}"
+                "{{integration_url}}"
               ],
               "path": [
                 "api",
@@ -446,17 +721,28 @@
                 "repayments"
               ]
             },
-            "description": "",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"external_reference\": \"FIN-2026-900002\",\n  \"amount\": 500000,\n  \"payment_type\": \"Money Transfer\"\n}",
+              "raw": "{\n  \"external_reference\": \"PM-RPY-{{run}}\",\n  \"amount\": 500000\n}",
               "options": {
                 "raw": {
                   "language": "json"
                 }
               }
             }
-          }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is one of [200]', () => pm.expect([200]).to.include(pm.response.code));",
+                  "pm.test(\"Fineract's own split adds up\", () => pm.expect(pm.response.json().principal_portion + pm.response.json().interest_portion).to.eql(500000));"
+                ]
+              }
+            }
+          ]
         },
         {
           "name": "Loan status and balances",
@@ -464,172 +750,1046 @@
             "method": "GET",
             "header": [
               {
-                "key": "X-API-Key",
-                "value": "{{api_key}}"
+                "key": "Accept",
+                "value": "application/json"
               },
               {
-                "key": "X-Correlation-ID",
-                "value": "c-postman-{{$randomUUID}}"
+                "key": "X-API-Key",
+                "value": "{{integration_key}}"
               }
             ],
             "url": {
-              "raw": "{{base_url}}/api/loans/{{loan_reference}}",
+              "raw": "{{integration_url}}/api/loans/{{loan_reference}}",
               "host": [
-                "{{base_url}}"
+                "{{integration_url}}"
               ],
               "path": [
                 "api",
                 "loans",
                 "{{loan_reference}}"
               ]
-            },
-            "description": ""
-          }
-        }
-      ]
-    },
-    {
-      "name": "Transactions and reconciliation",
-      "item": [
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is one of [200]', () => pm.expect([200]).to.include(pm.response.code));",
+                  "pm.test(\"active\", () => pm.expect(pm.response.json().status.code).to.eql('ACTIVE'));",
+                  "pm.test(\"the balance came down\", () => pm.expect(pm.response.json().balances.principal_outstanding).to.be.below(5000000));"
+                ]
+              }
+            }
+          ]
+        },
         {
-          "name": "What happened to a reference",
+          "name": "What happened to the payout?",
           "request": {
             "method": "GET",
             "header": [
               {
-                "key": "X-API-Key",
-                "value": "{{api_key}}"
+                "key": "Accept",
+                "value": "application/json"
               },
               {
-                "key": "X-Correlation-ID",
-                "value": "c-postman-{{$randomUUID}}"
+                "key": "X-API-Key",
+                "value": "{{integration_key}}"
               }
             ],
             "url": {
-              "raw": "{{base_url}}/api/transactions/FIN-2026-000001",
+              "raw": "{{integration_url}}/api/transactions/PM-DSB-{{run}}",
               "host": [
-                "{{base_url}}"
+                "{{integration_url}}"
               ],
               "path": [
                 "api",
                 "transactions",
-                "FIN-2026-000001"
+                "PM-DSB-{{run}}"
               ]
             },
-            "description": ""
-          }
-        },
-        {
-          "name": "Reconcile a date range",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "X-API-Key",
-                "value": "{{api_key}}"
-              },
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              },
-              {
-                "key": "X-Correlation-ID",
-                "value": "c-postman-{{$randomUUID}}"
-              }
-            ],
-            "url": {
-              "raw": "{{base_url}}/api/reconciliation",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "reconciliation"
-              ]
-            },
-            "description": "At most 31 days. Read only.",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"from\": \"2026-10-01\",\n  \"to\": \"2026-10-31\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
+            "description": "Everything I know about one reference: status, ERP status and the full history."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is one of [200]', () => pm.expect([200]).to.include(pm.response.code));",
+                  "pm.test(\"the op key names the operation\", () => pm.expect(pm.response.json().operations[0].op_key).to.eql('DSB:PM-DSB-' + pm.variables.get('run')));"
+                ]
               }
             }
-          }
-        },
-        {
-          "name": "Reconcile references",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "X-API-Key",
-                "value": "{{api_key}}"
-              },
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              },
-              {
-                "key": "X-Correlation-ID",
-                "value": "c-postman-{{$randomUUID}}"
-              }
-            ],
-            "url": {
-              "raw": "{{base_url}}/api/reconciliation",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "reconciliation"
-              ]
-            },
-            "description": "At most 100 references.",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"references\": [\n    \"FIN-2026-000001\",\n    \"RPY:FIN-2026-900002\"\n  ]\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          }
+          ]
         }
       ]
     },
     {
-      "name": "Operator",
+      "name": "4 Idempotency, see for yourself",
+      "description": "The same payout sent again is answered from the saved record. A changed body or a second reference for the same payout is refused, and nothing reaches Fineract.",
       "item": [
+        {
+          "name": "Same payout again (same body)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{integration_key}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{integration_url}}/api/loans/{{loan_reference}}/disburse",
+              "host": [
+                "{{integration_url}}"
+              ],
+              "path": [
+                "api",
+                "loans",
+                "{{loan_reference}}",
+                "disburse"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"external_reference\": \"PM-DSB-{{run}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is one of [200, 202]', () => pm.expect([200, 202]).to.include(pm.response.code));",
+                  "if (pm.response.code === 200) pm.test('the saved answer, not a second payout', () => pm.expect(pm.response.json().external_reference).to.eql('PM-DSB-' + pm.variables.get('run')));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Same reference, different body",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{integration_key}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{integration_url}}/api/loans/{{loan_reference}}/disburse",
+              "host": [
+                "{{integration_url}}"
+              ],
+              "path": [
+                "api",
+                "loans",
+                "{{loan_reference}}",
+                "disburse"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"external_reference\": \"PM-DSB-{{run}}\",\n  \"transaction_date\": \"2026-01-02\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is one of [409]', () => pm.expect([409]).to.include(pm.response.code));",
+                  "pm.test(\"refused as a conflict\", () => pm.expect(pm.response.json().error.code).to.eql('IDEMPOTENCY_CONFLICT'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "New reference, same loan",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{integration_key}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{integration_url}}/api/loans/{{loan_reference}}/disburse",
+              "host": [
+                "{{integration_url}}"
+              ],
+              "path": [
+                "api",
+                "loans",
+                "{{loan_reference}}",
+                "disburse"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"external_reference\": \"PM-DSB2-{{run}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is one of [409]', () => pm.expect([409]).to.include(pm.response.code));",
+                  "pm.test(\"a loan is paid out once\", () => pm.expect(pm.response.json().error.code).to.eql('LOAN_ALREADY_DISBURSED'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "5 Reconciliation",
+      "description": "Compares Fineract with the ERP and gives each reference one outcome. Right after a write you may see IN_FLIGHT for a few seconds, until the outbox has sent the entry.",
+      "item": [
+        {
+          "name": "Reconcile my references",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{integration_key}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{integration_url}}/api/reconciliation",
+              "host": [
+                "{{integration_url}}"
+              ],
+              "path": [
+                "api",
+                "reconciliation"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"references\": [\n    \"PM-DSB-{{run}}\",\n    \"PM-RPY-{{run}}\"\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is one of [200]', () => pm.expect([200]).to.include(pm.response.code));",
+                  "pm.test(\"two items, one per reference\", () => pm.expect(pm.response.json().summary.total).to.eql(2));",
+                  "pm.test(\"nothing wrong on either side\", () => pm.expect(pm.response.json().summary.MISSING_IN_FINERACT + pm.response.json().summary.AMOUNT_MISMATCH).to.eql(0));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Reconcile today",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{integration_key}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{integration_url}}/api/reconciliation",
+              "host": [
+                "{{integration_url}}"
+              ],
+              "path": [
+                "api",
+                "reconciliation"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"from\": \"{{today}}\",\n  \"to\": \"{{today}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('today', new Date().toISOString().slice(0, 10));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is one of [200]', () => pm.expect([200]).to.include(pm.response.code));",
+                  "pm.test(\"only money movements are compared\", () => pm.expect(pm.response.json().compared_types).to.eql(['DISBURSEMENT', 'REPAYMENT']));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "6 Break things on purpose",
+      "description": "First the ERP goes down: the repayment still succeeds, because Fineract has the money, and the journal entry waits in the outbox. Then Fineract goes down behind the fault proxy: nothing is sent, the caller gets 503, and the same reference succeeds once Fineract is back. Every switch is turned off again at the end.",
+      "item": [
+        {
+          "name": "ERP down",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{erp_key}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{erp_url}}/admin/faults",
+              "host": [
+                "{{erp_url}}"
+              ],
+              "path": [
+                "admin",
+                "faults"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"mode\": \"down\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is one of [200]', () => pm.expect([200]).to.include(pm.response.code));",
+                  "pm.test(\"the fault is on\", () => pm.expect(pm.response.json().active).to.eql(true));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Repay while the ERP is down",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{integration_key}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{integration_url}}/api/loans/{{loan_reference}}/repayments",
+              "host": [
+                "{{integration_url}}"
+              ],
+              "path": [
+                "api",
+                "loans",
+                "{{loan_reference}}",
+                "repayments"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"external_reference\": \"PM-RPY-ERPDOWN-{{run}}\",\n  \"amount\": 100000\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is one of [200]', () => pm.expect([200]).to.include(pm.response.code));",
+                  "pm.test(\"the entry waits in the outbox\", () => pm.expect(pm.response.json().erp_status).to.eql('PENDING'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "ERP back",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{erp_key}}"
+              }
+            ],
+            "url": {
+              "raw": "{{erp_url}}/admin/faults",
+              "host": [
+                "{{erp_url}}"
+              ],
+              "path": [
+                "admin",
+                "faults"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is one of [200]', () => pm.expect([200]).to.include(pm.response.code));",
+                  "pm.test(\"the fault is off\", () => pm.expect(pm.response.json().active).to.eql(false));"
+                ]
+              }
+            }
+          ]
+        },
         {
           "name": "Run one recovery pass",
           "request": {
             "method": "POST",
             "header": [
               {
-                "key": "X-API-Key",
-                "value": "{{api_key}}"
+                "key": "Accept",
+                "value": "application/json"
               },
               {
-                "key": "X-Correlation-ID",
-                "value": "c-postman-{{$randomUUID}}"
+                "key": "X-API-Key",
+                "value": "{{integration_key}}"
               }
             ],
             "url": {
-              "raw": "{{base_url}}/admin/recover",
+              "raw": "{{integration_url}}/admin/recover",
               "host": [
-                "{{base_url}}"
+                "{{integration_url}}"
               ],
               "path": [
                 "admin",
                 "recover"
               ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is one of [200]', () => pm.expect([200]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "The entry got through",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{integration_key}}"
+              }
+            ],
+            "url": {
+              "raw": "{{integration_url}}/api/transactions/PM-RPY-ERPDOWN-{{run}}",
+              "host": [
+                "{{integration_url}}"
+              ],
+              "path": [
+                "api",
+                "transactions",
+                "PM-RPY-ERPDOWN-{{run}}"
+              ]
             },
-            "description": "Not for partners. Today it takes a partner key."
-          }
+            "description": "COMPLETED once the outbox has sent it. If it still says ERP_PENDING, the retry is a few seconds away: send this again."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is one of [200]', () => pm.expect([200]).to.include(pm.response.code));",
+                  "pm.test(\"completed, or still retrying on its own\", () => pm.expect(pm.response.json().operations[0].status).to.be.oneOf(['COMPLETED', 'ERP_PENDING']));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Fineract down (fault proxy)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{fault_proxy_key}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{fault_proxy_url}}/admin/faults",
+              "host": [
+                "{{fault_proxy_url}}"
+              ],
+              "path": [
+                "admin",
+                "faults"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"mode\": \"down\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is one of [200]', () => pm.expect([200]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Repay while Fineract is down",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{integration_key}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{integration_url}}/api/loans/{{loan_reference}}/repayments",
+              "host": [
+                "{{integration_url}}"
+              ],
+              "path": [
+                "api",
+                "loans",
+                "{{loan_reference}}",
+                "repayments"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"external_reference\": \"PM-RPY-FINDOWN-{{run}}\",\n  \"amount\": 100000\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is one of [503]', () => pm.expect([503]).to.include(pm.response.code));",
+                  "pm.test(\"nothing was sent, and I say so\", () => pm.expect(pm.response.json().error.code).to.eql('FINERACT_UNAVAILABLE'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Fineract back",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{fault_proxy_key}}"
+              }
+            ],
+            "url": {
+              "raw": "{{fault_proxy_url}}/admin/faults",
+              "host": [
+                "{{fault_proxy_url}}"
+              ],
+              "path": [
+                "admin",
+                "faults"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is one of [200]', () => pm.expect([200]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Same reference again, now it works",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{integration_key}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{integration_url}}/api/loans/{{loan_reference}}/repayments",
+              "host": [
+                "{{integration_url}}"
+              ],
+              "path": [
+                "api",
+                "loans",
+                "{{loan_reference}}",
+                "repayments"
+              ]
+            },
+            "description": "Before sending, the service looks the reference up in Fineract, so a late first attempt could never be doubled.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"external_reference\": \"PM-RPY-FINDOWN-{{run}}\",\n  \"amount\": 100000\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is one of [200]', () => pm.expect([200]).to.include(pm.response.code));",
+                  "pm.test(\"recorded once\", () => pm.expect(pm.response.json().amount).to.eql(100000));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "7 Mock ERP",
+      "description": "The accounting side. Only the Integration Service writes here during a loan; these calls read what it posted, and add one manual entry.",
+      "item": [
+        {
+          "name": "Chart of accounts",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{erp_key}}"
+              }
+            ],
+            "url": {
+              "raw": "{{erp_url}}/api/accounts",
+              "host": [
+                "{{erp_url}}"
+              ],
+              "path": [
+                "api",
+                "accounts"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is one of [200]', () => pm.expect([200]).to.include(pm.response.code));",
+                  "pm.test(\"the chart is seeded\", () => pm.expect(pm.response.json().items.length).to.be.above(0));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Balance of Loan Receivable (1200)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{erp_key}}"
+              }
+            ],
+            "url": {
+              "raw": "{{erp_url}}/api/accounts/1200/balance",
+              "host": [
+                "{{erp_url}}"
+              ],
+              "path": [
+                "api",
+                "accounts",
+                "1200",
+                "balance"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is one of [200]', () => pm.expect([200]).to.include(pm.response.code));",
+                  "pm.test(\"an asset account\", () => pm.expect(pm.response.json().normal_side).to.eql('DEBIT'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "The payout's journal entry",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{erp_key}}"
+              }
+            ],
+            "url": {
+              "raw": "{{erp_url}}/api/journal-entries/DSB:PM-DSB-{{run}}",
+              "host": [
+                "{{erp_url}}"
+              ],
+              "path": [
+                "api",
+                "journal-entries",
+                "DSB:PM-DSB-{{run}}"
+              ]
+            },
+            "description": "The outbox posts entries a moment after Fineract answers. A 404 here means it has not arrived yet: run 6's recovery pass, or send this again."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is one of [200, 404]', () => pm.expect([200, 404]).to.include(pm.response.code));",
+                  "if (pm.response.code === 200) pm.test('built from Fineract: debit 1200, credit 1100', () => { const l = pm.response.json().lines; pm.expect(l.find(x => x.account_code === '1200').debit).to.eql(5000000); pm.expect(l.find(x => x.account_code === '1100').credit).to.eql(5000000); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Search the journal",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{erp_key}}"
+              }
+            ],
+            "url": {
+              "raw": "{{erp_url}}/api/journal-entries?q=PM-RPY-{{run}}",
+              "host": [
+                "{{erp_url}}"
+              ],
+              "path": [
+                "api",
+                "journal-entries"
+              ],
+              "query": [
+                {
+                  "key": "q",
+                  "value": "PM-RPY-{{run}}"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is one of [200]', () => pm.expect([200]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Post a manual entry",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{erp_key}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{erp_url}}/api/journal-entries",
+              "host": [
+                "{{erp_url}}"
+              ],
+              "path": [
+                "api",
+                "journal-entries"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"external_reference\": \"PM-MAN-{{run}}\",\n  \"entry_date\": \"{{today}}\",\n  \"source\": \"MANUAL\",\n  \"description\": \"Manual test entry\",\n  \"lines\": [\n    {\n      \"account_code\": \"1100\",\n      \"debit\": 1000\n    },\n    {\n      \"account_code\": \"4100\",\n      \"credit\": 1000\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('today', new Date().toISOString().slice(0, 10));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is one of [201, 200]', () => pm.expect([201, 200]).to.include(pm.response.code));",
+                  "pm.test(\"balanced, total is the debit side\", () => pm.expect(pm.response.json().total).to.eql(1000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Fault switch state",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{erp_key}}"
+              }
+            ],
+            "url": {
+              "raw": "{{erp_url}}/admin/faults",
+              "host": [
+                "{{erp_url}}"
+              ],
+              "path": [
+                "admin",
+                "faults"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is one of [200]', () => pm.expect([200]).to.include(pm.response.code));",
+                  "pm.test(\"no fault left on\", () => pm.expect(pm.response.json().active).to.eql(false));"
+                ]
+              }
+            }
+          ]
         }
       ]
     }
