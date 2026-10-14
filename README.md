@@ -1,179 +1,193 @@
 # Fineract and ERP integration
 
-This is my take-home assessment. It connects three things:
+This is my take-home assessment: money moves exactly once between Fineract and the ERP, even when requests repeat, time out, crash halfway or arrive together. Apache Fineract is the core banking system. A Python Mock ERP owns the chart of accounts. A Python Integration Service sits between the client system and both of them. Fineract takes plugins and custom modules, so my Java customisation is a plugin beside Fineract's code, never a change to its core.
 
-- **Apache Fineract**, the core banking system. I changed it with a small Java plugin.
-- **A mock ERP**, written in Python. It owns the chart of accounts.
-- **An integration service**, written in Python. It sits between partners, Fineract and the ERP.
+> **Status:** Tiers 1 and 2 (Parts A to K) are built, tested and run on the local stack. Tier 3 (Part L) is not built.
 
-The goal is to show that money moves exactly once, even with duplicate requests, timeouts, crashes and requests that arrive at the same time.
+```mermaid
+flowchart LR
+  P[Client system] -->|clients, loans, repayments| IS[Integration Service]
+  subgraph F[Fineract]
+    L[Clients, loans, transactions]
+    G[glsync plugin and GL accounts]
+  end
+  IS --> L
+  IS -->|GL sync| G
+  E[Mock ERP] -->|chart of accounts| IS
+  IS -->|journal entries, through an outbox| E
+  IS -. reconciliation reads .-> L
+  IS -. reconciliation reads .-> E
+```
 
-> **Status:** Tiers 1 and 2 (Parts A to K) are built, tested and run on the local stack. Tier 3 (Part L) is not built. Every simulation in [SIMULATIONS.md](SIMULATIONS.md) has a `make` command and its recorded result.
+[ARCHITECTURE.md](ARCHITECTURE.md) explains each arrow.
 
 ## What is done
 
-| Part | What | Status | Shown by |
-|---|---|---|---|
-| A | Fineract plugin: GL accounts synced from the ERP, once | Done, tested, run | `make demo-gl-sync`, `make simulate-gl-sync-4x`, [build.log](fineract-customization/build.log), [integration-test.log](fineract-customization/integration-test.log) |
-| B | Fineract setup: office, currency, role, API user, GL accounts, loan product | Done, tested, run twice | The two setup runs below, `integration-service/tests/unit/test_setup_run.py`, `integration-service/tests/integration/test_setup_live.py`, `integration-service/tests/integration/test_least_privilege_live.py` |
-| C | Clients | Done, tested, run | `make demo-identity` |
-| D | Loan lifecycle, application to Closed | Done, tested, run | `make demo-lifecycle` |
-| E | The Integration API, with reconciliation | Done, tested | [API.md](API.md), `integration-service/tests/integration/test_templates_api.py` |
-| F | Duplicate requests | Done, tested, run | `make simulate-duplicates` |
-| G | Mock ERP, with fault switches | Done, tested | [API.md](API.md) |
-| H | Journal entries from Fineract's own split, through an outbox | Done, tested, run | `make demo-lifecycle`, `make simulate-concurrent-repay` |
-| I | Concurrency: I-1, I-2a, I-2b, I-3 | Done, tested, run | `make simulate-duplicates`, `make simulate-concurrent-disburse`, `make simulate-concurrent-repay` |
-| J | Failures J-1 to J-5, recovery | Done, tested, run | `make simulate-j1` to `make simulate-j5`, the FIN-2026-000001 trail in [DECISIONS.md](DECISIONS.md) |
-| K | Reconciliation, all four outcomes | Done, tested, run | `make simulate-recon` |
-| L | Stretch | Not built. See "What I chose not to build" in [DECISIONS.md](DECISIONS.md). | |
+Every part has tests, and most have a `make` command that shows it live. [SIMULATIONS.md](SIMULATIONS.md) records the results.
 
-The results of every run are written down in [SIMULATIONS.md](SIMULATIONS.md). They were captured on 2026-10-13 and 2026-10-14 on the local stack. Each can be reproduced with the `make` command listed next to it. The `make` commands are in the "Simulations" section below.
+| Part | What | Shown by |
+|---|---|---|
+| A | Fineract plugin: GL accounts from the ERP, once | `make demo-gl-sync` |
+| B | Fineract setup | the `setup` service |
+| C | Clients | `make demo-identity` |
+| D | Loan lifecycle, application to Closed | `make demo-lifecycle` |
+| E | The Integration Service API | [API.md](API.md) |
+| F | Duplicate requests | `make simulate-duplicates` |
+| G | Mock ERP, with fault switches | [API.md](API.md) |
+| H | Journal entries, through an outbox | `make demo-lifecycle` |
+| I | Concurrency, I-1 to I-3 | `make simulate-concurrent-disburse`, `make simulate-concurrent-repay` |
+| J | Failures J-1 to J-5, with recovery | `make simulate-j1` to `make simulate-j5` |
+| K | Reconciliation, all four outcomes | `make simulate-recon` |
+| L | Stretch | not built |
 
 ## Versions
 
-| What | Version | Where it is pinned |
+Everything is pinned.
+
+| What | Version | Pinned in |
 |---|---|---|
-| Apache Fineract | `1.15.0`, commit `d5636847ac556c30b437254c353f05526d172b97` | git submodule `fineract-customization/fineract` |
-| JDK | 21 | Fineract's own build file |
-| Build tool | Gradle 8.14.5 | the Gradle wrapper inside the tag |
-| Database | PostgreSQL 18.3 (Alpine image) | `docker-compose.yml` |
-| Python | 3.13 (image `python:3.13.16-alpine3.24`) | `pyproject.toml` and `Dockerfile` in `mock-erp/` and `integration-service/` |
-| Python packages | Flask 3, flask-openapi3, Pydantic 2, SQLAlchemy 2, Alembic, psycopg 3, Gunicorn, and httpx (Integration Service) | `uv.lock` in each Python service |
-
-## Get the code
-
-```bash
-git clone --recurse-submodules <this-repo>
-# or, if you already cloned without submodules:
-git submodule update --init --depth 1
-```
-
-`fineract-customization/fineract` is the original Fineract 1.15.0 source. I never edit it. My Java code lives next to it, in `fineract-customization/custom/`. The build copies it into Fineract.
+| Apache Fineract | `1.15.0`, commit `d5636847ac556c30b437254c353f05526d172b97` | submodule `fineract-customization/fineract` |
+| JDK | 21 | Fineract's build file |
+| Gradle | 8.14.5 | the wrapper in the tag |
+| PostgreSQL | 18.3, Alpine image | `docker-compose.yml` |
+| Python | 3.13, image `python:3.13.16-alpine3.24` | each `Dockerfile` |
+| Packages | Flask 3, flask-openapi3, Pydantic 2, SQLAlchemy 2, Alembic, psycopg 3, Gunicorn; httpx in the Integration Service | `uv.lock` in each service |
 
 ## Run it
 
-```bash
-make build    # builds Fineract from source and runs the Java unit tests, then the Mock ERP, fault proxy and Integration Service images
-make up       # starts Postgres, Fineract, the fault proxy, the Mock ERP, runs the setup once, then starts the Integration Service
-```
-
-`make up` creates `.env` from `.env.example` the first time. On a clean stack it took about two minutes, most of it waiting for Fineract.
-
-To rebuild only the Python images:
+Two commands bring up the whole stack. The first one is slow because it builds Fineract from source.
 
 ```bash
-docker buildx build --load -t mock-erp-inkomoko:0.1.0 mock-erp
-docker buildx build --load -t fault-proxy-inkomoko:0.1.0 fault-proxy
-docker buildx build --load -t integration-service-inkomoko:0.1.0 integration-service
-docker compose up -d --no-build --wait
+git clone --recurse-submodules https://github.com/wmnjuguna/Inkomoko-Interview.git
+cd Inkomoko-Interview
+# or, if you already cloned without submodules:
+git submodule update --init --depth 1
+
+make build    # Fineract from source (runs the Java unit tests), then the Mock ERP, fault proxy and Integration Service images
+make up       # Postgres, Fineract, the fault proxy, the Mock ERP, the setup step once, then the Integration Service
 ```
 
-The Mock ERP and the Integration Service update their own database tables when they start. The Mock ERP also adds a small starting chart of accounts.
+The Makefile only wraps plain docker and compose commands. Without make, copy `.env.example` to `.env` and run `docker compose up -d --no-build --wait`. A clean start took me about two minutes.
 
-### The setup step (Part B)
+`fineract-customization/fineract` is the untouched Fineract 1.15.0 source. My plugin sits beside it in `fineract-customization/custom/`. [fineract-customization/patch/glsync.diff](fineract-customization/patch/glsync.diff) shows the same change as one diff.
 
-`setup` is a one-shot service in `docker-compose.yml`. It uses the Integration Service image and Fineract's admin user. It does these steps, in order:
+> **The fault proxy** is a small pass-through between the Integration Service and Fineract. It lets the failure simulations cut Fineract off or drop its answer, and does nothing otherwise.
 
-1. Waits until Fineract and the ERP are healthy.
-2. Creates the office `Kigali Main Office` under Head Office. It finds the office by its external id, `OFF-KGL-MAIN`.
-3. Adds RWF to the organisation's currencies.
-4. Creates the role `Integration Service` with exactly 11 permissions.
-5. Creates the API user `integration-api` in that office with that role, then logs in as it once to check it works.
-6. Syncs the whole ERP chart of accounts to Fineract (GL sync, Part A).
-7. Stops unless all 9 GL accounts the loan product needs are synced.
-8. Creates the loan product `SME Asset Finance`.
-
-The settings are JSON files in `fineract/configuration/`. They hold only our choices, by name or code (`"parent": "Head Office"`, `"repaymentFrequency": "MONTHS"`), never a Fineract id. Setup reads Fineract's templates (`/offices/template`, `/users/template`, `/currencies`, `/permissions`, `/loanproducts/template`) to turn them into ids, and stops with the allowed values if a name or code is not offered. [DECISIONS.md](DECISIONS.md) has the details. The Integration Service starts only after setup has finished without error, and it logs in to Fineract as `integration-api`, never as the admin.
-
-It is safe to run again. A second run creates nothing:
+The `setup` service (Part B) runs once and is the only thing that logs in as Fineract's admin. It creates the office, RWF, a role, the `integration-api` user, the synced chart and the `SME Asset Finance` loan product. Its settings in `fineract/configuration/` hold names and codes only; the ids come from Fineract's templates. Running it again creates nothing:
 
 ```bash
 docker compose run --rm setup
 ```
 
-On a clean stack on 2026-10-13, the first run printed `created` for every step and `13 SYNCED (13 sent to Fineract)`. The second run printed `exists` for every step and `0 sent to Fineract`. Fineract's command log (`m_portfolio_command_source`) held 18 rows before and after the second run. `integration-service/tests/unit/test_setup_run.py` checks that a second run writes nothing new.
+## How to use it
 
-## Try the APIs in the browser
+Six steps take you from a cold start to a reconciled loan. Ports bind to this computer only, and every credential is a placeholder from `.env.example`.
 
-1. Open http://localhost:8080/fineract-provider/swagger-ui/index.html
-2. Pick a spec in the **Select a definition** list at the top right:
-   - **Fineract 1.15.0**: all of Fineract's own APIs
-   - **ERP integration (glsync plugin)**: my plugin's `/v1/erp-integration/accounts` endpoints
-3. Click **Authorize**. Fill in both:
-   - `basicAuth`: user `mifos`, password `password`
-   - `tenantid`: `default`
-4. Open an endpoint, click **Try it out**, then **Execute**.
+**1. Start the stack.** `make up` waits until every service is healthy.
 
-Without step 3, every call gets `401`.
+```bash
+make build
+make up
+curl http://127.0.0.1:8080/fineract-provider/actuator/health   # Fineract, answers "UP"
+curl http://127.0.0.1:8090/health                               # Mock ERP
+curl http://127.0.0.1:8091/health                               # Integration Service
+curl http://127.0.0.1:8092/health                               # fault proxy, admin port
+```
 
-## The Mock ERP in the browser
+**2. Open the Mock ERP at http://127.0.0.1:8090/.** This is the accounting side, and its chart is what setup synced into Fineract.
 
-It listens on http://localhost:8090. Only this computer can reach it.
+![The chart of accounts](docs/images/erp-accounts.png)
+*Chart of accounts (`/ui/accounts`) with live balances.*
 
-| What | Where |
-|---|---|
-| Small web UI: chart of accounts, journal, new entry and fault switches | http://localhost:8090/ (opens `/ui/accounts`; the others are `/ui/journal`, `/ui/journal/new` and `/ui/faults`) |
-| Swagger UI | http://localhost:8090/openapi/swagger |
-| OpenAPI spec | http://localhost:8090/openapi/openapi.json |
-| Health check | http://localhost:8090/health |
+![The journal](docs/images/erp-journal.png)
+*Journal (`/ui/journal`): every entry the ERP accepted.*
 
-In Swagger, click **Authorize** and enter the API key from `.env` (`ERP_API_KEY`, by default `change-me-erp-key`). Calls to `/api` and `/admin` need it. The UI does not.
+![One journal entry](docs/images/erp-journal-entry.png)
+*One disbursement entry. "New entry" (`/ui/journal/new`) posts one by hand.*
 
-## The Integration Service in the browser
+![The fault switches](docs/images/erp-faults.png)
+*Fault switches (`/ui/faults`).*
 
-It listens on http://localhost:8091. Only this computer can reach it.
+**3. Explore the APIs.** Each service has a Swagger UI; click **Authorize** and paste its key.
 
-| What | Where |
-|---|---|
-| Swagger UI | http://localhost:8091/openapi/swagger |
-| OpenAPI spec | http://localhost:8091/openapi/openapi.json |
-| Health check | http://localhost:8091/health |
+- Integration Service: http://127.0.0.1:8091/openapi/swagger, key `change-me-partner-key` (from `PARTNER_API_KEYS`, `demo-partner:change-me-partner-key`).
+- Mock ERP: http://127.0.0.1:8090/openapi/swagger, key `change-me-erp-key` (`ERP_API_KEY`).
+- Fineract: http://127.0.0.1:8080/fineract-provider/swagger-ui/index.html. Pick **ERP integration (glsync plugin)** under **Select a definition**, then use `mifos` / `password` and `tenantid` `default`.
+- Postman: import [postman/collection.json](postman/collection.json).
 
-In Swagger, click **Authorize** and enter a partner key. Keys are set in `.env` as `PARTNER_API_KEYS`, in the form `name:key`. The default is `demo-partner:change-me-partner-key`. The routes are GL sync (`/api/accounts/...`), clients (`/api/clients`), loans with approve, disburse and repayments (`/api/loans/...`), the forms for each step (`/api/clients/template`, `/api/loans/template`, `/api/loans/{loan_reference}/template?step=`), `GET /api/transactions/{external_reference}`, `POST /api/reconciliation` and `POST /admin/recover`. See [API.md](API.md). A Postman collection with every partner endpoint is in `postman/collection.json`. Set its `base_url` and `api_key` variables.
+![Integration Service Swagger](docs/images/integration-swagger.png)
+*The Integration Service in Swagger.*
 
-The background loop that sends journal entries to the ERP and finishes stuck requests has three optional settings in `.env`: `INTEGRATION_OUTBOX_ENABLED` (default `true`), `INTEGRATION_OUTBOX_POLL_SECONDS` (default `5`) and `INTEGRATION_OUTBOX_MAX_ATTEMPTS` (default `8`).
+![Mock ERP Swagger](docs/images/erp-swagger.png)
+*The Mock ERP in Swagger.*
+
+**4. Sync the chart of accounts.** Setup already did it, so a second sync writes nothing.
+
+```bash
+BASE=http://127.0.0.1:8091
+KEY="X-API-Key: change-me-partner-key"
+curl -s -X POST $BASE/api/accounts/sync -H "$KEY"
+```
+
+**5. Run one loan.** Each write carries an `external_reference` you keep for retries, so a repeat gets the same answer and never a second payout.
+
+```bash
+JSON="Content-Type: application/json"
+curl -s -X POST $BASE/api/clients -H "$KEY" -H "$JSON" \
+  -d '{"external_reference": "MAN-CLI-0001", "client_uid": "SME-000001", "first_name": "Test", "last_name": "Client"}'
+curl -s -X POST $BASE/api/loans -H "$KEY" -H "$JSON" \
+  -d '{"external_reference": "MAN-APP-0001", "client_uid": "SME-000001", "principal": 5000000}'
+LOAN=LN-2026-000001    # the loan_reference you got back
+curl -s -X POST $BASE/api/loans/$LOAN/approve -H "$KEY" -H "$JSON" -d '{"external_reference": "MAN-APR-0001"}'
+curl -s -X POST $BASE/api/loans/$LOAN/disburse -H "$KEY" -H "$JSON" -d '{"external_reference": "MAN-DSB-0001"}'
+curl -s -X POST $BASE/api/loans/$LOAN/repayments -H "$KEY" -H "$JSON" \
+  -d '{"external_reference": "MAN-RPY-0001", "amount": 500000}'
+```
+
+**6. Reconcile.** It compares Fineract with the ERP and gives each reference one outcome. A fresh write may show `IN_FLIGHT` for a few seconds, until the outbox sends its entry.
+
+```bash
+curl -s -X POST $BASE/api/reconciliation -H "$KEY" -H "$JSON" \
+  -d '{"references": ["MAN-DSB-0001", "MAN-RPY-0001"]}'
+```
+
+**Then break things.** Switch the ERP off and a repayment still succeeds with `erp_status` `PENDING`. The outbox retries the journal entry until the ERP is back.
+
+```bash
+ERP="X-API-Key: change-me-erp-key"
+curl -s -X PUT http://127.0.0.1:8090/admin/faults -H "$ERP" -H "$JSON" -d '{"mode": "down"}'
+curl -s -X POST $BASE/api/loans/$LOAN/repayments -H "$KEY" -H "$JSON" \
+  -d '{"external_reference": "MAN-RPY-0002", "amount": 100000}'          # 200, erp_status PENDING
+curl -s -X DELETE http://127.0.0.1:8090/admin/faults -H "$ERP"           # fault off
+curl -s $BASE/api/transactions/MAN-RPY-0002 -H "$KEY"                     # COMPLETED once the entry is sent
+```
 
 ## Tests
 
-| Language | Command | What it runs |
-|---|---|---|
-| Java | `make test-java` | Builds Fineract (51 unit tests run during the build), starts it, then runs 10 integration tests against it. On 2026-10-14 the 10 integration tests passed against the running stack. Details: [fineract-customization/BUILD.md](fineract-customization/BUILD.md) |
-| Python | `make test-python` | For the Mock ERP and then the Integration Service: ruff (lint and format), mypy in strict mode, then pytest. Last full run on 2026-10-14: Mock ERP 216 passed, Integration Service 925 passed, with ruff and mypy clean in both. |
+Each language has one command, and both pass.
 
-The Python tests need the running stack and two empty test databases: `erp_test` and `integration_test`. They rebuild their tables on every run. A new data volume creates both by itself. On an older volume, create them once:
+| Language | Command | Last result |
+|---|---|---|
+| Java | `make test-java` | 51 unit tests run in the build, then 10 integration tests passed. See [fineract-customization/BUILD.md](fineract-customization/BUILD.md). |
+| Python | `make test-python` | ruff, strict mypy and pytest. On 2026-10-14: Mock ERP 216 passed, Integration Service 925 passed, ruff and mypy clean. |
+
+The Python tests need two empty databases, `erp_test` and `integration_test`. A new data volume creates them; on an older one:
 
 ```bash
 docker compose exec db createdb -U postgres -O erp erp_test
 docker compose exec db createdb -U postgres -O integration integration_test
 ```
 
-To use other databases, set `ERP_TEST_DATABASE_URL` or `INTEGRATION_TEST_DATABASE_URL`, for example `postgresql+psycopg://integration:change-me-integration@localhost:5432/integration_test`.
-
-Some Integration Service tests call the live Fineract and Mock ERP. They log in to Fineract as the API user. `tests/conftest.py` reads `FINERACT_API_USERNAME` and `FINERACT_API_PASSWORD` from `.env` when they are not already set. They never assume Fineract is empty and never delete anything. They use new GL codes (8 digits, starting with 7), new client ids and new references on every run, so they can run again and again. This leaves test clients, loans and accounts in Fineract.
-
-Other commands: `make down` stops everything. `make reset` stops everything and deletes all data. `make help` lists all commands.
+`make down` stops everything, `make reset` also deletes the data, and `make help` lists every command.
 
 ## Simulations
 
-Each scenario has a `make` command. It prints the state before and after, in the brief's evidence format. Run them after `make up`. They only call the Integration Service, like a partner, and read Fineract, the ERP and the databases to show the state. Each run uses new ids, so they can run again.
+Each scenario is a `make` command that calls the Integration Service as the client system would. [SIMULATIONS.md](SIMULATIONS.md) lists every scenario with its recorded result. Two to start with:
 
-| Command | ID | What it shows |
-|---|---|---|
-| `make demo-gl-sync` | A-1 | The plugin's four rules on `GL-1200`: one mapping, same data gives the same account, different data gives 409, no permission gives 403 |
-| `make simulate-gl-sync-4x` | A-2 | Two new ERP accounts, each sent 4 times at once. Every count must be 1. |
-| `make demo-identity` | C-1 | Create a client, find it by `client_uid`, check its name, send it again, send different data, reuse the `client_uid` |
-| `make demo-lifecycle` | D-1 | A 5,000,000 RWF loan from application to Closed, with Fineract, ERP and service state after each step |
-| `make simulate-duplicates` | I-1 | The same disbursement sent 4 times: 4 requests, 1 Fineract disbursement, 1 ERP entry, 1 operation |
-| `make simulate-concurrent-disburse` | I-2a, I-2b | 10 disbursements of one loan at once, with one reference, then with ten |
-| `make simulate-concurrent-repay` | I-3 | 10 repayments at once, 6 references plus copies |
-| `make simulate-j1` | J-1 | The ERP is down after Fineract succeeds |
-| `make simulate-j2` | J-2 | Fineract is down |
-| `make simulate-j3` | J-3 | Fineract times out after the request was sent. Takes about 4 minutes. |
-| `make simulate-j4` | J-4 | The ERP times out after it saved the entry |
-| `make simulate-j5` | J-5 | The service crashes between Fineract and the ERP. It restarts the Integration Service container. |
-| `make simulate-recon` | K-1 | Reconciliation with all four outcomes planted |
-
-`make demo-gl-sync` creates one extra Fineract user the first time, `demo-no-sync`, with only `READ_GLACCOUNT`, to show the 403. `make simulate-gl-sync-4x` adds two new ERP accounts (codes starting with 7, under 5000) on every run. The J simulations switch faults on in the Mock ERP and the fault proxy, and switch every fault off at the end.
+```bash
+make demo-lifecycle            # D-1: a 5,000,000 RWF loan from application to Closed
+make simulate-j5               # J-5: the service crashes between Fineract and the ERP, then recovers
+```
 
 ## Folders
 
@@ -182,6 +196,7 @@ Each scenario has a `make` command. It prints the state before and after, in the
 ├── Makefile
 ├── docker-compose.yml
 ├── docs/openapi/                  OpenAPI specs
+├── docs/images/                   the screenshots above
 ├── infra/postgres/                creates one database per service
 ├── fineract-customization/
 │   ├── fineract/                  Fineract 1.15.0 source (submodule, never edited)
@@ -194,28 +209,23 @@ Each scenario has a `make` command. It prints the state before and after, in the
 ├── mock-erp/                      Python: the Mock ERP (Flask, Postgres, small web UI)
 ├── fault-proxy/                   Python: the fault proxy in front of Fineract (failure simulations only)
 ├── scripts/                       demos and simulations
-└── postman/collection.json        every partner endpoint, with fake data
+└── postman/collection.json        every Integration Service endpoint, with fake data
 ```
-
-## Other documents
-
-| File | What is in it |
-|---|---|
-| [ARCHITECTURE.md](ARCHITECTURE.md) | The parts of the system and how data moves between them |
-| [API.md](API.md) | Every endpoint, its rules and its errors |
-| [SIMULATIONS.md](SIMULATIONS.md) | The failure tests and their results |
-| [DECISIONS.md](DECISIONS.md) | The choices I made and why |
-| [fineract-customization/BUILD.md](fineract-customization/BUILD.md) | How the Fineract image is built and tested |
 
 ## Use of AI
 
 <!-- author: please review this section -->
 
-The brief allows AI tools. I used Claude Code (Anthropic) heavily: to read the brief, design the system, write the code and the tests, run the simulations and draft these documents. I directed the work, made the decisions and reviewed the results. I can explain and change any part.
+I used AI assistance (Claude) while building this. The things I used it for include:
 
-Every result in these documents was copied from a real run. The raw output is not kept in the repo. The simulations can be run again with their `make` commands. Where an example comes from a run with no `make` command, the document says so. All data is fake: test names, made-up ids and references like `FIN-2026-000001`.
+- writing unit tests
+- writing and editing the documentation (the `.md` files)
+- documenting the APIs in the Swagger/OpenAPI specs
+- designing the simple interactive web UI of the Mock ERP
+
+I reviewed the output, made the decisions, and can explain and change any part of the code.
 
 ## Not done
 
-- Part L (stretch) is not built. [DECISIONS.md](DECISIONS.md) lists what I chose not to build, and why.
-- I did not rehearse the whole thing from a fresh `git clone` on another machine. Each part was run on a clean stack (`docker compose down -v`) on my machine.
+- Part L (stretch). [DECISIONS.md](DECISIONS.md) lists what I chose not to build, and why.
+- I have not rehearsed a fresh `git clone` on another machine. Each part ran on a clean stack, but only on mine.
