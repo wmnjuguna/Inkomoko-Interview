@@ -1,9 +1,9 @@
 """The loan product: the body built from config, the synced GL ids and Fineract's
 GET /loanproducts/template, and ensure_product.
 
-The template fixture is a trimmed copy of the live 1.15 answer (P2.6 probe). The old body
-fixture is what the code before P2.6 built from the old loan-product.json with the live GL
-ids, so the existing product stays unchanged."""
+The template fixture is a trimmed copy of the live 1.15 answer. The old body fixture is
+what the code built before setup read the templates, from the old loan-product.json with
+the live GL ids, so the existing product stays unchanged."""
 
 from __future__ import annotations
 
@@ -76,7 +76,7 @@ def _with(**changes: Any) -> LoanProductConfig:
     return LoanProductConfig.model_validate(raw)
 
 
-# --- the body stays what it was before P2.6 -----------------------------------------------
+# --- the body stays what it was before setup read the templates ---------------------------
 
 
 def test_body_equals_the_body_the_old_code_built(

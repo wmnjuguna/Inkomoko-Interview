@@ -41,7 +41,7 @@ def seed(engine: Engine) -> str:
         engine,
         "DISB-UI-1",
         [("1200", 250_000, 0), ("1100", 0, 250_000)],
-        description="Loan for Aline",
+        description="Loan for Testperson",
     )
     post(
         engine,
@@ -86,7 +86,7 @@ def test_journal_page_lists_entries(client: FlaskClient, db: Engine) -> None:
     assert "<html" in page
     assert "DISB-UI-1" in page
     assert "REPAY-UI-1" in page
-    assert "Loan for Aline" in page
+    assert "Loan for Testperson" in page
     assert 'href="/ui/journal" aria-current="page"' in page
     assert count_of(page, "ALL") == "2"
     assert count_of(page, "REPAYMENT") == "1"
@@ -106,7 +106,7 @@ def test_search_narrows_by_reference_and_description(client: FlaskClient, db: En
     assert "DISB-UI-1" not in by_ref
     assert "<html" not in by_ref
 
-    by_text = client.get("/ui/journal/_list?q=Aline", headers=HX).get_data(as_text=True)
+    by_text = client.get("/ui/journal/_list?q=Testperson", headers=HX).get_data(as_text=True)
     assert "DISB-UI-1" in by_text
     assert "REPAY-UI-1" not in by_text
 

@@ -153,8 +153,8 @@ def stuck(
         payload = {
             "external_reference": reference,
             "client_uid": client_uid,
-            "first_name": "Aline",
-            "last_name": "Uwase",
+            "first_name": "Testa",
+            "last_name": "Fakename",
         }
     started = begin(
         engine,
@@ -445,9 +445,9 @@ def client_body(client_uid: str) -> dict[str, Any]:
         "externalId": client_uid,
         "active": True,
         "status": {"id": 300, "code": "clientStatusType.active", "value": "Active"},
-        "firstname": "Aline",
-        "lastname": "Uwase",
-        "displayName": "Aline Uwase",
+        "firstname": "Testa",
+        "lastname": "Fakename",
+        "displayName": "Testa Fakename",
     }
 
 
@@ -469,7 +469,7 @@ def test_a_client_found_in_fineract_is_completed_and_saved(
             .mappings()
             .one()
         )
-    assert saved["display_name"] == "Aline Uwase"
+    assert saved["display_name"] == "Testa Fakename"
     assert saved["fineract_client_id"] == 55
 
 
@@ -479,7 +479,7 @@ def test_a_client_with_another_name_is_not_claimed(eng: Engine, fineract: FakeFi
     op = stuck(
         eng,
         "CLI",
-        payload={"first_name": "Jean", "last_name": "Habimana", "client_uid": "x"},
+        payload={"first_name": "Testb", "last_name": "Fakename", "client_uid": "x"},
     )
     fineract.answers[f"/clients/external-id/{op['client_uid']}"] = client_body(op["client_uid"])
     report = run(eng, fineract, NoErp())
@@ -531,7 +531,7 @@ def add_client(engine: Engine, client_uid: str) -> None:
             clients.insert().values(
                 client_uid=client_uid,
                 external_reference=f"C-{client_uid}",
-                display_name="Aline Uwase",
+                display_name="Testa Fakename",
                 status="ACTIVE",
             )
         )
