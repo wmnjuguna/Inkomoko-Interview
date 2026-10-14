@@ -8,26 +8,26 @@ This is my take-home assessment. It connects three things:
 
 The goal is to show that money moves exactly once, even with duplicate requests, timeouts, crashes and requests that arrive at the same time.
 
-> **Status:** Tiers 1 and 2 (Parts A to K) are built, tested and run on the local stack. Tier 3 (Part L) is not built. Every simulation in [SIMULATIONS.md](SIMULATIONS.md) has a `make` command, and its real output is in [evidence/](evidence/README.md).
+> **Status:** Tiers 1 and 2 (Parts A to K) are built, tested and run on the local stack. Tier 3 (Part L) is not built. Every simulation in [SIMULATIONS.md](SIMULATIONS.md) has a `make` command and its recorded result.
 
 ## What is done
 
-| Part | What | Status | Evidence |
+| Part | What | Status | Shown by |
 |---|---|---|---|
-| A | Fineract plugin: GL accounts synced from the ERP, once | Done, tested, run | `A-1.txt`, `A-2.txt`, `fineract-customization/build.log`, `fineract-customization/integration-test.log` |
-| B | Fineract setup: office, currency, role, API user, GL accounts, loan product | Done, tested, run twice | `setup-first-run.txt`, `setup-second-run.txt`, `office-and-product.txt`, `least-privilege.txt` |
-| C | Clients | Done, tested, run | `C-1.txt` |
-| D | Loan lifecycle, application to Closed | Done, tested, run | `D-1.txt` |
-| E | The Integration API, with reconciliation | Done, tested | [API.md](API.md), `templates.txt` |
-| F | Duplicate requests | Done, tested, run | `I-1.txt` |
+| A | Fineract plugin: GL accounts synced from the ERP, once | Done, tested, run | `make demo-gl-sync`, `make simulate-gl-sync-4x`, [build.log](fineract-customization/build.log), [integration-test.log](fineract-customization/integration-test.log) |
+| B | Fineract setup: office, currency, role, API user, GL accounts, loan product | Done, tested, run twice | The two setup runs below, `integration-service/tests/unit/test_setup_run.py`, `integration-service/tests/integration/test_setup_live.py`, `integration-service/tests/integration/test_least_privilege_live.py` |
+| C | Clients | Done, tested, run | `make demo-identity` |
+| D | Loan lifecycle, application to Closed | Done, tested, run | `make demo-lifecycle` |
+| E | The Integration API, with reconciliation | Done, tested | [API.md](API.md), `integration-service/tests/integration/test_templates_api.py` |
+| F | Duplicate requests | Done, tested, run | `make simulate-duplicates` |
 | G | Mock ERP, with fault switches | Done, tested | [API.md](API.md) |
-| H | Journal entries from Fineract's own split, through an outbox | Done, tested, run | `D-1.txt`, `I-3.txt` |
-| I | Concurrency: I-1, I-2a, I-2b, I-3 | Done, tested, run | `I-1.txt`, `I-2.txt`, `I-3.txt` |
-| J | Failures J-1 to J-5, recovery | Done, tested, run | `J-1.txt` to `J-5.txt`, `FIN-2026-000001.txt` |
-| K | Reconciliation, all four outcomes | Done, tested, run | `K-1.txt` |
+| H | Journal entries from Fineract's own split, through an outbox | Done, tested, run | `make demo-lifecycle`, `make simulate-concurrent-repay` |
+| I | Concurrency: I-1, I-2a, I-2b, I-3 | Done, tested, run | `make simulate-duplicates`, `make simulate-concurrent-disburse`, `make simulate-concurrent-repay` |
+| J | Failures J-1 to J-5, recovery | Done, tested, run | `make simulate-j1` to `make simulate-j5`, the FIN-2026-000001 trail in [DECISIONS.md](DECISIONS.md) |
+| K | Reconciliation, all four outcomes | Done, tested, run | `make simulate-recon` |
 | L | Stretch | Not built. See "What I chose not to build" in [DECISIONS.md](DECISIONS.md). | |
 
-The evidence files are in `evidence/`. [evidence/README.md](evidence/README.md) says what each one proves and which command makes it.
+The results of every run are written down in [SIMULATIONS.md](SIMULATIONS.md). They were captured on 2026-10-13 and 2026-10-14 on the local stack. Each can be reproduced with the `make` command listed next to it. The `make` commands are in the "Simulations" section below.
 
 ## Versions
 
@@ -91,7 +91,7 @@ It is safe to run again. A second run creates nothing:
 docker compose run --rm setup
 ```
 
-On a clean stack, the first run printed `created` for every step and `13 SYNCED (13 sent to Fineract)`. The second run printed `exists` for every step and `0 sent to Fineract`. See `evidence/setup-first-run.txt` and `evidence/setup-second-run.txt`.
+On a clean stack on 2026-10-13, the first run printed `created` for every step and `13 SYNCED (13 sent to Fineract)`. The second run printed `exists` for every step and `0 sent to Fineract`. Fineract's command log (`m_portfolio_command_source`) held 18 rows before and after the second run. `integration-service/tests/unit/test_setup_run.py` checks that a second run writes nothing new.
 
 ## Try the APIs in the browser
 
@@ -137,8 +137,8 @@ The background loop that sends journal entries to the ERP and finishes stuck req
 
 | Language | Command | What it runs |
 |---|---|---|
-| Java | `make test-java` | Builds Fineract (51 unit tests run during the build), starts it, then runs 10 integration tests against it. Details: [fineract-customization/BUILD.md](fineract-customization/BUILD.md) |
-| Python | `make test-python` | For the Mock ERP and then the Integration Service: ruff (lint and format), mypy in strict mode, then pytest. On a clean stack: Mock ERP 216 passed, Integration Service 873 passed (595 unit, 278 integration), nothing skipped (`evidence/tests.txt`). That run is older than the reliability tests (concurrency, faults and reconciliation). Those were run on their own (`evidence/tests-reliability.txt`). |
+| Java | `make test-java` | Builds Fineract (51 unit tests run during the build), starts it, then runs 10 integration tests against it. On 2026-10-14 the 10 integration tests passed against the running stack. Details: [fineract-customization/BUILD.md](fineract-customization/BUILD.md) |
+| Python | `make test-python` | For the Mock ERP and then the Integration Service: ruff (lint and format), mypy in strict mode, then pytest. Last full run on 2026-10-14: Mock ERP 216 passed, Integration Service 925 passed, with ruff and mypy clean in both. |
 
 The Python tests need the running stack and two empty test databases: `erp_test` and `integration_test`. They rebuild their tables on every run. A new data volume creates both by itself. On an older volume, create them once:
 
@@ -194,8 +194,7 @@ Each scenario has a `make` command. It prints the state before and after, in the
 ├── mock-erp/                      Python: the Mock ERP (Flask, Postgres, small web UI)
 ├── fault-proxy/                   Python: the fault proxy in front of Fineract (failure simulations only)
 ├── scripts/                       demos and simulations
-├── postman/collection.json        every partner endpoint, with fake data
-└── evidence/                      saved output of real runs (index: evidence/README.md)
+└── postman/collection.json        every partner endpoint, with fake data
 ```
 
 ## Other documents
@@ -214,7 +213,7 @@ Each scenario has a `make` command. It prints the state before and after, in the
 
 The brief allows AI tools. I used Claude Code (Anthropic) heavily: to read the brief, design the system, write the code and the tests, run the simulations and draft these documents. I directed the work, made the decisions and reviewed the results. I can explain and change any part.
 
-Every claim in these documents should be backed by a real run in `evidence/`. Where an example comes from a run whose output was not kept, the document says so. All data is fake: test names, made-up ids and references like `FIN-2026-000001`.
+Every result in these documents was copied from a real run. The raw output is not kept in the repo. The simulations can be run again with their `make` commands. Where an example comes from a run with no `make` command, the document says so. All data is fake: test names, made-up ids and references like `FIN-2026-000001`.
 
 ## Not done
 
