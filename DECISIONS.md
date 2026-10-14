@@ -34,7 +34,7 @@ Writes to one loan also wait their turn on a lock held in the database. Without 
 
 The caller waits for Fineract, because once Fineract says yes the money has moved and they need to know. The ERP entry goes into an `outbox` table in the same transaction that marks the request done, and each worker sends due rows every five seconds. An ERP outage therefore blocks nobody. The price is a poll every five seconds, even when nothing is waiting.
 
-**Why no Redis and no Kafka.** Neither adds correctness here. Fineract keeps its cache in its own memory, and its shared-cache mode is not supported in 1.15, so Redis would serve only my services. Their shared state, the idempotency rows, the per-loan lock and the outbox, has to be durable and commit with the operation. Postgres does that; Redis cannot. Fineract can publish events to Kafka, but they are off by default and go out after the write, at least once, from its `m_external_event` table. They cannot stop a duplicate, and every consumer would need its own deduplication. So I enforce idempotency at the write, over REST, with the key above and a lookup before any retry, and for GL accounts the plugin enforces it inside Fineract's own transaction. The ERP leg keeps the asynchronous pattern through the outbox, without the broker.
+**Why no Redis and no Kafka.** Fineract keeps its cache in its own memory, and its shared-cache mode is not supported in 1.15, so Redis would serve only my services. Their shared state, the idempotency rows, the per-loan lock and the outbox, has to be durable and commit with the operation. Postgres does that; Redis cannot. Fineract can publish events to Kafka, but they are off by default and go out after the write, at least once, from its `m_external_event` table. They cannot stop a duplicate, and every consumer would need its own deduplication. So I enforce idempotency at the write, over REST, with the key above and a lookup before any retry, and for GL accounts the plugin enforces it inside Fineract's own transaction. The ERP leg keeps the asynchronous pattern through the outbox, without the broker.
 
 ## Never retry blind
 
@@ -119,10 +119,5 @@ Time went to the required tiers, so I left out:
 ## Known weaknesses
 
 - Reconciliation reads every loan I know. Fine for hundreds, not thousands.
-- Test entries in the ERP show as `MISSING_IN_FINERACT` in a whole-day report; the K-1 run had 72 of them.
-- A reference ending in `:REV` is not refused yet.
-- Reversals are unit-tested only.
 - GL sync only creates. A renamed ERP account is warned about, not applied.
-- Operator routes accept any client-system key. They need an operator key of their own.
-- Any client-system key can read or pay into any loan.
-- A repayment finished by recovery can report a later `outstanding_after` than the one at the time.
+- One kind of API key. Operator routes and other clients' loans would need keys of their own.
