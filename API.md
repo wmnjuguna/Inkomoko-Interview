@@ -1,6 +1,6 @@
 # API
 
-> **Status:** every endpoint below is built and tested. The examples come from real runs on the local stack. Where a file in [evidence/](evidence/README.md) holds the run, it is named. A few examples come from earlier runs whose output was not kept. They are marked as such.
+> **Status:** every endpoint below is built and tested. The examples come from real runs on the local stack, on 2026-10-13 and 2026-10-14. Where an example comes from a simulation, the simulation is named, and its `make` command in [SIMULATIONS.md](SIMULATIONS.md) reproduces it. A few examples come from earlier runs with no `make` command. They are marked as such.
 
 ## OpenAPI specs
 
@@ -173,14 +173,14 @@ We never pass Fineract's error text on, because it can hold Fineract's internal 
 
 ### Error format
 
-Every error has this shape. A real answer (`evidence/C-1.txt`):
+Every error has this shape. A real answer, from C-1 (`make demo-identity`):
 
 ```json
 { "error": { "code": "IDEMPOTENCY_CONFLICT", "correlation_id": "c-demo-54e587-008", "details": {},
              "message": "external_reference C1-CLI-54E587-edf5 was already used with different data." } }
 ```
 
-A `422 VALIDATION_ERROR` for a field names the field and the problem in `message`, as `field: problem`. `details.problems` lists every problem found. The same shape is used for a bad body (Pydantic) and for a rule taken from a Fineract template. A real answer (`evidence/templates.txt`):
+A `422 VALIDATION_ERROR` for a field names the field and the problem in `message`, as `field: problem`. `details.problems` lists every problem found. The same shape is used for a bad body (Pydantic) and for a rule taken from a Fineract template. A real answer, from a run of the form endpoints on 2026-10-13:
 
 ```json
 { "error": { "code": "VALIDATION_ERROR", "correlation_id": "c-docs-…",
@@ -316,7 +316,7 @@ Creates the client in Fineract and makes it active, in one call. Fineract stores
 | `first_name`, `last_name` | Required. 1 to 50 characters each: letters, joined by single spaces, `'`, `.` or `-`. |
 | Anything else | `422` |
 
-Real run (`evidence/C-1.txt`):
+Real run, from C-1 (`make demo-identity`):
 
 ```
 POST /api/clients {"client_uid": "DEMO-797009", "external_reference": "C1-CLI-54E587-edf5", "first_name": "Test", "last_name": "Client One"}
@@ -353,14 +353,14 @@ Applies for a loan on the SME Asset Finance product. The principal range, term, 
 | `principal` | Required. Whole RWF, inside the range in Fineract's loan template (100,000 to 50,000,000 today), else `422`. |
 | `expected_disbursement_date` | Optional, `YYYY-MM-DD`, today or later in Kigali. Default today. |
 
-A principal outside the range is refused after the template is read. The request is saved as `FAILED`, and no loan is sent to Fineract (`evidence/templates.txt`):
+A principal outside the range is refused after the template is read. The request is saved as `FAILED`, and no loan is sent to Fineract. A real answer, from a run of the form endpoints on 2026-10-13:
 
 ```
 POST /api/loans {"client_uid": "TPL-000001", "external_reference": "P25-APP-TPL-BIG", "principal": 60000000}
 -> 422 {"error": {"code": "VALIDATION_ERROR", "details": {"problems": [{"field": "principal", "problem": "must be between 100000 and 50000000 RWF (the product range)"}]}, "message": "principal: must be between 100000 and 50000000 RWF (the product range)", ...}}
 ```
 
-Real run (`evidence/D-1.txt`):
+Real run, from D-1 (`make demo-lifecycle`):
 
 ```
 POST /api/loans {"client_uid": "DEMO-371457", "external_reference": "APP-B63B2F-bd7f", "principal": 5000000}
@@ -381,9 +381,9 @@ POST /api/loans/LN-2026-000003/approve {"approved_on": "2026-10-14", "external_r
 -> 422 {"error": {"code": "VALIDATION_ERROR", "details": {"problems": [{"field": "approved_on", "problem": "cannot be in the future (Kigali date)"}]}, "message": "approved_on: cannot be in the future (Kigali date)", ...}}
 ```
 
-A date after the expected disbursement date gets `422` with the problem `must be on or before the expected disbursement date <date>`. Through the partner API, that case can only happen once a loan's expected date is in the past, so it was not run on the one-day stack. A unit test covers our check. Fineract's own refusal was run straight on Fineract (part 12 of `evidence/templates.txt`).
+A date after the expected disbursement date gets `422` with the problem `must be on or before the expected disbursement date <date>`. Through the partner API, that case can only happen once a loan's expected date is in the past, so it was not run on the one-day stack. A unit test covers our check. Fineract's own refusal was run straight on Fineract on 2026-10-13: [DECISIONS.md](DECISIONS.md) has the details.
 
-The approval is from `evidence/D-1.txt`. The `409` is from an earlier run whose output was not kept:
+The approval is from D-1 (`make demo-lifecycle`). The `409` is from an earlier run whose output was not kept:
 
 ```
 POST /api/loans/LN-2026-000001/approve {"external_reference": "APR-B63B2F-2429"}
@@ -423,14 +423,14 @@ Pays out the loan once, for the amount in Fineract's disbursement template. That
 | `external_reference` | Required |
 | `transaction_date` | Optional, `YYYY-MM-DD`, not in the future (Kigali). Default **today**, the day the money moves. It is not the loan's expected disbursement date. |
 
-A payout before the expected disbursement date is allowed. A loan applied for with `expected_disbursement_date` 2026-10-20 was paid out on 2026-10-13 (`evidence/templates.txt`, part 10):
+A payout before the expected disbursement date is allowed. A loan applied for with `expected_disbursement_date` 2026-10-20 was paid out on 2026-10-13. A real answer, from a run of the form endpoints on 2026-10-13:
 
 ```
 POST /api/loans/LN-2026-000004/disburse {"external_reference": "P25-DSB-TPL-0002"}
 -> 200 {"amount": 1000000, ..., "loan_status": "ACTIVE", "status": "ERP_PENDING", "transaction_date": "2026-10-13", "type": "DISBURSEMENT"}
 ```
 
-Real run (`evidence/D-1.txt`):
+Real run, from D-1 (`make demo-lifecycle`):
 
 ```
 POST /api/loans/LN-2026-000001/disburse {"external_reference": "DSB-B63B2F-0d4d"}
@@ -441,13 +441,13 @@ POST /api/loans/LN-2026-000001/disburse {"external_reference": "DSB-B63B2F-0d4d"
 
 | Situation | Response |
 |---|---|
-| The same request 4 times in a row (`evidence/I-1.txt`) | `200` four times, identical bodies. One Fineract disbursement, one ERP entry. |
+| The same request 4 times in a row (I-1, `make simulate-duplicates`) | `200` four times, identical bodies. One Fineract disbursement, one ERP entry. |
 | Another reference for a loan already paid out | `409 LOAN_ALREADY_DISBURSED`, `details.holder_status` |
 | The loan is not approved yet | `422 VALIDATION_ERROR` |
 | Fineract refuses because the loan is already paid out outside our service | `409 LOAN_ALREADY_DISBURSED` |
 | Unknown loan | `404 LOAN_NOT_FOUND` |
 
-One of the nine refused requests in I-2b, sent while the winner was still running (`evidence/I-2.txt`):
+One of the nine refused requests in I-2b, sent while the winner was still running (`make simulate-concurrent-disburse`):
 
 ```
 POST /api/loans/LN-2026-000014/disburse, 10 at once, each with its own external_reference
@@ -472,7 +472,7 @@ POST /api/loans/LN-2026-000003/repayments {"amount": 100000, "external_reference
 -> 422 {"error": {"code": "VALIDATION_ERROR", "details": {"problems": [{"field": "payment_type", "problem": "must be one of: Money Transfer"}]}, "message": "payment_type: must be one of: Money Transfer", ...}}
 ```
 
-Real run (`evidence/D-1.txt`):
+Real run, from D-1 (`make demo-lifecycle`):
 
 ```
 POST /api/loans/LN-2026-000001/repayments {"external_reference": "RPY1-B63B2F-6b79", "amount": 500000}
@@ -494,7 +494,7 @@ POST /api/loans/LN-2026-000001/repayments {"amount": 5000, "external_reference":
 
 These three reads tell a partner what to send, before it sends it. They read Fineract's own templates live and save nothing. The same templates are read again by the write itself, so the form and the write follow the same rules.
 
-Every form has `fields`. Each field has `name`, `type`, `required`, `read_only`, `default`, `minimum`, `maximum`, `multiple_of`, `pattern`, `max_length`, `options` and `description`. A `read_only` field is shown for information: Fineract or the product sets it, so do not send it. An option's `value` is a name or a code, never a Fineract id. All examples below are real answers from `evidence/templates.txt`, shortened.
+Every form has `fields`. Each field has `name`, `type`, `required`, `read_only`, `default`, `minimum`, `maximum`, `multiple_of`, `pattern`, `max_length`, `options` and `description`. A `read_only` field is shown for information: Fineract or the product sets it, so do not send it. An option's `value` is a name or a code, never a Fineract id. All examples below are real answers from a run of the form endpoints on 2026-10-13, shortened. They have no `make` command. `integration-service/tests/integration/test_templates_api.py` checks the same endpoints against the live Fineract.
 
 #### `GET /api/clients/template`
 
@@ -564,7 +564,7 @@ An unknown loan gets `404 LOAN_NOT_FOUND`. An unknown step gets `422` with the p
 
 ### `GET /api/transactions/{external_reference}`
 
-Every request this partner sent with that reference, with its full history. Another partner gets `404` for the same reference. Real answer (`evidence/FIN-2026-000001.txt`):
+Every request this partner sent with that reference, with its full history. Another partner gets `404` for the same reference. Real answer, from 2026-10-14. [DECISIONS.md](DECISIONS.md) shows the log lines of the same request:
 
 ```json
 { "external_reference": "FIN-2026-000001",
@@ -660,7 +660,7 @@ No Fineract numeric id appears in the answer.
 
 It is all or nothing. If one read fails, there is no report. A report built from half the data would show false `MISSING` items.
 
-**A real run** (K-1, `evidence/K-1.txt`). Five items were planted on purpose: a disbursement and a repayment that match, a repayment whose ERP entry has the wrong split, a repayment made straight in Fineract with its own `externalId`, and an ERP entry with no Fineract transaction.
+**A real run** (K-1, `make simulate-recon`, on 2026-10-14). Five items were planted on purpose: a disbursement and a repayment that match, a repayment whose ERP entry has the wrong split, a repayment made straight in Fineract with its own `externalId`, and an ERP entry with no Fineract transaction.
 
 ```
 POST /api/reconciliation {"references": ["DSB:K1-DSB-FC9343-8aca", "RPY:K1-RPY-FC9343-a98a", "RPY:K1-MIS-FC9343-128c", "MANUAL-FC9343", "RPY:K1-FC9343-GHOST"]}
@@ -690,7 +690,7 @@ POST /api/reconciliation {"references": ["DSB:K1-DSB-FC9343-8aca", "RPY:K1-RPY-F
     { "key": "RPY:K1-RPY-FC9343-a98a", "outcome": "MATCHED", "reasons": [], "...": "..." } ] }
 ```
 
-The items are shortened. `evidence/K-1.txt` has them in full, and a second report for the whole day. `generated_at` and `compared_types` are not printed by the script.
+The items are shortened. The script also prints them in full, and a second report for the whole day. That day report counted `{'AMOUNT_MISMATCH': 2, 'IN_FLIGHT': 0, 'MATCHED': 28, 'MISSING_IN_ERP': 4, 'MISSING_IN_FINERACT': 72, 'total': 106}`, because other runs had used the same stack that day. `generated_at` and `compared_types` are not printed by the script.
 
 ## Mock ERP
 
