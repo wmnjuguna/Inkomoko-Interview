@@ -2,7 +2,7 @@
 
 One decision per line: what I chose and why. The diagrams are in [ARCHITECTURE.md](ARCHITECTURE.md), the endpoints in [API.md](API.md), and the runs behind each claim in [SIMULATIONS.md](SIMULATIONS.md).
 
-1. **Fineract is extended with a plugin, not patched.** Fineract takes custom modules in its `custom/` folder. Mine keeps the ERP's reference on each GL account, which Fineract 1.15 has no field for, and refuses a second account for the same reference. Patching Fineract's own code would make every upgrade a merge, so upstream stays a pinned 1.15.0 submodule.
+1. **The change is inside Fineract, delivered as a plugin.** It does everything a direct change to Fineract's core would do: a new table through Liquibase, a new permission, a new command in Fineract's own command pipeline, and a call into Fineract's own GL service. I packaged it as a module in Fineract's `custom/` folder instead of editing the core, so the upstream 1.15.0 source stays untouched and an upgrade is a rebuild, not a merge. Fineract 1.15 has no field for an outside reference on a GL account; this module adds one and refuses a second account for the same reference.
 
 2. **The plugin runs inside Fineract's own transaction.** Its one write, `PUT /v1/erp-integration/accounts/{erpReference}`, takes the same path as Fineract's own commands, so Fineract checks the permission and writes its audit record, and the GL account, my reference row and that record commit together or not at all. A database lock on the reference makes ten parallel requests give one account.
 
