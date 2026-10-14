@@ -1,6 +1,6 @@
 # Simulations
 
-I wrote these simulations so nobody has to take the design on trust: each one calls the Integration Service the way a client system would, reads Fineract, the Mock ERP and our own database before and after, and prints the brief's nine evidence points. The results come from runs on 2026-10-13 and 2026-10-14 on the local stack and can be reproduced with the listed `make` commands after `make up` (see [README.md](README.md)); a fresh run makes new loan numbers and references, but the counts and the result line should not change. The mechanisms are in [ARCHITECTURE.md](ARCHITECTURE.md), the trade-offs in [DECISIONS.md](DECISIONS.md) and the endpoints in [API.md](API.md).
+I wrote these simulations so nobody has to take the design on trust: each one calls the Integration Service the way a client system would, reads Fineract, the Mock ERP and our own database before and after, and prints the brief's nine evidence points. The results come from runs on 2026-10-13 and 2026-10-14 on the local stack, and every script passed again on 2026-10-15. They can be reproduced with the scripts in the table, run as `uv run --project integration-service python scripts/<file>` once the stack is up (see [README.md](README.md)); a fresh run makes new loan numbers and references, but the counts and the result line should not change. The mechanisms are in [ARCHITECTURE.md](ARCHITECTURE.md), the trade-offs in [DECISIONS.md](DECISIONS.md) and the endpoints in [API.md](API.md).
 
 ## Where the failures hit
 
@@ -8,15 +8,15 @@ Every money movement takes one path, and the five J drills each break it at a di
 
 ```mermaid
 flowchart LR
-    P[Client system] --> S[Integration Service]
-    S -- "1. write" --> F[Fineract]
-    S -- "2. one transaction: FINERACT_DONE, saved answer, outbox row" --> O[(Outbox)]
-    O -- "3. send" --> E[Mock ERP]
-    J2([J-2 Fineract down]) -.-> F
-    J3([J-3 Fineract times out after the write]) -.-> F
-    J5([J-5 service crashes after step 2]) -.-> S
-    J1([J-1 ERP down]) -.-> E
-    J4([J-4 ERP times out after it saved]) -.-> E
+ P[Client system] --> S[Integration Service]
+ S -- "1. write" --> F[Fineract]
+ S -- "2. one transaction: FINERACT_DONE, saved answer, outbox row" --> O[(Outbox)]
+ O -- "3. send" --> E[Mock ERP]
+ J2([J-2 Fineract down]) -.-> F
+ J3([J-3 Fineract times out after the write]) -.-> F
+ J5([J-5 service crashes after step 2]) -.-> S
+ J1([J-1 ERP down]) -.-> E
+ J4([J-4 ERP times out after it saved]) -.-> E
 ```
 
 ## The runs at a glance
