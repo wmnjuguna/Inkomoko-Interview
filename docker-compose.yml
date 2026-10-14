@@ -208,5 +208,19 @@ services:
       retries: 20
       start_period: 10s
 
+  # The plugin's Java integration tests, run against the started stack:
+  #   docker compose --profile test run --rm java-tests
+  java-tests:
+    build:
+      context: ./fineract-customization
+      target: integration-test
+    image: fineract-inkomoko-it:1.15.0
+    profiles: ["test"]
+    environment:
+      FINERACT_URL: http://fineract:8080
+    depends_on:
+      fineract:
+        condition: service_healthy
+
 volumes:
   pgdata:
