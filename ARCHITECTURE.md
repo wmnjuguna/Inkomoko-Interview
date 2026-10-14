@@ -1,6 +1,6 @@
 # Architecture
 
-> **Status:** the Fineract plugin, the Mock ERP, the Fineract setup step and the Integration Service are built and tested: GL sync, clients, loans, disbursements, repayments, duplicate protection, journal entries through an outbox, and recovery. They were run on a clean stack (`evidence/P2/`), and again after the loan steps moved to Fineract's templates (`evidence/P2.5/`). Reconciliation (Part K) is still a design. Sections marked *planned* describe what I will build.
+> **Status:** everything below is built and tested: the Fineract plugin, the Mock ERP, the setup step, the Integration Service (GL sync, clients, loans, payouts, repayments, duplicate protection, journal entries through an outbox, recovery and reconciliation) and the fault proxy used by the failure simulations. Each simulation was run on the live stack. The output is in [evidence/](evidence/README.md).
 
 ## The parts
 
@@ -10,6 +10,7 @@
 | **Integration Service** | Python 3.13, Flask | The only API that partners call. It syncs the ERP chart of accounts to Fineract, keeps track of every request, stops duplicates, calls Fineract and sends journal entries to the ERP. |
 | **Setup** | Python (same image as the Integration Service) | A one-shot job that prepares Fineract: office, currency, role, API user, GL accounts and the loan product. |
 | **Mock ERP** | Python 3.13, Flask | The accounting system. It owns the chart of accounts and stores journal entries. It can pretend to be down or slow, for testing. It has a small web UI. |
+| **Fault proxy** | Python 3.13, standard library only | Sits between the Integration Service and Fineract. It passes everything on, unless a failure simulation switches a fault on. |
 | **PostgreSQL 18.3** | — | One server. Each part has its own database and its own user: `fineract_tenants` and `fineract_default` for Fineract, `integration_db`, `erp_db`. |
 
 There is no message queue, cache or separate worker. [DECISIONS.md](DECISIONS.md) explains why.
@@ -19,14 +20,16 @@ flowchart LR
   P[Financing partner] -->|REST, business IDs only| IS
   subgraph compose [docker compose]
     IS[Integration Service<br/>Flask]
+    FP[Fault proxy<br/>8081 data · 8092 admin]
     F[Fineract 1.15.0<br/>+ glsync plugin]
     E[Mock ERP<br/>Flask]
     DB[(PostgreSQL 18.3<br/>fineract_tenants · fineract_default<br/>integration_db · erp_db)]
   end
-  IS -->|clients, loans, disbursements, repayments<br/>externalId = our reference| F
+  IS -->|clients, loans, disbursements, repayments<br/>externalId = our reference| FP
+  FP --> F
   IS -->|journal entries, via an outbox| E
   E -.->|chart of accounts| IS
-  IS -->|GL sync: PUT /v1/erp-integration/accounts/{erpReference}| F
+  IS -->|GL sync: PUT /v1/erp-integration/accounts/{erpReference}| FP
   IS --- DB
   F --- DB
   E --- DB
@@ -39,7 +42,7 @@ Every request carries an `X-Correlation-ID`, so one request can be followed thro
 1. **GL accounts (Part A).** The Integration Service reads the ERP's chart of accounts. For each account it calls my Fineract plugin. The plugin creates the matching GL account in Fineract, once. The setup step runs this before it creates the loan product. Details are in "GL sync" below.
 2. **Partner requests (Parts C–F).** The Integration Service first saves the request in its own database. Then it calls Fineract and sends our reference as Fineract's `externalId`. Then it saves the result. Details are in "Partner requests" below.
 3. **Journal entries (Part H).** After a disbursement or a repayment, the Integration Service reads Fineract's transaction back and takes Fineract's own split (principal, interest, overpayment). It builds the journal entry from that. It saves the entry in an outbox table, in the same database transaction as the Fineract result. A background loop sends it to the ERP and retries if the ERP is down.
-4. **Reconciliation (Part K).** *(planned)* It reads transactions from Fineract and journal entries from the ERP. It matches them by `external_reference`. It reports each one as `MATCHED`, `MISSING_IN_ERP`, `MISSING_IN_FINERACT` or `AMOUNT_MISMATCH`. It never changes anything.
+4. **Reconciliation (Part K).** `POST /api/reconciliation` reads the transactions of our loans from Fineract and the journal entries from the ERP. It matches them on one key and reports each one as `MATCHED`, `MISSING_IN_ERP`, `MISSING_IN_FINERACT`, `AMOUNT_MISMATCH` or `IN_FLIGHT`. It never changes anything. Details are in "Reconciliation" below.
 
 ## The Mock ERP
 
@@ -90,7 +93,7 @@ It is built the same way as the Mock ERP: Flask 3 and flask-openapi3 with Pydant
 4. The work is done. Every error, even a crash, comes back as `{"error": {"code", "message", "correlation_id", "details"}}`.
 5. One JSON log line is written, with the correlation id, the partner, the status and the time taken.
 
-Every status change of a request also writes a JSON log line with `correlation_id`, `external_reference`, `client_uid`, `loan_reference`, `fineract_transaction_id`, `erp_transaction_id`, `status` and `timestamp`. Fineract's transaction id is only in the logs, never in a response. The outbox keeps the request's correlation id, so the ERP send seconds later carries it too (`evidence/P2/log-trail.txt`).
+Every status change of a request also writes a JSON log line with `correlation_id`, `external_reference`, `client_uid`, `loan_reference`, `fineract_transaction_id`, `erp_transaction_id`, `status` and `timestamp`. Fineract's transaction id is only in the logs, never in a response. The outbox keeps the request's correlation id, so the ERP send seconds later carries it too (`evidence/FIN-2026-000001.txt`).
 
 The service logs in to Fineract as `integration-api`, a user with only the permissions it needs. It never uses the admin user.
 
@@ -193,11 +196,11 @@ The entry date is Fineract's transaction date. The ERP reference is the op key, 
 
 The function does not guess. It gives no entry, and the operation goes to `NEEDS_RECONCILIATION`, when the transaction has fees, penalties or unrecognized income, is reversed, has portions that do not add up to the amount, has the wrong type or `externalId`, is not in RWF, or has a fraction of a franc. The Fineract success is still saved, and the outbox row is kept with the reason but never sent.
 
-In D-1 the ERP totals for each account equalled Fineract's own GL entries for the loan after every stage (`evidence/P2/D-1.txt`).
+In D-1 the ERP totals for each account equalled Fineract's own GL entries for the loan after every stage (`evidence/D-1.txt`).
 
 ## A disbursement, step by step
 
-This is what `services/money.py` does. The log lines of the D-1 disbursement are in `evidence/P2/log-trail.txt`.
+This is what `services/money.py` does. The log lines of one real disbursement are in `evidence/FIN-2026-000001.txt`.
 
 ```mermaid
 sequenceDiagram
@@ -279,7 +282,7 @@ The Fineract database starts empty. Fineract creates its own tables when it star
 | Op key | The Integration Service: `<type>:<external_reference>` | `DSB:FIN-2026-000123`. Unique in `operations`. |
 | Fineract `Idempotency-Key` header | The Integration Service: `<op key>:<attempt>` | `DSB:FIN-2026-000123:1` |
 | Fineract loan transaction `externalId` | The op key, for disbursements and repayments | `DSB:FIN-2026-000123`. It never changes. |
-| ERP journal entry `external_reference` | The op key | `DSB:FIN-2026-000123`. A reversal would be `DSB:FIN-2026-000123:REV` (*planned*). |
+| ERP journal entry `external_reference` | The op key | `DSB:FIN-2026-000123`. A reversal would be `DSB:FIN-2026-000123:REV`. Posting reversals is not built. Reconciliation already knows this shape. |
 | Fineract client `externalId` | The partner's `client_uid` | `SME-000001` |
 | Fineract loan `externalId` | Our `loan_reference` | `LN-2026-000001` |
 
@@ -332,7 +335,7 @@ stateDiagram-v2
   NEEDS_RECONCILIATION --> COMPLETED: fixed by an explicit repair (no repair call is built yet)
 ```
 
-The real history of a disbursement, from `GET /api/transactions/DSB-BE75C7-74d4` in D-1: `RECEIVED -> FINERACT_PENDING -> FINERACT_DONE -> ERP_PENDING -> COMPLETED`.
+The real history of a disbursement, from `GET /api/transactions/DSB-B63B2F-0d4d` in D-1 (`evidence/D-1.txt`): `RECEIVED -> FINERACT_PENDING -> FINERACT_DONE -> ERP_PENDING -> COMPLETED`.
 
 GL sync has its own simple status: `SYNC_PENDING`, then `SYNCED` or `FAILED`. A `FAILED` account is tried again on the next sync, with a new attempt number.
 
@@ -342,9 +345,9 @@ GL sync has its own simple status: `SYNC_PENDING`, then `SYNCED` or `FAILED`. A 
 
 | Layer | How | Where | Shown by |
 |---|---|---|---|
-| L1 | Same reference: the saved answer is returned, a running one gets `202` | Unique (`op_type`, `external_reference`) in `operations`, `begin()` in `services/operations.py` | I-1: 4 requests, 1 Fineract disbursement, 1 ERP entry, 1 operation (`evidence/P2/I-1.txt`). Test `test_ten_requests_with_one_reference_pay_out_once`. |
-| L2 | Only one live disbursement per loan. Another reference gets `409 LOAN_ALREADY_DISBURSED`. | Partial unique index `operations_one_live_disbursement` | Tests `test_ten_references_for_one_loan_pay_out_once` and `test_another_reference_for_the_same_loan_is_409` |
-| L3 | A Postgres advisory lock per loan around every Fineract write to it (approve, disburse, repay, and recovery of them). Waits up to 30 s. | `services/loan_locks.py` | Test `test_parallel_repayments_each_land_once`. It fails when the lock is removed, because Fineract then loses parallel writes to its own `409`. |
+| L1 | Same reference: the saved answer is returned, a running one gets `202` | Unique (`op_type`, `external_reference`) in `operations`, `begin()` in `services/operations.py` | I-1: 4 requests, 1 Fineract disbursement, 1 ERP entry, 1 operation (`evidence/I-1.txt`). I-2a: 10 at once, 1 of each (`evidence/I-2.txt`). Test `test_ten_requests_with_one_reference_pay_out_once`. |
+| L2 | Only one live disbursement per loan. Another reference gets `409 LOAN_ALREADY_DISBURSED`. | Partial unique index `operations_one_live_disbursement` | I-2b: 10 references at once, one `200` and nine `409`, no row saved for the nine (`evidence/I-2.txt`). Tests `test_ten_references_for_one_loan_pay_out_once` and `test_another_reference_for_the_same_loan_is_409` |
+| L3 | A Postgres advisory lock per loan around every Fineract write to it (approve, disburse, repay, and recovery of them). Waits up to 30 s. | `services/loan_locks.py` | I-3: 10 repayments at once, each of the 6 references applied once (`evidence/I-3.txt`). Test `test_parallel_repayments_each_land_once`. It fails when the lock is removed, because Fineract then loses parallel writes to its own `409`. |
 | L4 | Fineract's unique transaction `externalId` (`DSB:<ref>`), plus the `Idempotency-Key` per attempt | Fineract | The probe: a second transaction with the same `externalId` gets `400 value.must.be.unique` and nothing is created |
 | L5 | Fineract's loan state: a single-tranche loan is paid out once | Fineract | The probe: 5 disbursements at once with different keys gave 1 success and 4 `403`. Test `test_fineract_refuses_a_loan_paid_out_elsewhere_and_we_say_409`: a loan paid out outside the service is refused by Fineract, and we answer `409 LOAN_ALREADY_DISBURSED`. |
 
@@ -352,4 +355,54 @@ All five are enforced. L1 to L3 only cover requests that come through us. L5 cov
 
 Repayments use L1, L3 and L4. A loan can have many repayments, so L2 does not apply. They still go one at a time per loan.
 
-The concurrency simulations I-2a, I-2b and I-3 are not run yet. The tests above cover the same cases.
+## The fault proxy (Part J)
+
+The failure simulations need Fineract to fail in exact ways. The fault proxy does that. It is a small Python program in `fault-proxy/`, with no packages outside the standard library. It runs as its own container.
+
+- **Port 8081 (data).** The Integration Service reaches Fineract only through this port (`FINERACT_BASE_URL` in `docker-compose.yml`). With no fault on, it passes every request on unchanged.
+- **Port 8092 (admin).** `GET /health`, and `GET`, `PUT` and `DELETE /admin/faults`. The fault calls need the `X-API-Key` header (`FAULT_PROXY_API_KEY` in `.env`).
+- Both ports are only open on `127.0.0.1`.
+
+| Mode | What the Integration Service sees |
+|---|---|
+| `off` | Everything passes |
+| `down` | The data port stops listening. A new connection is refused, so the caller knows nothing was sent. Used by J-2. |
+| `timeout_after_send` | Reads pass. The next write whose path holds `path_contains` goes to Fineract, and Fineract's answer is read and thrown away. The caller waits `delay_seconds` and gets no answer. Right after that, the proxy goes down, so the caller's lookup fails too, like a cut network. It stays down until `DELETE`. Used by J-3. |
+| `delay` | Every request waits `delay_seconds`, then passes |
+
+The state lives in one process, so every request sees the same switch.
+
+## The crash hook (J-5)
+
+J-5 needs the service to die at one exact moment: right after it saved `FINERACT_DONE` and the outbox row, before the ERP call. `faults.py` does this.
+
+- It is off unless `FAULT_CRASH_AFTER_FINERACT_DONE` is set. Its value is an `external_reference` prefix, like `J5-`, not a switch. Only requests whose reference starts with it crash. Other traffic is never hit.
+- Nothing in `.env.example` sets it. The J-5 script sets it for one run and clears it at the end.
+- When it fires, it kills the gunicorn master with `SIGKILL` and then exits. That is a hard stop, like a power cut. Gunicorn cannot just start a new worker. The container stops, and compose starts it again (`restart: unless-stopped`).
+- When the hook is on, the service logs a warning at start-up.
+
+## Reconciliation (Part K)
+
+`POST /api/reconciliation` takes either a date range (`from` and `to`, at most 31 days) or a list of up to 100 references. The code is in `services/reconciliation.py`. It reads three sources:
+
+1. **Fineract.** Every transaction of every loan in our `loans` table (`GET /loans/external-id/{loan}?associations=transactions`, 8 reads at a time). Only `DISBURSEMENT` and `REPAYMENT` are compared. Accruals and other types are only counted, under `not_compared`.
+2. **The ERP.** `GET /api/journal-entries` by date range or by reference. Then one more read by reference for any Fineract key the first list did not have, in case the ERP entry has another date.
+3. **Our tables.** The operation status and the outbox status for each key. This tells "not sent yet" apart from "missing".
+
+**The key** is the op key, like `RPY:FIN-2026-000007`. It is the Fineract transaction's `externalId` and the ERP entry's `external_reference`, so no lookup table is needed. A transaction made straight in Fineract has a foreign `externalId`, or none. It is matched on that value as it is.
+
+**Outcomes for each key:**
+
+| Outcome | When |
+|---|---|
+| `MATCHED` | The ERP entry equals the entry our Part H mapping builds from Fineract's own transaction: same lines per account and side, same source, same date |
+| `AMOUNT_MISMATCH` | Both sides exist but differ. Each difference is one line in `reasons`. |
+| `MISSING_IN_ERP` | In Fineract, not in the ERP, and not on its way |
+| `MISSING_IN_FINERACT` | In the ERP, but no transaction of a loan we know has that `externalId` |
+| `IN_FLIGHT` | Not in the ERP yet, but our operation is `FINERACT_PENDING`, `FINERACT_DONE` or `ERP_PENDING` with its outbox row unsent. The outbox will send it, so it is not missing. |
+
+**Reversals.** Posting reversals is not built, but reconciliation handles the shape. A reversed Fineract transaction expects two ERP entries: `<key>` with the original lines, and `<key>:REV` with the opposite lines. Each is compared on its own. If the ERP has neither, both sides net to zero, and that is one `MATCHED` item with that reason. An ERP `<key>:REV` whose Fineract transaction is not reversed is `MISSING_IN_FINERACT`. Unit tests cover this. It was not run live.
+
+**All or nothing.** If Fineract or the ERP cannot be read, the call fails with `502`, `503` or `504`. A half-read report would show false `MISSING` items. A loan in our table that Fineract does not know is only a warning.
+
+The report is not stored. Each call reads the sources again. K-1 planted all four outcomes and got them (`evidence/K-1.txt`).
