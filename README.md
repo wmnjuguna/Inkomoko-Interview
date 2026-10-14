@@ -108,7 +108,13 @@ Five steps take you from a cold start to a reconciled loan. Ports bind to this c
 ![Mock ERP Swagger](docs/images/erp-swagger.png)
 *The Mock ERP in Swagger.*
 
-**4. Call the APIs from Postman.** I put every call a reviewer needs into one collection, in the order to make them, with a test on each response. Import [postman/collection.json](postman/collection.json) and [postman/local.postman_environment.json](postman/local.postman_environment.json), pick the **Local stack** environment, and run the folders top to bottom with the Collection Runner, or click through one request at a time. Each run makes up its own client and references, so you can run it as often as you like.
+**4. Call the APIs from Postman.** I put every call a reviewer needs into one collection, in the order to make them, with a test on each response. To load it:
+
+1. In Postman, click **Import** (top left) and drop in [postman/collection.json](postman/collection.json) and [postman/local.postman_environment.json](postman/local.postman_environment.json). You get a collection called **Inkomoko Fineract integration** and an environment called **Local stack**.
+2. In the environment picker (top right) choose **Local stack**. It holds the three local addresses and the placeholder keys, so nothing else needs setting.
+3. Open the collection and go folder by folder: click a request, press **Send**, and read the **Test Results** tab under the response. To run everything at once, right-click the collection and choose **Run collection**; 37 requests take about half a minute.
+
+Each run makes up its own client and references, so you can run it as often as you like.
 
 | Folder | What it shows |
 |---|---|
