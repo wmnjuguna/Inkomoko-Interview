@@ -1,3 +1,4 @@
 [submodule "fineract-upstream"]
 	path = fineract-customization/fineract
 	url = https://github.com/apache/fineract.git
+	shallow = true
