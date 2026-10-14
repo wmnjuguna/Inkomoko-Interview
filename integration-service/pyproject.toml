@@ -3,6 +3,7 @@ name = "integration-service"
 version = "0.1.0"
 description = "The only API partners call: GL sync, clients, loans, payments, journal entries to the ERP, reconciliation."
 requires-python = ">=3.13"
+urls = { Repository = "https://github.com/wmnjuguna/Inkomoko-Interview.git" }
 dependencies = [
     "flask>=3.1",
     "flask-openapi3[swagger]>=4.1",

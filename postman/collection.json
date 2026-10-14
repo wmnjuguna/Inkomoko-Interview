@@ -1,7 +1,7 @@
 {
   "info": {
     "name": "Fineract integration: partner API",
-    "description": "The Integration Service partner API. All data here is fake. Set base_url and api_key (PARTNER_API_KEYS in .env, the key part).",
+    "description": "The Integration Service partner API from https://github.com/wmnjuguna/Inkomoko-Interview.git. All data here is fake. Set base_url and api_key (PARTNER_API_KEYS in .env, the key part).",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
