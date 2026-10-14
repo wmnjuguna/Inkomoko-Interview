@@ -68,7 +68,7 @@ Why:
 
 The path still sits under `/fineract-provider/api`. That is on purpose. Only paths under `/api` go through Fineract's login, tenant check, permission check and audit log. A path outside `/api` would skip all of that, and I would have to rebuild it by hand.
 
-Who can reach Fineract at all is a separate question. It is controlled by the network, not by paths. For now Fineract's port is only open on `localhost`, so I can use Swagger UI and run the tests. Before I submit, I will close it, so that only the Integration Service can call Fineract.
+Who can reach Fineract at all is a separate question. It is controlled by the network, not by paths. Fineract's port is published only on `127.0.0.1`, so nothing outside this computer can reach it. I kept it open on `localhost` for Swagger UI and for the Java integration tests. In production only the Integration Service would reach Fineract.
 
 ### Parent accounts
 
@@ -161,9 +161,13 @@ I chose this over storing the partner's reference as it is. That would need a se
 
 The operation codes are `CLI` (new client), `APP` (loan application), `APR` (approval), `DSB` (disbursement) and `RPY` (repayment). Only `DSB` and `RPY` (and their reversals) reach the ERP.
 
-### A guard inside Fineract, as a stretch item
+### The last line of defence against paying out twice
 
-Fineract's loan state already refuses a second disbursement on a single-disbursement loan. That is the last line of defence today. I plan a small extra guard inside Fineract, so even a broken caller can't pay a loan out twice. It is a time-boxed stretch item, built only after the required tiers pass. If it doesn't fit in the time, I will write it up here as a known gap, with the evidence.
+I planned a small extra guard inside Fineract, so even a broken caller could not pay a loan out twice. I did not build it (see "What I chose not to build"). The last line of defence that does exist has three parts:
+
+- **Our database.** The partial unique index `operations_one_live_disbursement` allows one live disbursement per loan. A second one is refused before anything is saved or sent (I-2b).
+- **Fineract's unique `externalId`** on loan transactions. A second transaction with the same key is refused, even on another loan.
+- **Fineract's `Idempotency-Key`** per attempt, and its loan state: a single-tranche loan is paid out once.
 
 ### GL sync is started by a call
 
@@ -187,7 +191,7 @@ Rules of one run:
 
 ### The partner API (Parts C to E)
 
-- **Our ids only.** Partners use `client_uid`, `loan_reference` and `external_reference`. Fineract's numeric ids are kept in our tables for our own use and appear in logs, never in a response. `evidence/P2/id-leak.txt` shows the check on the OpenAPI spec and on every answer of the runs. `evidence/P2.5/id-leak.txt` repeats it with the form endpoints, whose Fineract templates are full of ids (office, product, payment types): every option value in a form is a name or a code.
+- **Our ids only.** Partners use `client_uid`, `loan_reference` and `external_reference`. Fineract's numeric ids are kept in our tables for our own use and appear in logs, never in a response. I checked the OpenAPI spec and every answer of the runs for Fineract ids, including the form endpoints, whose Fineract templates are full of ids (office, product, payment types). None was found: every option value in a form is a name or a code. The output of that check was not kept, but the answers in `evidence/` can be read the same way.
 - **`loan_reference` is ours.** We issue `LN-<year>-<6 digits>` from a Postgres sequence, with the year from the database's date. It is the loan's `externalId` in Fineract. If Fineract already holds that reference (for example after `integration_db` was rebuilt but Fineract was not), a new one is issued, up to 3 times.
 - **The office** is found by name through `GET /clients/template`. The API user has no permission to read `/offices`, and I did not want to add one only for this.
 - **Approval and payout amounts come from Fineract.** The approval is for the amount in Fineract's approval template (the applied principal). There is no partial approval. The payout is for the amount in Fineract's disbursement template (the approved amount). The partner sends neither. See "Fineract templates are the source of the rules" below.
@@ -216,7 +220,7 @@ What each step reads:
 What I learned about the templates on Fineract 1.15.0:
 
 - **Templates ignore the loan's status.** An approval template answers `200` for a loan that is already approved. A disbursement template answers for a loan that is not approved yet. So the forms check the status themselves and say `available: false` with a reason. The writes still rely on our own status checks and on Fineract's refusal.
-- **Fineract refuses an approval after the expected disbursement date** (`error.msg.loan.expecteddisbursal.should.be.on.or.after.approval.date`). The approval template still proposes today as the approval date, even when that is too late. So we check `approved_on` ourselves and answer `422` before we send anything. Shown on the live Fineract in `evidence/P2.5/templates.txt`, part 12.
+- **Fineract refuses an approval after the expected disbursement date** (`error.msg.loan.expecteddisbursal.should.be.on.or.after.approval.date`). The approval template still proposes today as the approval date, even when that is too late. So we check `approved_on` ourselves and answer `422` before we send anything. Shown on the live Fineract in `evidence/templates.txt`, part 12.
 - **A payout before the expected disbursement date is allowed.** A loan expected on 2026-10-20 was paid out on 2026-10-13 (part 10 of the same file).
 - **The default payout date is today, not the template's date.** The disbursement template proposes the loan's expected disbursement date. Once that date has passed, using it would backdate the payout to a day when no money moved. So the default is today, the day the money really moves. A partner can still send an earlier `transaction_date`.
 - **Payment types include Fineract's own.** The repayment template lists `Money Transfer` and also two system-defined types used for Fineract's own adjustments (refund and chargeback). We accept only the partner types. The others get `422`.
@@ -259,7 +263,7 @@ The strategy, the currency and every GL account are checked against the template
 - **Fineract does not check an office's opening date.** Fineract 1.15 accepts an opening date in the future, or one before the parent office opened. *(Read in the source, `OfficeCommandFromApiJsonDeserializer` and `Office.fromJson`, not tried.)* Fineract does refuse a client activated before its office opened, so a wrong date would only fail later, on a client, far from its cause. *(Also read in the source.)* So setup refuses both before it creates the office. On a re-run, an office with our external id but another name, parent or opening date stops setup.
 - **`/currencies` splits its answer in two.** `selectedCurrencyOptions` has the currencies already in use. `currencyOptions` has only the others. On the clean stack, 2 were selected and 162 offered, with no code in both. So a code is valid if it is in either list, and the error message lists both.
 
-Shown on a clean stack in `evidence/P2.6/`: the first run created every step, the second run said `exists` for each and wrote nothing, and the office and product read back from Fineract match (`office-and-product.txt`).
+Shown on a clean stack: the first run created every step (`evidence/setup-first-run.txt`), the second run said `exists` for each and wrote nothing (`evidence/setup-second-run.txt`), and the office and product read back from Fineract match (`evidence/office-and-product.txt`).
 
 ## Sync or async
 
@@ -330,6 +334,37 @@ The ERP has its own unique rule on the reference, and its own debits-equal-credi
 - **ERP retries** are always safe, because the ERP answers `200` for an entry it already has. Wait 1, 2, 4 ... up to 60 s, plus up to 25% random extra so senders do not retry in step. Stop after 8 attempts and mark it `NEEDS_RECONCILIATION`. A `429` waits for `Retry-After` and does not count. A `409` or `422` from the ERP goes to `NEEDS_RECONCILIATION` at once, because sending it again cannot help.
 - Recovery counts its failed lookups in `recovery_lookups`, apart from `attempts`, which is the attempt number in Fineract's key. After 8 failed lookups the request goes to `NEEDS_RECONCILIATION`. A repeat of such a request gets `409 NEEDS_RECONCILIATION`, not `202`, because it will not move without a person.
 
+### I-2b: a refused reference gets no row, not `FAILED`
+
+The brief's I-2b wording expects the losing requests to end `FAILED`. Here they end with no operation row at all. That is on purpose.
+
+The partial unique index `operations_one_live_disbursement` allows one live disbursement per loan. The other nine inserts fail on that index, inside the same transaction that would have saved them. So nothing is saved and nothing is sent to Fineract. The partner gets `409 LOAN_ALREADY_DISBURSED` at once.
+
+- **Why not save them as `FAILED`:** `FAILED` means "we tried and nothing happened, you may send it again". These were never tried. Saving them would also need a second write after the index refused the first, which only adds noise.
+- **What the partner can still do:** `GET /api/transactions/{reference}` answers `404` for a refused reference. If the winning request ends `FAILED`, the loan is free again, and the same refused reference can be sent.
+- I-2b shows it: one `200`, nine `409`, and `operations rows for the 9 refused references: 0` (`evidence/I-2.txt`).
+
+### Recovery waits about 180 s before it looks at `FINERACT_PENDING`
+
+After an unclear Fineract answer, the request looks itself up at once. If the lookup also fails, the request stays `FINERACT_PENDING`. Recovery only looks at it again once it is 180 s old. That is longer than our 30 s Fineract timeout plus Fineract's own internal retries, so a slow Fineract has finished by then, one way or the other. A lookup earlier than that could find nothing while Fineract is still working, and wrongly mark the request `FAILED`.
+
+The cost: the partner waits about 3 minutes for the final answer, and gets `202` on repeats until then. J-3 shows it (`evidence/J-3.txt`). An earlier lookup, for example when Fineract is reachable again, is possible. I did not build it.
+
+### Failure simulations: a fault proxy in this repo, not toxiproxy
+
+J-2 and J-3 need Fineract to fail in exact ways. I wrote a small fault proxy (`fault-proxy/`, standard library only) and put it between the Integration Service and Fineract.
+
+- **Why not toxiproxy.** Toxiproxy works on TCP. It can cut or slow a connection, but it cannot tell one HTTP request from another. J-3 needs this: let the disbursement reach Fineract, let Fineract finish it, then throw away Fineract's answer to that one write, while reads still pass. Only something that reads HTTP can do that.
+- **Why in this repo.** It is about 250 lines, with no packages to install. It is easy to read and to change live.
+- **The cost.** It is test-only code on the path to Fineract. With no fault on, it only passes requests on. It handles one request per connection, which is fine for this load but not for production. In production it would not be deployed.
+
+### The J-5 crash hook
+
+J-5 needs the service to die at one exact moment: after `FINERACT_DONE` and its outbox row are saved, before the ERP call. Killing the container from outside cannot hit that moment reliably. So the service has a hook (`faults.py`).
+
+- **Opt-in by reference prefix.** `FAULT_CRASH_AFTER_FINERACT_DONE` holds an `external_reference` prefix, like `J5-`. Only requests whose reference starts with it crash. A stray `true` can't turn it on for everything, and other traffic is never hit. Nothing in `.env.example` sets it. The service logs a warning at start-up when it is set.
+- **It kills the gunicorn master.** A worker that only exits is replaced by gunicorn at once, which is not a real crash. So the hook sends `SIGKILL` to the gunicorn master, then exits. The container stops, and compose starts it again. Then the start-up recovery pass finishes what the crash left.
+
 ### The outbox runs inside the service, with no queue
 
 - **Chosen:** a background thread in each Gunicorn worker. It runs recovery and sends due outbox rows every 5 seconds, and `POST /admin/recover` runs the same pass on demand.
@@ -337,15 +372,27 @@ The ERP has its own unique rule on the reference, and its own debits-equal-credi
 - **Why no queue or separate worker:** the outbox table is already a durable queue, written in the same transaction as the Fineract result. A broker would need that outbox anyway, would still deliver some messages twice, and is one more thing to run. A separate worker process would be one more container that does exactly what the thread does.
 - **The cost:** every worker polls the database every 5 seconds. That is fine at this size.
 
+## Reconciliation (Part K)
+
+- **Not stored.** The report is built from Fineract, the ERP and our tables on every call. A stored report would go stale, and would need its own rules for when to rebuild it.
+- **Read only.** Reconciliation never repairs anything. A repair call does not exist yet (see below).
+- **The key** is the op key, like `RPY:FIN-2026-000007`. It is Fineract's `externalId` and the ERP's `external_reference`, so there is no lookup table.
+- **A fifth outcome, `IN_FLIGHT`.** The brief has four. Right after a payment, the ERP entry is often still in our outbox. Calling that `MISSING_IN_ERP` would be a false alarm. So when our own records show the operation is still on its way, the item is `IN_FLIGHT`, and it is not counted as missing.
+- **`AMOUNT_MISMATCH` covers any difference** from the entry our mapping builds from Fineract's own transaction: an account, a side, an amount, the source or the date. Each difference is one line in `reasons`. So a wrong split is caught even when the total is right (K-1 shows this: the total was 50,000 on both sides, but the ERP had the wrong split).
+- **Only `DISBURSEMENT` and `REPAYMENT` are compared.** Those are the only types the ERP gets from us. Accruals and other Fineract types are counted under `not_compared`, so nothing is hidden.
+- **All or nothing.** If a Fineract or ERP read fails, the call fails. A report built from half the data would show false `MISSING` items.
+- **Reversals.** Posting reversals is not built. Reconciliation still handles the shape: a reversed Fineract transaction expects `<key>` with the original lines and `<key>:REV` with the opposite lines. If the ERP has neither, both sides net to zero, and that is one `MATCHED` item with that reason. This is unit-tested only.
+- **Limits.** A date range is at most 31 days and a list at most 100 references, so one call stays small.
+
 ## Fineract settings (Part B)
 
-All of these are made by the setup step (`python -m integration_service.setup`, the compose service `setup`). The settings are in `fineract/configuration/`. Each row was checked on a clean stack: see `evidence/P1/`.
+All of these are made by the setup step (`python -m integration_service.setup`, the compose service `setup`). The settings are in `fineract/configuration/`. Each row was checked on a clean stack: see `evidence/setup-first-run.txt`, `evidence/office-and-product.txt` and `evidence/least-privilege.txt`.
 
 | Setting | Choice | Why |
 |---|---|---|
 | Office | `Kigali Main Office` (external id `OFF-KGL-MAIN`), under the default Head Office *(assumption)* | Keeps Fineract's top office as it is. Fineract only shows a user the clients and loans in its own office and below, so the API user sits in this office too. |
 | Currency | RWF, no decimals | RWF has no cents. Fineract already knows RWF with 0 decimals. Setup adds it to the organisation's list and keeps the others, because `PUT /currencies` replaces the whole list. The product sets 0 decimals too. |
-| Loan product | "SME Asset Finance" (`SMEA`, external id `PRD-SME-ASSET-FINANCE`): 18% a year, 12 monthly payments, declining balance, equal payments, paid out once, RWF. Default amount 5,000,000 RWF (100,000 to 50,000,000). Strategy `mifos-standard-strategy`. | The values the brief suggests. Checked with `GET /loanproducts/1` in `evidence/P1/product.txt`. |
+| Loan product | "SME Asset Finance" (`SMEA`, external id `PRD-SME-ASSET-FINANCE`): 18% a year, 12 monthly payments, declining balance, equal payments, paid out once, RWF. Default amount 5,000,000 RWF (100,000 to 50,000,000). Strategy `mifos-standard-strategy`. | The values the brief suggests. Read back from Fineract in `evidence/office-and-product.txt`. |
 | Accounting | Cash-based (`CASH` in the product template) | Journal entries only on payout and repayment, which matches Part H. Reconciliation is one entry per payment. It is less realistic, because no interest is booked between payments. |
 | GL accounts | All owned by the ERP and synced. Codes follow the usual pattern: 1xxx assets, 2xxx liabilities, 4xxx income, 5xxx expenses. | In 1.15.0, cash-based accounting needs 9 GL roles. The ERP seed has a DETAIL account of the right type for each one (table below). The optional charge-off and goodwill roles are left out, because the brief does not use them. |
 | API user | `integration-api`, with its own role `Integration Service` (11 permissions, below) | Least privilege. The admin user is only used by the setup step. |
@@ -379,11 +426,11 @@ The role `Integration Service` has exactly these 11 permissions, and setup remov
 | `READ_LOAN` | Find loans and their transactions by external id. In 1.15.0 this also covers loan transactions. There is no separate `READ_LOANTRANSACTION`. |
 | `READ_LOANPRODUCT` | Find the loan product by its external id |
 
-Checked on the clean stack (`evidence/P1/least-privilege.txt`): the user can read a GL mapping and the loan product, and gets `403` when it tries to create a GL account, create a user, change role permissions or create a loan product. The probe (2026-10-13) showed these 11 are enough for everything Parts C to H do: clients, loans, payouts, repayments, lookups by external id and the repayment and payoff templates. Two codes are missing on purpose: `ADJUST_LOAN`, only needed for reversals, which are not built, and `READ_JOURNALENTRY`, which nothing uses yet.
+Checked on the clean stack (`evidence/least-privilege.txt`): the user can read a GL mapping and the loan product, and gets `403` when it tries to create a GL account, create a user, change role permissions or create a loan product. The probe (2026-10-13) showed these 11 are enough for everything Parts C to H do: clients, loans, payouts, repayments, lookups by external id and the repayment and payoff templates. Two codes are missing on purpose: `ADJUST_LOAN`, only needed for reversals, which are not built, and `READ_JOURNALENTRY`, which nothing uses yet.
 
 ### Re-running setup
 
-Each step looks first, then creates only what is missing. A second run on the clean stack printed `exists` for every step and sent nothing to Fineract (`evidence/P1/setup-second-run.txt`, and again after the template change in `evidence/P2.6/setup-second-run.txt`). Some rules:
+Each step looks first, then creates only what is missing. A second run on the clean stack printed `exists` for every step and sent nothing to Fineract (`evidence/setup-second-run.txt`). Some rules:
 
 - The office is found by its external id, `OFF-KGL-MAIN`. If it has another name, parent or opening date, setup stops. An office with our name but another external id also stops setup.
 - The role's permissions are set back to exactly the list in `role.json`. An unknown permission code stops setup before anything is written.
@@ -410,7 +457,35 @@ Each step looks first, then creates only what is missing. A second run on the cl
 - **Entry date:** Fineract's transaction date.
 - **Overpayments.** Paying more than is owed on an `ACTIVE` loan is allowed. Fineract books the extra as `overpaymentPortion` and the entry credits 2100. A repayment on a loan that is not `ACTIVE` (for example Closed) is refused with `422`. Fineract would accept it and turn all of it into an overpayment, which is almost never what the partner meant.
 - **Fees, penalties and anything odd** are not guessed. The entry is not built and the request goes to `NEEDS_RECONCILIATION`, with the reason. The Fineract success is still saved. The same happens for a reversed transaction, portions that do not add up, the wrong type or `externalId`, a currency other than RWF, or a fraction of a franc. The SME Asset Finance product has no fees, so this does not happen in normal use.
-- **Reversals** are *planned*, not built. The plan: Fineract's undo, with `reversalExternalId` `<op key>:REV`, then a new ERP entry with the opposite lines, reference `<op key>:REV` and `reverses` set to the original. Nothing is deleted. The probe showed two things to know first. Undo needs `ADJUST_LOAN`, which the API user does not have, so it must be added to `role.json`. And an undone Fineract transaction keeps its `externalId` and shows `manuallyReversed: true`; no new transaction is made. Today the mapping refuses a reversed transaction, so it can never be posted as if it were live.
+- **Reversals** are not built. Reconciliation already knows their shape (see above). The plan for posting them: Fineract's undo, with `reversalExternalId` `<op key>:REV`, then a new ERP entry with the opposite lines, reference `<op key>:REV` and `reverses` set to the original. Nothing is deleted. The probe showed two things to know first. Undo needs `ADJUST_LOAN`, which the API user does not have, so it must be added to `role.json`. And an undone Fineract transaction keeps its `externalId` and shows `manuallyReversed: true`; no new transaction is made. Today the mapping refuses a reversed transaction, so it can never be posted as if it were live.
+
+## What happened to FIN-2026-000001?
+
+This is how an engineer answers it: one API call, then the logs. The run below is real, on fake data (`evidence/FIN-2026-000001.txt`).
+
+**1. One API call.**
+
+```
+GET /api/transactions/FIN-2026-000001
+-> 200 DISBURSEMENT, op_key DSB:FIN-2026-000001, loan LN-2026-000022, status COMPLETED, erp_status SENT, attempts 1
+   history: RECEIVED -> FINERACT_PENDING -> FINERACT_DONE (Fineract said yes) -> ERP_PENDING -> COMPLETED (the ERP saved the journal entry)
+```
+
+**The answer:** it was a disbursement of loan `LN-2026-000022`. Fineract paid it out once, at the first attempt, at 10:22:10 UTC. The journal entry reached the ERP 2 seconds later, through the outbox. Nothing is left to do.
+
+**2. The logs, for the details.** `docker compose logs integration-service | grep FIN-2026-000001` gives every line for the reference. Each line has `correlation_id`, `external_reference`, `client_uid`, `loan_reference`, `fineract_transaction_id`, `erp_transaction_id`, `status` and `timestamp`. Shortened:
+
+```
+10:22:09.737  c-fin-2026-000001  status FINERACT_PENDING  (saved and claimed)
+10:22:10.249  c-fin-2026-000001  status FINERACT_DONE     fineract_transaction_id 319
+10:22:10.260  c-fin-2026-000001  status ERP_PENDING       (journal entry waiting for the ERP)
+10:22:10.265  c-fin-2026-000001  POST /api/loans/LN-2026-000022/disburse -> 200 in 549.5 ms
+10:22:12.107  c-fin-2026-000001  status COMPLETED         erp_transaction_id 646fbfe7-dedd-482f-bcca-6430d72ad731
+```
+
+The outbox keeps the request's correlation id. So the ERP's own log line for the journal entry carries it too (`docker compose logs mock-erp | grep c-fin-2026-000001`: `POST /api/journal-entries 201`, `DSB:FIN-2026-000001`). Fineract's transaction id is only in our logs, never in an API answer.
+
+If the answer had been `FINERACT_PENDING`, the next step is to wait for recovery, or look up `DSB:FIN-2026-000001` in Fineract by `externalId`. If it had been `NEEDS_RECONCILIATION`, `last_error` says why, and `POST /api/reconciliation {"references": ["FIN-2026-000001"]}` shows both sides.
 
 ## Open questions (my assumptions)
 
@@ -419,15 +494,25 @@ Each step looks first, then creates only what is missing. A second run on the cl
 - How do partners log in? I use one API key per partner.
 - What is `FIN-2026-000001`? I assume it is a partner's `external_reference`.
 - Should reconciliation include reversed payments? I assume yes, matched to their opposite entries.
+- I-2b says the losing requests end `FAILED`. I assume "refused, with nothing saved or sent" is what matters. They get `409` and no row (see "I-2b" above).
 
 ## What I chose not to build
 
-No message queue, no Redis, no separate worker, no OAuth. No reversals yet, and no repair call for `NEEDS_RECONCILIATION`.
+The honest reason for each is time and energy. I put both into the required tiers and their evidence.
+
+- **The extra guard inside Fineract** (a spike for a last line of defence in Java). The last line of defence that exists is our database's one-live-disbursement index, plus Fineract's own unique `externalId` and `Idempotency-Key`, plus its loan state.
+- **An operations console** for `NEEDS_RECONCILIATION` and the outbox, and a repair call. Today a person reads `GET /api/transactions` and the logs.
+- **The other Part L items:** GL master-data reconciliation, fees and penalties in the mapping, a live overpayment and reversal demo, a dead-letter view, Prometheus metrics, scheduled reconciliation and signed partner webhooks.
+- **Reversals.** Reconciliation knows their shape, but the service cannot post one.
+- No message queue, no Redis, no separate worker and no OAuth. The reasons are above.
+- **A rehearsal from a clean clone.** Each part was run on a clean stack (`docker compose down -v`), but not from a fresh `git clone` on another machine.
 
 ## Known weaknesses
 
-To be filled in from what testing shows. So far:
-
+- **Reconciliation reads every loan.** It reads every transaction of every loan we know from Fineract on each call, 8 at a time. That is fine for hundreds of loans. It will not scale to many thousands. The next step would be Fineract's transaction search by date, or a local copy kept in step.
+- **ERP entries for loans we don't know show as `MISSING_IN_FINERACT`.** Reconciliation only reads loans in our `loans` table. The live tests write ERP entries for loans that live only in the test database, and K-1 plants one on purpose. So on the shared ERP a whole-day report shows many of these (72 in K-1's day report). I did not check each of the 72. The label is not wrong, since we see no Fineract transaction for them, but it is noisy.
+- **A `:REV` suffix in a partner reference would be misread.** A partner reference that ends in `:REV` would be taken for a reversal. Partner references should refuse that suffix. They don't yet.
+- **Reversals are unit-tested only.** No reversal was run on the live stack.
 - **GL sync only creates accounts.** If the ERP renames an account after it is synced, Fineract keeps the old name. The report shows a warning, but nothing fixes it.
 - **The GL sync routes use the partner key.** Syncing the chart is an operator task. In production it should sit on an internal route.
 - **`/admin/recover` takes a partner key.** Any partner key works for it today. It should have its own operator key.
@@ -435,4 +520,4 @@ To be filled in from what testing shows. So far:
 - **No repair call.** A request in `NEEDS_RECONCILIATION` stays there. The state machine allows a repair to `COMPLETED`, but no endpoint does it yet.
 - **A repayment finished by recovery** reads `outstanding_after` at recovery time, so it can include later repayments on the same loan. On the normal path it is read under the loan's lock right after the write.
 - **Each Gunicorn worker polls** the database every 5 seconds, even when there is nothing to do.
-- **Test data stays in Fineract.** The live tests and `make simulate-gl-sync-4x` add GL accounts with 8-digit codes starting with 7, and a few test users and roles. They never delete anything, so the shared Fineract grows. `make reset` clears it.
+- **Test data stays in Fineract.** The live tests and the simulations add clients, loans and GL accounts (8-digit codes starting with 7). They never delete anything, so the shared Fineract grows. `make reset` clears it.
