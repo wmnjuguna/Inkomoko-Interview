@@ -7,7 +7,7 @@ MOCK_ERP_IMAGE := mock-erp-inkomoko:0.1.0
 INTEGRATION_IMAGE := integration-service-inkomoko:0.1.0
 COMPOSE_NETWORK := inkomoko-fineract_default
 
-.PHONY: help build up down reset test-java test-python demo-gl-sync simulate-gl-sync-4x demo-identity demo-lifecycle simulate-duplicates
+.PHONY: help build up down reset test-java test-python demo-gl-sync simulate-gl-sync-4x demo-identity demo-lifecycle simulate-duplicates simulate-recon
 
 help:
 	@echo "build        build the Fineract image from source (runs the Java unit tests), the integration test image, the Mock ERP and Integration Service images, and refresh the OpenAPI specs"
@@ -23,6 +23,8 @@ help:
 	@echo "simulate-duplicates  I-1: the same disbursement sent 4 times; requests 4, Fineract 1, ERP 1, operations 1"
 	@echo "simulate-concurrent-disburse  I-2: 10 disbursements of one loan at once, same reference (a) and different references (b); Fineract 1, operations 1, outbox 1, ERP 1"
 	@echo "simulate-concurrent-repay     I-3: 10 repayments at once, 6 references plus copies; each applies once, balance and ERP lines from Fineract's split"
+	@echo "simulate-j1 ... simulate-j5   J-1 to J-5: ERP down, Fineract down, Fineract timeout after send, ERP timeout after write, crash after FINERACT_DONE"
+	@echo "simulate-recon               K-1: reconciliation with all four outcomes planted"
 
 .env:
 	cp .env.example .env
