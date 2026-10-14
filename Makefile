@@ -21,6 +21,8 @@ help:
 	@echo "demo-identity        C-1: create a client, find it by client_uid, check it, replay, conflict"
 	@echo "demo-lifecycle       D-1: a 5,000,000 RWF loan from application to Closed, with Fineract and ERP state after each stage"
 	@echo "simulate-duplicates  I-1: the same disbursement sent 4 times; requests 4, Fineract 1, ERP 1, operations 1"
+	@echo "simulate-concurrent-disburse  I-2: 10 disbursements of one loan at once, same reference (a) and different references (b); Fineract 1, operations 1, outbox 1, ERP 1"
+	@echo "simulate-concurrent-repay     I-3: 10 repayments at once, 6 references plus copies; each applies once, balance and ERP lines from Fineract's split"
 
 .env:
 	cp .env.example .env
@@ -36,6 +38,7 @@ build: .env
 		-c 'import json; from mock_erp.app import create_app; print(json.dumps(create_app().api_doc))' \
 		| uv run --no-project --quiet --with pyyaml python -c 'import json, sys, yaml; sys.stdout.write(yaml.safe_dump(json.load(sys.stdin), sort_keys=False, allow_unicode=True, width=100))' \
 		> docs/openapi/mock-erp.yaml
+	docker buildx build --load -t fault-proxy-inkomoko:0.1.0 fault-proxy
 	docker buildx build --load -t $(INTEGRATION_IMAGE) integration-service
 	@# Same for the Integration Service: dummy settings, nothing is called while building the spec.
 	@# OUTBOX_ENABLED=false: no background loop, so no log line ends up in the JSON.
@@ -79,3 +82,35 @@ demo-lifecycle: .env
 
 simulate-duplicates: .env
 	uv run --project integration-service python scripts/simulate_duplicates.py
+
+.PHONY: simulate-concurrent-disburse simulate-concurrent-repay
+
+simulate-concurrent-disburse: .env
+	uv run --project integration-service python scripts/simulate_concurrent_disburse.py
+
+simulate-concurrent-repay: .env
+	uv run --project integration-service python scripts/simulate_concurrent_repay.py
+
+# K-1: reconciliation with all four outcomes planted (run setup first: make up).
+# Add ARGS=--in-process to run this checkout's service code inside the script.
+simulate-recon: .env
+	uv run --project integration-service python scripts/simulate_recon.py $(ARGS)
+
+# Part J: failure injection and recovery (run setup first: make up). Fineract faults go
+# through the fault proxy, ERP faults through the Mock ERP switch; every fault is off at the end.
+.PHONY: simulate-j1 simulate-j2 simulate-j3 simulate-j4 simulate-j5
+
+simulate-j1: .env
+	uv run --project integration-service python scripts/simulate_j1.py
+
+simulate-j2: .env
+	uv run --project integration-service python scripts/simulate_j2.py
+
+simulate-j3: .env
+	uv run --project integration-service python scripts/simulate_j3.py
+
+simulate-j4: .env
+	uv run --project integration-service python scripts/simulate_j4.py
+
+simulate-j5: .env
+	uv run --project integration-service python scripts/simulate_j5.py
