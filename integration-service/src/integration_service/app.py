@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import atexit
+import logging
 from typing import Any
 
 from flask_openapi3.models.info import Info
@@ -10,17 +11,19 @@ from flask_openapi3.models.security_scheme import SecurityScheme
 from flask_openapi3.openapi import OpenAPI
 from sqlalchemy import Engine
 
-from integration_service import auth, logs
+from integration_service import auth, faults, logs
 from integration_service.api import admin as admin_api
 from integration_service.api import clients as clients_api
 from integration_service.api import gl_sync as gl_sync_api
 from integration_service.api import health as health_api
 from integration_service.api import loans as loans_api
+from integration_service.api import reconciliation as reconciliation_api
 from integration_service.api import templates as templates_api
 from integration_service.api import transactions as transactions_api
 from integration_service.config import Settings
 from integration_service.db import make_engine
 from integration_service.errors import register_error_handlers, validation_error_response
+from integration_service.logs import log_event
 from integration_service.schemas.common import ErrorResponse
 from integration_service.services.recovery import gl_role_accounts_from, start_background_loop
 
@@ -62,7 +65,15 @@ def create_app(settings: Settings | None = None, engine: Engine | None = None) -
     app.register_api(clients_api.bp)
     app.register_api(loans_api.bp)
     app.register_api(templates_api.bp)
+    app.register_api(reconciliation_api.bp)
     app.register_api(admin_api.bp)
+
+    if faults.crash_prefix() is not None:
+        log_event(
+            f"FAULT INJECTION ON: {faults.CRASH_ENV} is set; this process crashes after "
+            "FINERACT_DONE for matching references. Never set it outside a simulation.",
+            level=logging.WARNING,
+        )
 
     # Outbox sender and recovery: one background thread per process, unless switched off.
     accounts = gl_role_accounts_from(settings.gl_roles_config_path)
