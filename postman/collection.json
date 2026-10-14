@@ -1,0 +1,637 @@
+{
+  "info": {
+    "name": "Fineract integration: partner API",
+    "description": "The Integration Service partner API. All data here is fake. Set base_url and api_key (PARTNER_API_KEYS in .env, the key part).",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:8091"
+    },
+    {
+      "key": "api_key",
+      "value": "change-me-partner-key"
+    },
+    {
+      "key": "client_uid",
+      "value": "SME-000001"
+    },
+    {
+      "key": "loan_reference",
+      "value": "LN-2026-000001"
+    }
+  ],
+  "item": [
+    {
+      "name": "GL sync",
+      "item": [
+        {
+          "name": "Sync the whole ERP chart",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{api_key}}"
+              },
+              {
+                "key": "X-Correlation-ID",
+                "value": "c-postman-{{$randomUUID}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/accounts/sync",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "accounts",
+                "sync"
+              ]
+            },
+            "description": "Reads the ERP chart and syncs each account to Fineract, parents first. 200, or 202 when another sync runs."
+          }
+        },
+        {
+          "name": "Sync state of every account",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{api_key}}"
+              },
+              {
+                "key": "X-Correlation-ID",
+                "value": "c-postman-{{$randomUUID}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/accounts/sync",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "accounts",
+                "sync"
+              ]
+            },
+            "description": "Reads our database only."
+          }
+        },
+        {
+          "name": "Sync one ERP account",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{api_key}}"
+              },
+              {
+                "key": "X-Correlation-ID",
+                "value": "c-postman-{{$randomUUID}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/accounts/GL-1200/sync",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "accounts",
+                "GL-1200",
+                "sync"
+              ]
+            },
+            "description": "Syncs one account by its ERP reference."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Clients",
+      "item": [
+        {
+          "name": "Client form",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{api_key}}"
+              },
+              {
+                "key": "X-Correlation-ID",
+                "value": "c-postman-{{$randomUUID}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/clients/template",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "clients",
+                "template"
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "Create a client",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{api_key}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Correlation-ID",
+                "value": "c-postman-{{$randomUUID}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/clients",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "clients"
+              ]
+            },
+            "description": "201 the first time, 200 with the same body on a replay, 409 IDEMPOTENCY_CONFLICT with other data.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"external_reference\": \"PM-CLI-000001\",\n  \"client_uid\": \"{{client_uid}}\",\n  \"first_name\": \"Test\",\n  \"last_name\": \"Client One\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Check a client",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{api_key}}"
+              },
+              {
+                "key": "X-Correlation-ID",
+                "value": "c-postman-{{$randomUUID}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/clients/{{client_uid}}?name=Test Client One",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "clients",
+                "{{client_uid}}"
+              ],
+              "query": [
+                {
+                  "key": "name",
+                  "value": "Test Client One"
+                }
+              ]
+            },
+            "description": ""
+          }
+        }
+      ]
+    },
+    {
+      "name": "Loans",
+      "item": [
+        {
+          "name": "Loan application form",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{api_key}}"
+              },
+              {
+                "key": "X-Correlation-ID",
+                "value": "c-postman-{{$randomUUID}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/loans/template?client_uid={{client_uid}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "loans",
+                "template"
+              ],
+              "query": [
+                {
+                  "key": "client_uid",
+                  "value": "{{client_uid}}"
+                }
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "Apply for a loan",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{api_key}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Correlation-ID",
+                "value": "c-postman-{{$randomUUID}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/loans",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "loans"
+              ]
+            },
+            "description": "Returns the new loan_reference. Put it in the loan_reference variable.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"external_reference\": \"PM-APP-000001\",\n  \"client_uid\": \"{{client_uid}}\",\n  \"principal\": 5000000\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Step form (approval, disbursement, repayment, payoff)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{api_key}}"
+              },
+              {
+                "key": "X-Correlation-ID",
+                "value": "c-postman-{{$randomUUID}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/loans/{{loan_reference}}/template?step=approval",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "loans",
+                "{{loan_reference}}",
+                "template"
+              ],
+              "query": [
+                {
+                  "key": "step",
+                  "value": "approval"
+                }
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "Approve",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{api_key}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Correlation-ID",
+                "value": "c-postman-{{$randomUUID}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/loans/{{loan_reference}}/approve",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "loans",
+                "{{loan_reference}}",
+                "approve"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"external_reference\": \"PM-APR-000001\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Disburse",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{api_key}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Correlation-ID",
+                "value": "c-postman-{{$randomUUID}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/loans/{{loan_reference}}/disburse",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "loans",
+                "{{loan_reference}}",
+                "disburse"
+              ]
+            },
+            "description": "Pays out the approved amount once. Another reference for the same loan gets 409 LOAN_ALREADY_DISBURSED.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"external_reference\": \"FIN-2026-900001\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Repay",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{api_key}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Correlation-ID",
+                "value": "c-postman-{{$randomUUID}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/loans/{{loan_reference}}/repayments",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "loans",
+                "{{loan_reference}}",
+                "repayments"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"external_reference\": \"FIN-2026-900002\",\n  \"amount\": 500000,\n  \"payment_type\": \"Money Transfer\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Loan status and balances",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{api_key}}"
+              },
+              {
+                "key": "X-Correlation-ID",
+                "value": "c-postman-{{$randomUUID}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/loans/{{loan_reference}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "loans",
+                "{{loan_reference}}"
+              ]
+            },
+            "description": ""
+          }
+        }
+      ]
+    },
+    {
+      "name": "Transactions and reconciliation",
+      "item": [
+        {
+          "name": "What happened to a reference",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{api_key}}"
+              },
+              {
+                "key": "X-Correlation-ID",
+                "value": "c-postman-{{$randomUUID}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/transactions/FIN-2026-000001",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "transactions",
+                "FIN-2026-000001"
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "Reconcile a date range",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{api_key}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Correlation-ID",
+                "value": "c-postman-{{$randomUUID}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/reconciliation",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "reconciliation"
+              ]
+            },
+            "description": "At most 31 days. Read only.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"from\": \"2026-10-01\",\n  \"to\": \"2026-10-31\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Reconcile references",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{api_key}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Correlation-ID",
+                "value": "c-postman-{{$randomUUID}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/reconciliation",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "reconciliation"
+              ]
+            },
+            "description": "At most 100 references.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"references\": [\n    \"FIN-2026-000001\",\n    \"RPY:FIN-2026-900002\"\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Operator",
+      "item": [
+        {
+          "name": "Run one recovery pass",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{api_key}}"
+              },
+              {
+                "key": "X-Correlation-ID",
+                "value": "c-postman-{{$randomUUID}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/admin/recover",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "admin",
+                "recover"
+              ]
+            },
+            "description": "Not for partners. Today it takes a partner key."
+          }
+        }
+      ]
+    }
+  ]
+}
